@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shuvoice"
+version = "0.1.0"
+description = "Streaming speech-to-text overlay for Hyprland"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+    "sounddevice",
+    "numpy",
+    "evdev",
+]
+
+[project.optional-dependencies]
+# NeMo must be installed from git main branch:
+#   pip install git+https://github.com/NVIDIA/NeMo.git@main#egg=nemo_toolkit[asr]
+# System packages (pacman):
+#   gtk4 gtk4-layer-shell python-gobject python-pytorch-cuda
+#   wtype wl-clipboard portaudio pipewire pipewire-audio pipewire-alsa
+
+[project.scripts]
+shuvoice = "shuvoice.__main__:main"
