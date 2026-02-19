@@ -29,6 +29,34 @@ from .typer import StreamingTyper
 log = logging.getLogger(__name__)
 
 
+def _prefer_transcript(previous: str, candidate: str) -> str:
+    """Prefer stable cumulative transcript growth over regressions.
+
+    Streaming RNNT hypotheses can occasionally jump backward (shorter text) between
+    steps. Keep the older hypothesis unless the new one clearly extends it.
+    """
+    if not candidate:
+        return previous
+    if not previous:
+        return candidate
+
+    prev = previous.strip()
+    new = candidate.strip()
+    if not new:
+        return previous
+
+    # Normal growth path: cumulative hypothesis extends prior text.
+    if new.startswith(prev):
+        return candidate
+
+    # Decoder regressed to a shorter prefix — keep the fuller prior text.
+    if prev.startswith(new):
+        return previous
+
+    # For conflicting hypotheses, prefer the one carrying more content.
+    return candidate if len(new) >= len(prev) else previous
+
+
 class ShuVoiceApp(Gtk.Application):
     """GTK4 application that orchestrates streaming speech-to-text.
 
@@ -227,15 +255,61 @@ class ShuVoiceApp(Gtk.Application):
                     log.exception("ASR chunk processing failed")
                     text = ""
 
-                if text and text != last_text:
-                    last_text = text
+                merged = _prefer_transcript(last_text, text)
+                if merged != last_text:
+                    last_text = merged
                     if self.overlay:
-                        self.overlay.set_text(text)
+                        self.overlay.set_text(last_text)
                     if self.config.output_mode == "streaming_partial":
-                        self.typer.update_partial(text)
+                        self.typer.update_partial(last_text)
 
             # Detect recording→stopped transition
             if was_recording and not is_recording:
+                # Drain queued audio captured just before stop to avoid losing
+                # late words when ASR is slightly behind real-time.
+                drained = self.audio.drain_pending_chunks()
+                if drained:
+                    buffer.extend(drained)
+                    total += sum(len(chunk) for chunk in drained)
+                    log.debug(
+                        "Drained %d queued audio chunk(s) on stop (%d samples buffered)",
+                        len(drained),
+                        total,
+                    )
+
+                # Small grace window for in-flight callback audio that can
+                # arrive right after key release.
+                tail_chunk = self.audio.get_chunk(timeout=0.12)
+                if tail_chunk is not None:
+                    buffer.append(tail_chunk)
+                    total += len(tail_chunk)
+
+                    drained = self.audio.drain_pending_chunks()
+                    if drained:
+                        buffer.extend(drained)
+                        total += sum(len(chunk) for chunk in drained)
+                        log.debug(
+                            "Drained %d queued audio chunk(s) after stop grace (%d samples buffered)",
+                            len(drained),
+                            total,
+                        )
+
+                # Process any complete buffered 1120 ms chunks.
+                while total >= native:
+                    audio_data = np.concatenate(buffer)
+                    to_process = audio_data[:native]
+                    remainder = audio_data[native:]
+                    buffer = [remainder] if len(remainder) > 0 else []
+                    total = len(remainder)
+
+                    try:
+                        text = self._process_chunk_safe(to_process)
+                    except Exception:
+                        log.exception("ASR buffered final chunk failed")
+                        text = ""
+
+                    last_text = _prefer_transcript(last_text, text)
+
                 # Process any remaining audio (pad with silence)
                 if total > 0:
                     audio_data = np.concatenate(buffer)
@@ -246,8 +320,27 @@ class ShuVoiceApp(Gtk.Application):
                     except Exception:
                         log.exception("ASR final flush failed")
                         text = ""
-                    if text:
-                        last_text = text
+                    last_text = _prefer_transcript(last_text, text)
+
+                # Flush a couple extra silent chunks to release decoder tail
+                # tokens (helps avoid clipped last words on stop).
+                silence = np.zeros(native, dtype=np.float32)
+                stable_steps = 0
+                for _ in range(3):
+                    try:
+                        text = self._process_chunk_safe(silence)
+                    except Exception:
+                        log.exception("ASR tail flush failed")
+                        break
+
+                    merged = _prefer_transcript(last_text, text)
+                    if merged == last_text:
+                        stable_steps += 1
+                        if stable_steps >= 2:
+                            break
+                    else:
+                        stable_steps = 0
+                        last_text = merged
 
                 # Commit final text
                 if last_text:

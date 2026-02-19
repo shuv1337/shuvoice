@@ -152,5 +152,5 @@ use_cuda_graph_decoder = false
 - Recognition quality is poor / start-stop triggers repeatedly
   - Set a single keyboard device in config (`hotkey_device=/dev/input/eventX`) or keep `hotkey_listen_all_devices=false`.
   - Increase ASR context for accuracy (eg. `right_context=6`).
-  - Select the correct mic (`python -m shuvoice --list-audio-devices`, then set `audio_device`).
+  - Select the correct mic (`python -m shuvoice --list-audio-devices`, then set `audio_device`). Prefer device *name* over numeric index, because indices can change between runs.
   - Increase `input_gain` moderately (eg. `1.3` to `1.8`) if your mic is too quiet.
