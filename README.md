@@ -154,3 +154,4 @@ use_cuda_graph_decoder = false
   - Increase ASR context for accuracy (eg. `right_context=6`).
   - Select the correct mic (`python -m shuvoice --list-audio-devices`, then set `audio_device`). Prefer device *name* over numeric index, because indices can change between runs.
   - Increase `input_gain` moderately (eg. `1.3` to `1.8`) if your mic is too quiet.
+  - If silent presses still produce phantom text (eg. "thank you"), raise `silence_rms_threshold` slightly (eg. `0.010` to `0.015`) and/or increase `silence_rms_multiplier` (eg. `2.0`) in config.

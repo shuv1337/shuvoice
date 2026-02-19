@@ -8,6 +8,12 @@ fallback_sample_rate = 48000
 # audio_device = 2
 # Optional mic gain multiplier (eg. 1.5 if too quiet)
 input_gain = 1.0
+# Absolute RMS floor used to suppress silence hallucinations on empty presses
+silence_rms_threshold = 0.008
+# Dynamic speech threshold multiplier based on ambient noise floor
+silence_rms_multiplier = 1.8
+# Minimum above-threshold speech to consider an utterance valid
+min_speech_ms = 80
 
 [asr]
 model_name = "nvidia/nemotron-speech-streaming-en-0.6b"

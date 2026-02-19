@@ -28,6 +28,9 @@ class Config:
     fallback_sample_rate: int = 48000
     audio_device: str | int | None = None  # sounddevice device name/index
     input_gain: float = 1.0  # multiply PCM before ASR (eg. 1.5)
+    silence_rms_threshold: float = 0.008  # absolute floor for speech RMS gating
+    silence_rms_multiplier: float = 1.8  # dynamic threshold = noise_floor * multiplier
+    min_speech_ms: int = 80  # minimum above-threshold speech before committing text
 
     # ASR
     model_name: str = "nvidia/nemotron-speech-streaming-en-0.6b"

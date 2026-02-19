@@ -232,14 +232,54 @@ class ShuVoiceApp(Gtk.Application):
         was_recording = False
         native = self.config.native_chunk_samples
 
+        speech_rms_threshold = max(0.0, float(self.config.silence_rms_threshold))
+        speech_rms_multiplier = max(1.0, float(self.config.silence_rms_multiplier))
+        min_speech_samples = max(
+            0,
+            self.config.sample_rate * max(0, int(self.config.min_speech_ms)) // 1000,
+        )
+        speech_samples = 0
+        peak_rms = 0.0
+        noise_floor_rms = 0.0
+        utterance_rms_threshold = speech_rms_threshold
+
         while self._running.is_set():
             chunk = self.audio.get_chunk(timeout=0.05)
             is_recording = self._recording.is_set()
 
+            if is_recording and not was_recording:
+                speech_samples = 0
+                peak_rms = 0.0
+                utterance_rms_threshold = max(
+                    speech_rms_threshold,
+                    noise_floor_rms * speech_rms_multiplier,
+                )
+                log.debug(
+                    "Recording energy threshold: %.4f (noise_floor=%.4f, floor=%.4f, x%.2f)",
+                    utterance_rms_threshold,
+                    noise_floor_rms,
+                    speech_rms_threshold,
+                    speech_rms_multiplier,
+                )
+
             # Accumulate audio while recording
-            if chunk is not None and is_recording:
-                buffer.append(chunk)
-                total += len(chunk)
+            if chunk is not None:
+                if is_recording:
+                    buffer.append(chunk)
+                    total += len(chunk)
+
+                    if chunk.size:
+                        rms = float(np.sqrt(np.mean(chunk * chunk)))
+                        peak_rms = max(peak_rms, rms)
+                        if rms >= utterance_rms_threshold:
+                            speech_samples += len(chunk)
+                elif chunk.size:
+                    rms = float(np.sqrt(np.mean(chunk * chunk)))
+                    if noise_floor_rms <= 0.0:
+                        noise_floor_rms = rms
+                    else:
+                        # Track ambient level slowly while idle.
+                        noise_floor_rms = 0.98 * noise_floor_rms + 0.02 * rms
 
             # Process complete 1120 ms chunks
             while is_recording and total >= native:
@@ -271,6 +311,12 @@ class ShuVoiceApp(Gtk.Application):
                 if drained:
                     buffer.extend(drained)
                     total += sum(len(chunk) for chunk in drained)
+                    for drained_chunk in drained:
+                        if drained_chunk.size:
+                            rms = float(np.sqrt(np.mean(drained_chunk * drained_chunk)))
+                            peak_rms = max(peak_rms, rms)
+                            if rms >= utterance_rms_threshold:
+                                speech_samples += len(drained_chunk)
                     log.debug(
                         "Drained %d queued audio chunk(s) on stop (%d samples buffered)",
                         len(drained),
@@ -283,16 +329,55 @@ class ShuVoiceApp(Gtk.Application):
                 if tail_chunk is not None:
                     buffer.append(tail_chunk)
                     total += len(tail_chunk)
+                    if tail_chunk.size:
+                        rms = float(np.sqrt(np.mean(tail_chunk * tail_chunk)))
+                        peak_rms = max(peak_rms, rms)
+                        if rms >= utterance_rms_threshold:
+                            speech_samples += len(tail_chunk)
 
                     drained = self.audio.drain_pending_chunks()
                     if drained:
                         buffer.extend(drained)
                         total += sum(len(chunk) for chunk in drained)
+                        for drained_chunk in drained:
+                            if drained_chunk.size:
+                                rms = float(np.sqrt(np.mean(drained_chunk * drained_chunk)))
+                                peak_rms = max(peak_rms, rms)
+                                if rms >= utterance_rms_threshold:
+                                    speech_samples += len(drained_chunk)
                         log.debug(
                             "Drained %d queued audio chunk(s) after stop grace (%d samples buffered)",
                             len(drained),
                             total,
                         )
+
+                log.debug(
+                    "Utterance energy: peak_rms=%.4f speech_samples=%d/%d threshold=%.4f",
+                    peak_rms,
+                    speech_samples,
+                    min_speech_samples,
+                    utterance_rms_threshold,
+                )
+
+                has_speech = min_speech_samples == 0 or speech_samples >= min_speech_samples
+                if not has_speech:
+                    log.info(
+                        "Ignoring silent utterance (peak_rms=%.4f, speech_samples=%d/%d)",
+                        peak_rms,
+                        speech_samples,
+                        min_speech_samples,
+                    )
+                    if self.overlay:
+                        self.overlay.hide()
+                    buffer.clear()
+                    total = 0
+                    last_text = ""
+                    self.typer.reset()
+                    speech_samples = 0
+                    peak_rms = 0.0
+                    utterance_rms_threshold = speech_rms_threshold
+                    was_recording = is_recording
+                    continue
 
                 # Process any complete buffered 1120 ms chunks.
                 while total >= native:
@@ -360,6 +445,9 @@ class ShuVoiceApp(Gtk.Application):
                 total = 0
                 last_text = ""
                 self.typer.reset()
+                speech_samples = 0
+                peak_rms = 0.0
+                utterance_rms_threshold = speech_rms_threshold
 
             was_recording = is_recording
 

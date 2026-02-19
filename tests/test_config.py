@@ -29,6 +29,9 @@ def test_load_flattens_sections_and_ignores_unknown(monkeypatch, tmp_path: Path)
 [audio]
 chunk_ms = 80
 sample_rate = 16000
+silence_rms_threshold = 0.007
+silence_rms_multiplier = 2.2
+min_speech_ms = 90
 unknown_audio_key = 999
 
 [hotkey]
@@ -52,6 +55,9 @@ foo = "bar"
     cfg = Config.load()
 
     assert cfg.chunk_ms == 80
+    assert cfg.silence_rms_threshold == 0.007
+    assert cfg.silence_rms_multiplier == 2.2
+    assert cfg.min_speech_ms == 90
     assert cfg.hotkey_backend == "ipc"
     assert cfg.hotkey == "KEY_F9"
     assert cfg.hold_threshold_ms == 250
