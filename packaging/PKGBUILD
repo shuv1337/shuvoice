@@ -1,0 +1,62 @@
+# Maintainer: Shuv <shuv@example.com>
+
+pkgname=shuvoice-git
+pkgver=0.1.0.r0
+pkgrel=1
+pkgdesc="Streaming speech-to-text overlay for Hyprland (Nemotron)"
+arch=('x86_64')
+url='https://github.com/shuv/shuvoice'
+license=('MIT')
+
+# NOTE:
+# - python-pytorch-cuda is preferred for NVIDIA systems.
+# - NeMo packaging may vary by repo availability; install nemo-toolkit[asr]
+#   in user env if not available as an Arch package.
+depends=(
+  'python'
+  'python-numpy'
+  'python-sounddevice'
+  'python-evdev'
+  'python-tomli'
+  'gtk4'
+  'gtk4-layer-shell'
+  'python-gobject'
+  'wtype'
+  'wl-clipboard'
+  'portaudio'
+  'pipewire'
+  'pipewire-audio'
+  'pipewire-alsa'
+  'python-pytorch-cuda'
+)
+optdepends=(
+  'python-nemo-toolkit: NeMo ASR runtime if available in repositories'
+  'ydotool: alternative text injection utility'
+)
+makedepends=(
+  'git'
+  'python-build'
+  'python-installer'
+  'python-wheel'
+  'python-setuptools'
+)
+source=('git+https://github.com/shuv/shuvoice.git')
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$srcdir/shuvoice"
+  printf "0.1.0.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  cd "$srcdir/shuvoice"
+  python -m build --wheel --no-isolation
+}
+
+package() {
+  cd "$srcdir/shuvoice"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 examples/config.toml "$pkgdir/usr/share/doc/$pkgname/config.toml.example"
+}

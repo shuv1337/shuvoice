@@ -6,20 +6,35 @@ build-backend = "setuptools.build_meta"
 name = "shuvoice"
 version = "0.1.0"
 description = "Streaming speech-to-text overlay for Hyprland"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 license = "MIT"
 dependencies = [
     "sounddevice",
     "numpy",
     "evdev",
+    "tomli; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
-# NeMo must be installed from git main branch:
-#   pip install git+https://github.com/NVIDIA/NeMo.git@main#egg=nemo_toolkit[asr]
-# System packages (pacman):
-#   gtk4 gtk4-layer-shell python-gobject python-pytorch-cuda
-#   wtype wl-clipboard portaudio pipewire pipewire-audio pipewire-alsa
+asr = [
+    "torch>=2.4",
+    "nemo-toolkit[asr]>=2.6.0",
+]
+dev = [
+    "pytest>=8.0",
+]
+
+# Arch Linux notes:
+# - Prefer system python-pytorch-cuda for GPU builds.
+# - If nemo-toolkit wheels lag, install NeMo from git main:
+#     pip install git+https://github.com/NVIDIA/NeMo.git@main#egg=nemo_toolkit[asr]
+# - System packages:
+#     gtk4 gtk4-layer-shell python-gobject python-pytorch-cuda
+#     wtype wl-clipboard portaudio pipewire pipewire-audio pipewire-alsa
 
 [project.scripts]
 shuvoice = "shuvoice.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["shuvoice*"]
+exclude = ["tests*", "packaging*", "scripts*", "examples*"]

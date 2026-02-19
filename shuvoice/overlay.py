@@ -27,9 +27,9 @@ class CaptionOverlay:
         self._setup_layer_shell()
         self._setup_css()
         self._setup_widgets()
-        self._window.present()
         # Make pointer-click-through after the window is mapped (fix #1)
         self._window.connect("realize", self._make_click_through)
+        self._window.present()
 
     def _setup_layer_shell(self):
         w = self._window

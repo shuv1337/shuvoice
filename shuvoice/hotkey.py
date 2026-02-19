@@ -5,6 +5,8 @@ Implements a hybrid tap/hold pattern:
   - Tap < threshold: toggle recording on/off
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
@@ -22,26 +24,53 @@ _TOGGLED = "toggled"  # Tap-toggled on, waiting for next tap to stop
 _STOPPING = "stopping"  # Key down in toggled state, waiting for release
 
 
-def find_keyboard() -> str:
-    """Find the first real keyboard device."""
+def find_keyboards(hotkey_code: int) -> list[str]:
+    """Find likely keyboard devices that can emit the target hotkey code."""
+    matches: list[str] = []
+
     for path in evdev.list_devices():
         dev = InputDevice(path)
         caps = dev.capabilities()
-        if ecodes.EV_KEY in caps:
-            keys = caps[ecodes.EV_KEY]
-            if ecodes.KEY_A in keys and ecodes.KEY_ENTER in keys:
-                log.info("Found keyboard: %s (%s)", dev.name, dev.path)
-                return dev.path
-    raise RuntimeError(
-        "No keyboard found. Ensure user is in 'input' group: "
-        "sudo usermod -aG input $USER"
-    )
+        if ecodes.EV_KEY not in caps:
+            continue
+
+        keys = caps[ecodes.EV_KEY]
+        # Heuristic: real keyboard-like device with common alpha/enter keys.
+        if ecodes.KEY_A not in keys or ecodes.KEY_ENTER not in keys:
+            continue
+
+        if hotkey_code not in keys:
+            continue
+
+        matches.append(dev.path)
+        log.debug("Keyboard candidate: %s (%s)", dev.name, dev.path)
+
+    if not matches:
+        raise RuntimeError(
+            "No keyboard device found for configured hotkey. "
+            "Ensure user is in 'input' group: sudo usermod -aG input $USER"
+        )
+
+    return matches
 
 
 class HotkeyListener:
-    def __init__(self, hotkey_name: str = "KEY_RIGHTCTRL", hold_threshold_ms: int = 300):
+    def __init__(
+        self,
+        hotkey_name: str = "KEY_RIGHTCTRL",
+        hold_threshold_ms: int = 300,
+        device_path: str | None = None,
+    ):
+        if not hasattr(ecodes, hotkey_name):
+            raise ValueError(
+                f"Unknown hotkey '{hotkey_name}'. "
+                "Use an evdev key name like KEY_RIGHTCTRL or KEY_F9."
+            )
+
         self.hotkey_code: int = getattr(ecodes, hotkey_name)
         self.hold_threshold_s = hold_threshold_ms / 1000.0
+        self.device_path = device_path
+
         self._on_start: Callable | None = None
         self._on_stop: Callable | None = None
         self._state = _IDLE
@@ -52,16 +81,7 @@ class HotkeyListener:
         self._on_start = on_start
         self._on_stop = on_stop
 
-    async def run(self):
-        """Run the hotkey event loop. Call from a dedicated thread."""
-        device_path = find_keyboard()
-        device = InputDevice(device_path)
-        log.info(
-            "Listening for %s on %s",
-            ecodes.KEY.get(self.hotkey_code, self.hotkey_code),
-            device.name,
-        )
-
+    async def _listen_device(self, device: InputDevice):
         async for event in device.async_read_loop():
             if event.type != ecodes.EV_KEY or event.code != self.hotkey_code:
                 continue
@@ -70,6 +90,25 @@ class HotkeyListener:
                 self._on_key_down()
             elif event.value == 0:  # Key release
                 self._on_key_up()
+            # event.value == 2 (auto-repeat) is ignored
+
+    async def run(self):
+        """Run the hotkey event loop. Call from a dedicated thread."""
+        if self.device_path:
+            paths = [self.device_path]
+        else:
+            paths = find_keyboards(self.hotkey_code)
+
+        devices = [InputDevice(path) for path in paths]
+        for dev in devices:
+            log.info(
+                "Listening for %s on %s (%s)",
+                ecodes.KEY.get(self.hotkey_code, self.hotkey_code),
+                dev.name,
+                dev.path,
+            )
+
+        await asyncio.gather(*(self._listen_device(device) for device in devices))
 
     def _on_key_down(self):
         if self._state == _IDLE:

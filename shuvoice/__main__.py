@@ -1,8 +1,117 @@
 """CLI entry point for shuvoice."""
 
+from __future__ import annotations
+
 import argparse
+import importlib
 import logging
+import shutil
 import sys
+from ctypes import CDLL
+from typing import Callable
+
+
+def _run_preflight(config) -> bool:
+    """Check runtime prerequisites and print a human-readable report."""
+    checks: list[tuple[str, bool, str]] = []
+
+    def add_check(name: str, fn: Callable[[], str]):
+        try:
+            detail = fn()
+            checks.append((name, True, detail))
+        except Exception as e:
+            checks.append((name, False, str(e)))
+
+    def check_python() -> str:
+        major, minor = sys.version_info[:2]
+        if (major, minor) < (3, 10) or (major, minor) >= (3, 13):
+            raise RuntimeError(
+                f"Unsupported Python {major}.{minor}; expected >=3.10,<3.13"
+            )
+        return f"Python {major}.{minor} is supported"
+
+    def check_import(module: str) -> Callable[[], str]:
+        def _inner() -> str:
+            importlib.import_module(module)
+            return f"import {module}"
+
+        return _inner
+
+    def check_binary(binary: str) -> Callable[[], str]:
+        def _inner() -> str:
+            path = shutil.which(binary)
+            if not path:
+                raise RuntimeError(f"{binary} not found in PATH")
+            return path
+
+        return _inner
+
+    def check_layer_shell() -> str:
+        CDLL("libgtk4-layer-shell.so")
+        return "libgtk4-layer-shell.so loaded"
+
+    def check_hotkey_backend() -> str:
+        allowed = {"evdev", "ipc"}
+        if config.hotkey_backend not in allowed:
+            raise RuntimeError(
+                f"Invalid hotkey_backend '{config.hotkey_backend}'. Allowed: {sorted(allowed)}"
+            )
+        return config.hotkey_backend
+
+    def check_hotkey() -> str:
+        from evdev import ecodes
+
+        if not hasattr(ecodes, config.hotkey):
+            raise RuntimeError(f"Unknown hotkey: {config.hotkey}")
+        return config.hotkey
+
+    def check_output_mode() -> str:
+        allowed = {"final_only", "streaming_partial"}
+        if config.output_mode not in allowed:
+            raise RuntimeError(
+                f"Invalid output_mode '{config.output_mode}'. Allowed: {sorted(allowed)}"
+            )
+        return config.output_mode
+
+    def check_asr_stack() -> str:
+        from .asr import ASREngine
+
+        errors = ASREngine.dependency_errors()
+        if errors:
+            raise RuntimeError("; ".join(errors))
+        return "torch + nemo ASR dependencies are importable"
+
+    add_check("Python version", check_python)
+    add_check("Import numpy", check_import("numpy"))
+    add_check("Import sounddevice", check_import("sounddevice"))
+    add_check("Import evdev", check_import("evdev"))
+    add_check("Import gi", check_import("gi"))
+    add_check("ASR dependencies", check_asr_stack)
+    add_check("wtype binary", check_binary("wtype"))
+    add_check("wl-copy binary", check_binary("wl-copy"))
+    if config.preserve_clipboard:
+        add_check("wl-paste binary", check_binary("wl-paste"))
+    else:
+        checks.append(("wl-paste binary", True, "skipped (preserve_clipboard=false)"))
+    add_check("gtk4-layer-shell library", check_layer_shell)
+    add_check("Hotkey backend", check_hotkey_backend)
+
+    if config.hotkey_backend == "evdev":
+        add_check("Configured hotkey", check_hotkey)
+    else:
+        checks.append(("Configured hotkey", True, "skipped (backend=ipc)"))
+
+    add_check("Output mode", check_output_mode)
+
+    print("ShuVoice preflight checks")
+    print("=" * 24)
+    for name, ok, detail in checks:
+        mark = "PASS" if ok else "FAIL"
+        print(f"[{mark}] {name}: {detail}")
+
+    ok = all(result for _, result, _ in checks)
+    print("\nResult:", "READY" if ok else "NOT READY")
+    return ok
 
 
 def main():
@@ -15,9 +124,31 @@ def main():
         help="Download the ASR model and exit",
     )
     parser.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Check runtime dependencies and exit",
+    )
+    parser.add_argument(
+        "--control",
+        choices=["start", "stop", "toggle", "status", "ping"],
+        default=None,
+        help="Send a control command to a running ShuVoice instance and exit",
+    )
+    parser.add_argument(
+        "--control-socket",
+        default=None,
+        help="Override control socket path (default: $XDG_RUNTIME_DIR/shuvoice/control.sock)",
+    )
+    parser.add_argument(
         "--device",
         default=None,
-        help="Inference device (default: cuda)",
+        help="Inference device (default: from config)",
+    )
+    parser.add_argument(
+        "--hotkey-backend",
+        choices=["evdev", "ipc"],
+        default=None,
+        help="Hotkey backend: evdev or ipc (default: from config)",
     )
     parser.add_argument(
         "--hotkey",
@@ -25,7 +156,19 @@ def main():
         help="Hotkey name, e.g. KEY_RIGHTCTRL (default: from config)",
     )
     parser.add_argument(
-        "-v", "--verbose",
+        "--hotkey-device",
+        default=None,
+        help="Explicit /dev/input/eventX path for hotkey capture",
+    )
+    parser.add_argument(
+        "--output-mode",
+        choices=["final_only", "streaming_partial"],
+        default=None,
+        help="Text output mode (default: from config)",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
         action="store_true",
         help="Enable debug logging",
     )
@@ -42,20 +185,46 @@ def main():
 
     if args.device:
         config.device = args.device
+    if args.hotkey_backend:
+        config.hotkey_backend = args.hotkey_backend
     if args.hotkey:
         config.hotkey = args.hotkey
+    if args.hotkey_device:
+        config.hotkey_device = args.hotkey_device
+    if args.output_mode:
+        config.output_mode = args.output_mode
+    if args.control_socket:
+        config.control_socket = args.control_socket
+
+    # Socket control command mode (for Hyprland bind/bindr)
+    if args.control:
+        from .control import send_control_command
+
+        try:
+            response = send_control_command(args.control, config.control_socket)
+        except Exception as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(response)
+        return
+
+    if args.preflight:
+        sys.exit(0 if _run_preflight(config) else 1)
 
     # --download-model: fetch the model files and exit
     if args.download_model:
         from .asr import ASREngine
 
-        ASREngine.download_model(config.model_name)
+        try:
+            ASREngine.download_model(config.model_name)
+        except RuntimeError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(1)
+
         print("Model downloaded successfully.")
         return
 
     # Load libgtk4-layer-shell BEFORE any gi imports (required by overlay/app)
-    from ctypes import CDLL
-
     try:
         CDLL("libgtk4-layer-shell.so")
     except OSError:
@@ -68,8 +237,13 @@ def main():
 
     from .app import ShuVoiceApp
 
-    app = ShuVoiceApp(config)
-    app.load_model()
+    try:
+        app = ShuVoiceApp(config)
+        app.load_model()
+    except (RuntimeError, ValueError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
     sys.exit(app.run(None))
 
 

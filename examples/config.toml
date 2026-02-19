@@ -1,0 +1,37 @@
+# ShuVoice example configuration
+
+[audio]
+sample_rate = 16000
+chunk_ms = 100
+fallback_sample_rate = 48000
+
+[asr]
+model_name = "nvidia/nemotron-speech-streaming-en-0.6b"
+right_context = 1
+# cuda | cpu
+device = "cuda"
+
+[overlay]
+font_size = 22
+bg_opacity = 0.75
+border_radius = 16
+bottom_margin = 60
+
+[hotkey]
+# evdev | ipc
+hotkey_backend = "evdev"
+# evdev key code name
+hotkey = "KEY_RIGHTCTRL"
+hold_threshold_ms = 300
+# Optional explicit /dev/input/eventX device path
+# hotkey_device = "/dev/input/event3"
+# Optional control socket override
+# control_socket = "/run/user/1000/shuvoice/control.sock"
+
+[typing]
+# final_only | streaming_partial
+output_mode = "final_only"
+use_clipboard_for_final = true
+preserve_clipboard = false
+typing_retry_attempts = 2
+typing_retry_delay_ms = 40

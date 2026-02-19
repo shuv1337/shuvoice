@@ -1,5 +1,7 @@
 """Audio capture via sounddevice with PipeWire."""
 
+from __future__ import annotations
+
 import logging
 import queue
 
@@ -19,21 +21,44 @@ class AudioCapture:
         self.sample_rate = sample_rate
         self.chunk_samples = chunk_samples
         self.fallback_sample_rate = fallback_sample_rate
+
         self.queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=200)
         self._stream: sd.InputStream | None = None
         self._resampling = False
+        self._dropped_chunks = 0
 
     def _callback(self, indata, frames, time_info, status):
         if status:
             log.warning("Audio status: %s", status)
-        audio = indata[:, 0].copy()  # Mono float32, must copy — buffer is reused
+
+        # Mono float32, must copy — sounddevice reuses callback buffer.
+        audio = indata[:, 0].copy()
+
         if self._resampling:
             ratio = self.fallback_sample_rate // self.sample_rate
-            audio = audio[::ratio]  # Simple decimation (fix #3: PipeWire fallback)
+            audio = audio[::ratio]  # Simple decimation for 48k->16k fallback mode
+
         try:
             self.queue.put_nowait(audio)
         except queue.Full:
-            pass  # Drop oldest implicitly by not blocking
+            # Keep latency low by dropping oldest data and retaining freshest chunk.
+            self._dropped_chunks += 1
+            try:
+                self.queue.get_nowait()
+            except queue.Empty:
+                pass
+
+            try:
+                self.queue.put_nowait(audio)
+            except queue.Full:
+                pass
+
+            if self._dropped_chunks % 50 == 1:
+                log.warning(
+                    "Audio queue overflow: dropped %d chunks (queue size=%d)",
+                    self._dropped_chunks,
+                    self.queue.qsize(),
+                )
 
     def start(self):
         try:
@@ -75,6 +100,9 @@ class AudioCapture:
             self._stream.stop()
             self._stream.close()
             self._stream = None
+
+        if self._dropped_chunks:
+            log.info("Audio dropped chunks total: %d", self._dropped_chunks)
 
     def clear(self):
         while not self.queue.empty():

@@ -1,9 +1,15 @@
 """XDG-compliant configuration management."""
 
+from __future__ import annotations
+
 import os
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+
+try:  # Python 3.11+
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 
 
 def _xdg_config_home() -> Path:
@@ -32,12 +38,19 @@ class Config:
     border_radius: int = 16
     bottom_margin: int = 60
 
-    # Hotkey
+    # Hotkey / control
+    hotkey_backend: str = "evdev"  # evdev | ipc
     hotkey: str = "KEY_RIGHTCTRL"
     hold_threshold_ms: int = 300
+    hotkey_device: str | None = None  # /dev/input/eventX; None => auto-detect
+    control_socket: str | None = None  # default: $XDG_RUNTIME_DIR/shuvoice/control.sock
 
     # Text injection
+    output_mode: str = "final_only"  # final_only | streaming_partial
     use_clipboard_for_final: bool = True
+    preserve_clipboard: bool = False
+    typing_retry_attempts: int = 2
+    typing_retry_delay_ms: int = 40
 
     @property
     def chunk_samples(self) -> int:
@@ -65,8 +78,10 @@ class Config:
         config_file = cls.config_dir() / "config.toml"
         if not config_file.exists():
             return cls()
+
         with open(config_file, "rb") as f:
             data = tomllib.load(f)
+
         # Flatten nested sections into a single dict
         flat: dict = {}
         for key, value in data.items():
@@ -74,6 +89,7 @@ class Config:
                 flat.update(value)
             else:
                 flat[key] = value
+
         valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
         filtered = {k: v for k, v in flat.items() if k in valid_fields}
         return cls(**filtered)

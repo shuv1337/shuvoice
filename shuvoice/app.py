@@ -4,6 +4,8 @@ IMPORTANT: ctypes.CDLL('libgtk4-layer-shell.so') must be called
 before this module is imported. See __main__.py.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import signal
@@ -19,6 +21,7 @@ from gi.repository import GLib, Gtk
 from .asr import ASREngine
 from .audio import AudioCapture
 from .config import Config
+from .control import ControlServer
 from .hotkey import HotkeyListener
 from .overlay import CaptionOverlay
 from .typer import StreamingTyper
@@ -30,10 +33,11 @@ class ShuVoiceApp(Gtk.Application):
     """GTK4 application that orchestrates streaming speech-to-text.
 
     Threading model:
-      - Main thread:   GTK4 event loop (Gtk.Application.run)
-      - Audio thread:  managed by sounddevice (callback puts chunks in a queue)
-      - ASR thread:    consumes audio queue, runs inference, updates overlay
-      - Hotkey thread: asyncio event loop reading evdev
+      - Main thread:    GTK4 event loop (Gtk.Application.run)
+      - Audio thread:   managed by sounddevice callback
+      - ASR thread:     consumes audio queue, runs inference, updates overlay
+      - Hotkey thread:  optional asyncio event loop reading evdev
+      - Control thread: local Unix socket server for IPC start/stop/toggle
     """
 
     def __init__(self, config: Config):
@@ -43,10 +47,42 @@ class ShuVoiceApp(Gtk.Application):
         # Components (created here, started in do_activate)
         self.asr = ASREngine(config.model_name, config.right_context, config.device)
         self.audio = AudioCapture(
-            config.sample_rate, config.chunk_samples, config.fallback_sample_rate
+            config.sample_rate,
+            config.chunk_samples,
+            config.fallback_sample_rate,
         )
-        self.typer = StreamingTyper()
-        self.hotkey = HotkeyListener(config.hotkey, config.hold_threshold_ms)
+        self.typer = StreamingTyper(
+            preserve_clipboard=config.preserve_clipboard,
+            retry_attempts=config.typing_retry_attempts,
+            retry_delay_ms=config.typing_retry_delay_ms,
+        )
+
+        if config.hotkey_backend not in {"evdev", "ipc"}:
+            raise ValueError(
+                f"Invalid hotkey_backend '{config.hotkey_backend}'. "
+                "Expected one of: evdev, ipc"
+            )
+        if config.output_mode not in {"final_only", "streaming_partial"}:
+            raise ValueError(
+                f"Invalid output_mode '{config.output_mode}'. "
+                "Expected one of: final_only, streaming_partial"
+            )
+
+        self.hotkey: HotkeyListener | None = None
+        if config.hotkey_backend == "evdev":
+            self.hotkey = HotkeyListener(
+                config.hotkey,
+                config.hold_threshold_ms,
+                config.hotkey_device,
+            )
+
+        self.control = ControlServer(
+            socket_path=config.control_socket,
+            on_start=self._on_recording_start,
+            on_stop=self._on_recording_stop,
+            on_toggle=self._on_recording_toggle,
+            on_status=self._recording_status,
+        )
 
         self.overlay: CaptionOverlay | None = None
 
@@ -54,6 +90,9 @@ class ShuVoiceApp(Gtk.Application):
         self._recording = threading.Event()
         self._running = threading.Event()
         self._running.set()
+
+        # Synchronize ASR state transitions across hotkey and ASR threads.
+        self._asr_lock = threading.Lock()
 
     def load_model(self):
         """Load the ASR model. Call before run() — this blocks."""
@@ -67,25 +106,38 @@ class ShuVoiceApp(Gtk.Application):
         # Start audio capture (runs continuously, chunks go to queue)
         self.audio.start()
 
-        # Configure hotkey callbacks
-        self.hotkey.set_callbacks(
-            on_start=self._on_recording_start,
-            on_stop=self._on_recording_stop,
-        )
+        # Always expose local control socket (for Hyprland bind/bindr fallback)
+        self.control.start()
 
-        # Start background threads
+        # Configure optional evdev hotkey callbacks
+        if self.hotkey:
+            self.hotkey.set_callbacks(
+                on_start=self._on_recording_start,
+                on_stop=self._on_recording_stop,
+            )
+
+        # Start background workers
         threading.Thread(target=self._asr_loop, name="asr", daemon=True).start()
-        threading.Thread(target=self._hotkey_loop, name="hotkey", daemon=True).start()
+        if self.hotkey:
+            threading.Thread(target=self._hotkey_loop, name="hotkey", daemon=True).start()
 
         # Handle SIGINT gracefully inside GTK main loop
         GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGINT, self._on_sigint)
 
-        log.info("Ready — press %s to talk", self.config.hotkey)
+        if self.hotkey:
+            log.info("Ready — press %s to talk", self.config.hotkey)
+        else:
+            log.info(
+                "Ready — hotkey backend=%s. Use control socket commands instead.",
+                self.config.hotkey_backend,
+            )
+        log.info("Control socket: %s", self.control.socket_path)
 
     def do_shutdown(self):
         log.info("Shutting down…")
         self._running.clear()
         self._recording.clear()
+        self.control.stop()
         self.audio.stop()
         Gtk.Application.do_shutdown(self)
 
@@ -94,20 +146,46 @@ class ShuVoiceApp(Gtk.Application):
         self.quit()
         return GLib.SOURCE_REMOVE
 
-    # -- Recording state (called from hotkey thread) ------------------------
+    # -- Recording state (called from hotkey/control threads) ---------------
 
     def _on_recording_start(self):
+        if self._recording.is_set():
+            log.debug("Recording already active; ignoring start")
+            return
+
         log.info("Recording started")
-        self.asr.reset()
+
+        with self._asr_lock:
+            self.asr.reset()
+
         self.audio.clear()
         self._recording.set()
+
         if self.overlay:
             self.overlay.show()
             self.overlay.set_text("Listening…")
 
     def _on_recording_stop(self):
+        if not self._recording.is_set():
+            log.debug("Recording already stopped; ignoring stop")
+            return
+
         log.info("Recording stopped")
         self._recording.clear()
+
+    def _on_recording_toggle(self):
+        if self._recording.is_set():
+            self._on_recording_stop()
+        else:
+            self._on_recording_start()
+
+    def _recording_status(self) -> str:
+        return "recording" if self._recording.is_set() else "idle"
+
+    def _process_chunk_safe(self, audio_data: np.ndarray) -> str:
+        """Serialize access to mutable ASR streaming state."""
+        with self._asr_lock:
+            return self.asr.process_chunk(audio_data)
 
     # -- ASR processing thread ----------------------------------------------
 
@@ -135,11 +213,18 @@ class ShuVoiceApp(Gtk.Application):
                 buffer = [remainder] if len(remainder) > 0 else []
                 total = len(remainder)
 
-                text = self.asr.process_chunk(to_process)
+                try:
+                    text = self._process_chunk_safe(to_process)
+                except Exception:
+                    log.exception("ASR chunk processing failed")
+                    text = ""
+
                 if text and text != last_text:
                     last_text = text
                     if self.overlay:
                         self.overlay.set_text(text)
+                    if self.config.output_mode == "streaming_partial":
+                        self.typer.update_partial(text)
 
             # Detect recording→stopped transition
             if was_recording and not is_recording:
@@ -148,7 +233,11 @@ class ShuVoiceApp(Gtk.Application):
                     audio_data = np.concatenate(buffer)
                     padded = np.zeros(native, dtype=np.float32)
                     padded[: len(audio_data)] = audio_data
-                    text = self.asr.process_chunk(padded)
+                    try:
+                        text = self._process_chunk_safe(padded)
+                    except Exception:
+                        log.exception("ASR final flush failed")
+                        text = ""
                     if text:
                         last_text = text
 
@@ -176,6 +265,9 @@ class ShuVoiceApp(Gtk.Application):
     # -- Hotkey event loop thread -------------------------------------------
 
     def _hotkey_loop(self):
+        if not self.hotkey:
+            return
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:

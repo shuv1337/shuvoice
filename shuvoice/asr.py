@@ -1,9 +1,11 @@
 """Streaming ASR engine using NeMo Nemotron."""
 
+from __future__ import annotations
+
 import logging
+from typing import Any
 
 import numpy as np
-import torch
 
 log = logging.getLogger(__name__)
 
@@ -18,7 +20,11 @@ class ASREngine:
         self.model_name = model_name
         self.right_context = right_context
         self.device = device
-        self.model = None
+
+        self.model: Any = None
+        self._torch: Any = None
+        self._nemo_asr: Any = None
+
         self._cache_last_channel = None
         self._cache_last_time = None
         self._cache_last_channel_len = None
@@ -27,11 +33,55 @@ class ASREngine:
         self._pred_out_stream = None
         self._step_num = 0
 
+    @staticmethod
+    def dependency_errors() -> list[str]:
+        errors: list[str] = []
+
+        try:
+            import torch  # noqa: F401
+        except Exception as e:
+            errors.append(
+                f"Missing PyTorch dependency: {e}. "
+                "Install torch (or python-pytorch-cuda on Arch)."
+            )
+
+        try:
+            import nemo.collections.asr  # noqa: F401
+        except Exception as e:
+            errors.append(
+                f"Missing NeMo ASR dependency: {e}. "
+                "Install nemo-toolkit[asr] (or NeMo from git main)."
+            )
+
+        return errors
+
+    def _ensure_dependencies(self):
+        if self._torch is None:
+            try:
+                import torch
+            except Exception as e:
+                raise RuntimeError(
+                    "PyTorch is required for ASR. "
+                    "Install torch (or python-pytorch-cuda on Arch Linux)."
+                ) from e
+            self._torch = torch
+
+        if self._nemo_asr is None:
+            try:
+                import nemo.collections.asr as nemo_asr
+            except Exception as e:
+                raise RuntimeError(
+                    "NeMo ASR is required for ASR. "
+                    "Install nemo-toolkit[asr] or "
+                    "pip install git+https://github.com/NVIDIA/NeMo.git@main#egg=nemo_toolkit[asr]"
+                ) from e
+            self._nemo_asr = nemo_asr
+
     def load(self):
-        import nemo.collections.asr as nemo_asr
+        self._ensure_dependencies()
 
         log.info("Loading model: %s", self.model_name)
-        self.model = nemo_asr.models.ASRModel.from_pretrained(self.model_name)
+        self.model = self._nemo_asr.models.ASRModel.from_pretrained(self.model_name)
         self.model.eval()
         self.model.to(self.device)
 
@@ -47,6 +97,9 @@ class ASREngine:
 
     def reset(self):
         """Reset streaming state for a new utterance."""
+        if self.model is None:
+            raise RuntimeError("ASR model is not loaded. Call load() first.")
+
         cache_last_channel, cache_last_time, cache_last_channel_len = (
             self.model.encoder.get_initial_cache_state(batch_size=1)
         )
@@ -54,9 +107,20 @@ class ASREngine:
         self._cache_last_time = cache_last_time
         self._cache_last_channel_len = cache_last_channel_len
 
-        num_features = self.model.preprocessor.featurizer.feat_out
+        # NeMo API compatibility: older versions expose feat_out, newer ones use nfilt.
+        featurizer = self.model.preprocessor.featurizer
+        if hasattr(featurizer, "feat_out"):
+            num_features = int(featurizer.feat_out)
+        elif hasattr(featurizer, "nfilt"):
+            num_features = int(featurizer.nfilt)
+        else:
+            raise RuntimeError(
+                "Could not determine feature dimension from NeMo featurizer "
+                f"type={type(featurizer)!r}"
+            )
+
         pre_encode_size = self.model.encoder.streaming_cfg.pre_encode_cache_size[1]
-        self._pre_encode_cache = torch.zeros(
+        self._pre_encode_cache = self._torch.zeros(
             (1, num_features, pre_encode_size), device=self.device
         )
 
@@ -64,57 +128,64 @@ class ASREngine:
         self._pred_out_stream = None
         self._step_num = 0
 
-    @torch.inference_mode()
     def process_chunk(self, audio_chunk: np.ndarray) -> str:
         """Process one 1120ms audio chunk, return cumulative transcription."""
-        audio_tensor = torch.from_numpy(audio_chunk).unsqueeze(0).to(self.device)
-        audio_len = torch.tensor([audio_tensor.shape[1]], device=self.device)
+        if self.model is None:
+            raise RuntimeError("ASR model is not loaded. Call load() first.")
 
-        # Preprocess to mel spectrogram
-        processed_signal, processed_signal_length = self.model.preprocessor(
-            input_signal=audio_tensor, length=audio_len
-        )
+        with self._torch.inference_mode():
+            audio_tensor = self._torch.from_numpy(audio_chunk).unsqueeze(0).to(self.device)
+            audio_len = self._torch.tensor([audio_tensor.shape[1]], device=self.device)
 
-        # Prepend pre-encode cache
-        pre_encode_size = self._pre_encode_cache.shape[-1]
-        processed_signal = torch.cat(
-            [self._pre_encode_cache, processed_signal], dim=-1
-        )
-        processed_signal_length += pre_encode_size
-        self._pre_encode_cache = processed_signal[:, :, -pre_encode_size:].clone()
+            # Preprocess to mel spectrogram
+            processed_signal, processed_signal_length = self.model.preprocessor(
+                input_signal=audio_tensor, length=audio_len
+            )
 
-        drop = (
-            0
-            if self._step_num == 0
-            else self.model.encoder.streaming_cfg.drop_extra_pre_encoded
-        )
+            # Prepend pre-encode cache
+            pre_encode_size = self._pre_encode_cache.shape[-1]
+            processed_signal = self._torch.cat(
+                [self._pre_encode_cache, processed_signal], dim=-1
+            )
+            processed_signal_length += pre_encode_size
+            self._pre_encode_cache = processed_signal[:, :, -pre_encode_size:].clone()
 
-        (
-            self._pred_out_stream,
-            transcribed_texts,
-            self._cache_last_channel,
-            self._cache_last_time,
-            self._cache_last_channel_len,
-            self._previous_hypotheses,
-        ) = self.model.conformer_stream_step(
-            processed_signal=processed_signal,
-            processed_signal_length=processed_signal_length,
-            cache_last_channel=self._cache_last_channel,
-            cache_last_time=self._cache_last_time,
-            cache_last_channel_len=self._cache_last_channel_len,
-            keep_all_outputs=False,
-            previous_hypotheses=self._previous_hypotheses,
-            previous_pred_out=self._pred_out_stream,
-            drop_extra_pre_encoded=drop,
-            return_transcription=True,
-        )
+            drop = (
+                0
+                if self._step_num == 0
+                else self.model.encoder.streaming_cfg.drop_extra_pre_encoded
+            )
 
-        self._step_num += 1
-        return transcribed_texts[0] if transcribed_texts else ""
+            (
+                self._pred_out_stream,
+                transcribed_texts,
+                self._cache_last_channel,
+                self._cache_last_time,
+                self._cache_last_channel_len,
+                self._previous_hypotheses,
+            ) = self.model.conformer_stream_step(
+                processed_signal=processed_signal,
+                processed_signal_length=processed_signal_length,
+                cache_last_channel=self._cache_last_channel,
+                cache_last_time=self._cache_last_time,
+                cache_last_channel_len=self._cache_last_channel_len,
+                keep_all_outputs=False,
+                previous_hypotheses=self._previous_hypotheses,
+                previous_pred_out=self._pred_out_stream,
+                drop_extra_pre_encoded=drop,
+                return_transcription=True,
+            )
 
-    @staticmethod
-    def download_model(model_name: str):
+            self._step_num += 1
+            return transcribed_texts[0] if transcribed_texts else ""
+
+    @classmethod
+    def download_model(cls, model_name: str):
         """Pre-download the model and exit."""
+        errors = cls.dependency_errors()
+        if errors:
+            raise RuntimeError("\n".join(errors))
+
         import nemo.collections.asr as nemo_asr
 
         log.info("Downloading model: %s", model_name)
