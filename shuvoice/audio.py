@@ -17,10 +17,14 @@ class AudioCapture:
         sample_rate: int = 16000,
         chunk_samples: int = 1600,
         fallback_sample_rate: int = 48000,
+        device: str | int | None = None,
+        input_gain: float = 1.0,
     ):
         self.sample_rate = sample_rate
         self.chunk_samples = chunk_samples
         self.fallback_sample_rate = fallback_sample_rate
+        self.device = device
+        self.input_gain = float(input_gain)
 
         self.queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=200)
         self._stream: sd.InputStream | None = None
@@ -37,6 +41,9 @@ class AudioCapture:
         if self._resampling:
             ratio = self.fallback_sample_rate // self.sample_rate
             audio = audio[::ratio]  # Simple decimation for 48k->16k fallback mode
+
+        if self.input_gain != 1.0:
+            audio = np.clip(audio * self.input_gain, -1.0, 1.0)
 
         try:
             self.queue.put_nowait(audio)
@@ -69,9 +76,15 @@ class AudioCapture:
                 dtype="float32",
                 callback=self._callback,
                 latency="low",
+                device=self.device,
             )
             self._stream.start()
-            log.info("Audio capture started at %d Hz", self.sample_rate)
+            log.info(
+                "Audio capture started at %d Hz (device=%s, gain=%.2f)",
+                self.sample_rate,
+                self.device if self.device is not None else "default",
+                self.input_gain,
+            )
         except sd.PortAudioError:
             log.warning(
                 "Failed at %d Hz, falling back to %d Hz",
@@ -87,12 +100,15 @@ class AudioCapture:
                 dtype="float32",
                 callback=self._callback,
                 latency="low",
+                device=self.device,
             )
             self._stream.start()
             log.info(
-                "Audio capture started at %d Hz (resampling to %d Hz)",
+                "Audio capture started at %d Hz (resampling to %d Hz, device=%s, gain=%.2f)",
                 self.fallback_sample_rate,
                 self.sample_rate,
+                self.device if self.device is not None else "default",
+                self.input_gain,
             )
 
     def stop(self):

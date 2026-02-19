@@ -16,10 +16,12 @@ class ASREngine:
         model_name: str = "nvidia/nemotron-speech-streaming-en-0.6b",
         right_context: int = 1,
         device: str = "cuda",
+        use_cuda_graph_decoder: bool = False,
     ):
         self.model_name = model_name
         self.right_context = right_context
         self.device = device
+        self.use_cuda_graph_decoder = use_cuda_graph_decoder
 
         self.model: Any = None
         self._torch: Any = None
@@ -77,6 +79,44 @@ class ASREngine:
                 ) from e
             self._nemo_asr = nemo_asr
 
+    def _configure_decoding_strategy(self):
+        """Apply runtime decoding overrides for better compatibility/stability."""
+        if self.model is None:
+            return
+
+        try:
+            from omegaconf import OmegaConf
+
+            decoding_cfg = OmegaConf.to_container(self.model.cfg.decoding, resolve=True)
+            if not isinstance(decoding_cfg, dict):
+                return
+
+            greedy_cfg = decoding_cfg.setdefault("greedy", {})
+            if isinstance(greedy_cfg, dict):
+                greedy_cfg["use_cuda_graph_decoder"] = bool(self.use_cuda_graph_decoder)
+
+            self.model.change_decoding_strategy(OmegaConf.create(decoding_cfg))
+            log.info(
+                "RNNT greedy CUDA graph decoder: %s",
+                "enabled" if self.use_cuda_graph_decoder else "disabled",
+            )
+        except Exception:
+            log.warning("Failed to apply decoding strategy overrides", exc_info=True)
+
+    @staticmethod
+    def _normalize_transcript_item(item: Any) -> str:
+        if item is None:
+            return ""
+        if isinstance(item, str):
+            return item
+
+        text = getattr(item, "text", None)
+        if isinstance(text, str):
+            return text
+
+        # Unknown transcript type (eg. Hypothesis without text) — ignore safely.
+        return ""
+
     def load(self):
         self._ensure_dependencies()
 
@@ -84,6 +124,8 @@ class ASREngine:
         self.model = self._nemo_asr.models.ASRModel.from_pretrained(self.model_name)
         self.model.eval()
         self.model.to(self.device)
+
+        self._configure_decoding_strategy()
 
         # Configure streaming latency
         self.model.encoder.set_default_att_context_size([70, self.right_context])
@@ -177,7 +219,11 @@ class ASREngine:
             )
 
             self._step_num += 1
-            return transcribed_texts[0] if transcribed_texts else ""
+            if not transcribed_texts:
+                return ""
+
+            text = self._normalize_transcript_item(transcribed_texts[0])
+            return text
 
     @classmethod
     def download_model(cls, model_name: str):

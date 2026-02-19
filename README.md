@@ -71,6 +71,7 @@ Checks include:
 
 - Python version compatibility
 - importability of key Python modules
+- audio input device validity
 - ASR stack (`torch`, `nemo`)
 - required binaries (`wtype`, `wl-copy`, `wl-paste`)
 - `libgtk4-layer-shell.so`
@@ -90,6 +91,9 @@ python -m shuvoice --download-model
 python -m shuvoice --hotkey KEY_F9
 python -m shuvoice --output-mode streaming_partial
 python -m shuvoice --hotkey-backend ipc
+python -m shuvoice --list-audio-devices
+python -m shuvoice --audio-device 2 --input-gain 1.5
+python -m shuvoice --right-context 6
 ```
 
 ## Control socket commands (IPC backend)
@@ -120,6 +124,13 @@ Example config:
 
 - `examples/config.toml`
 
+If you hit RNNT CUDA-graph decoder issues on your driver/toolkit combo,
+keep this setting disabled (default):
+
+```toml
+use_cuda_graph_decoder = false
+```
+
 ## Smoke test script
 
 ```bash
@@ -138,3 +149,8 @@ Example config:
   - `sudo pacman -S gtk4-layer-shell`
 - `wtype not found in PATH`
   - `sudo pacman -S wtype`
+- Recognition quality is poor / start-stop triggers repeatedly
+  - Set a single keyboard device in config (`hotkey_device=/dev/input/eventX`) or keep `hotkey_listen_all_devices=false`.
+  - Increase ASR context for accuracy (eg. `right_context=6`).
+  - Select the correct mic (`python -m shuvoice --list-audio-devices`, then set `audio_device`).
+  - Increase `input_gain` moderately (eg. `1.3` to `1.8`) if your mic is too quiet.

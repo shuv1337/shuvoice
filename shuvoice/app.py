@@ -45,11 +45,18 @@ class ShuVoiceApp(Gtk.Application):
         self.config = config
 
         # Components (created here, started in do_activate)
-        self.asr = ASREngine(config.model_name, config.right_context, config.device)
+        self.asr = ASREngine(
+            config.model_name,
+            config.right_context,
+            config.device,
+            config.use_cuda_graph_decoder,
+        )
         self.audio = AudioCapture(
             config.sample_rate,
             config.chunk_samples,
             config.fallback_sample_rate,
+            device=config.audio_device,
+            input_gain=config.input_gain,
         )
         self.typer = StreamingTyper(
             preserve_clipboard=config.preserve_clipboard,
@@ -74,6 +81,7 @@ class ShuVoiceApp(Gtk.Application):
                 config.hotkey,
                 config.hold_threshold_ms,
                 config.hotkey_device,
+                listen_all_devices=config.hotkey_listen_all_devices,
             )
 
         self.control = ControlServer(

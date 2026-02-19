@@ -24,6 +24,27 @@ _TOGGLED = "toggled"  # Tap-toggled on, waiting for next tap to stop
 _STOPPING = "stopping"  # Key down in toggled state, waiting for release
 
 
+def _is_virtual_keyboard(device: InputDevice) -> bool:
+    haystack = f"{device.name} {device.phys}".lower()
+    virtual_markers = (
+        "virtual",
+        "ydotool",
+        "input-remapper",
+        "passthrough",
+        "uinput",
+    )
+    if any(marker in haystack for marker in virtual_markers):
+        return True
+
+    # Common virtual/test IDs observed in local setups.
+    if device.info.vendor in {0x0001, 0x2333, 0xBEEF}:
+        return True
+    if device.info.product in {0xDEAD}:
+        return True
+
+    return False
+
+
 def find_keyboards(hotkey_code: int) -> list[str]:
     """Find likely keyboard devices that can emit the target hotkey code."""
     matches: list[str] = []
@@ -60,6 +81,7 @@ class HotkeyListener:
         hotkey_name: str = "KEY_RIGHTCTRL",
         hold_threshold_ms: int = 300,
         device_path: str | None = None,
+        listen_all_devices: bool = False,
     ):
         if not hasattr(ecodes, hotkey_name):
             raise ValueError(
@@ -70,16 +92,32 @@ class HotkeyListener:
         self.hotkey_code: int = getattr(ecodes, hotkey_name)
         self.hold_threshold_s = hold_threshold_ms / 1000.0
         self.device_path = device_path
+        self.listen_all_devices = listen_all_devices
 
         self._on_start: Callable | None = None
         self._on_stop: Callable | None = None
         self._state = _IDLE
         self._press_time = 0.0
 
+        # Suppress duplicate key edges emitted by multiple keyboard interfaces.
+        self._last_edge_value: int | None = None
+        self._last_edge_time = 0.0
+        self._edge_dedupe_window_s = 0.02
+
     def set_callbacks(self, on_start: Callable, on_stop: Callable):
         """Set recording start/stop callbacks. Called from the evdev thread."""
         self._on_start = on_start
         self._on_stop = on_stop
+
+    def _is_duplicate_edge(self, value: int) -> bool:
+        now = time.monotonic()
+        duplicate = (
+            self._last_edge_value == value
+            and (now - self._last_edge_time) <= self._edge_dedupe_window_s
+        )
+        self._last_edge_value = value
+        self._last_edge_time = now
+        return duplicate
 
     async def _listen_device(self, device: InputDevice):
         async for event in device.async_read_loop():
@@ -87,8 +125,12 @@ class HotkeyListener:
                 continue
 
             if event.value == 1:  # Key press
+                if self._is_duplicate_edge(1):
+                    continue
                 self._on_key_down()
             elif event.value == 0:  # Key release
+                if self._is_duplicate_edge(0):
+                    continue
                 self._on_key_up()
             # event.value == 2 (auto-repeat) is ignored
 
@@ -97,7 +139,38 @@ class HotkeyListener:
         if self.device_path:
             paths = [self.device_path]
         else:
-            paths = find_keyboards(self.hotkey_code)
+            discovered = find_keyboards(self.hotkey_code)
+            if self.listen_all_devices:
+                paths = discovered
+            else:
+                # Default: listen on non-virtual keyboards only.
+                # This avoids virtual remapper devices while still supporting multiple
+                # physical keyboards.
+                physical = []
+                virtual = []
+                for path in discovered:
+                    dev = InputDevice(path)
+                    if _is_virtual_keyboard(dev):
+                        virtual.append(path)
+                    else:
+                        physical.append(path)
+
+                if physical:
+                    paths = physical
+                    if virtual:
+                        log.info(
+                            "Skipping %d virtual keyboard device(s): %s",
+                            len(virtual),
+                            ", ".join(virtual),
+                        )
+                else:
+                    paths = [discovered[0]]
+                    if len(discovered) > 1:
+                        log.warning(
+                            "Only virtual keyboard devices detected. Using first device (%s). "
+                            "Set hotkey_device explicitly if hotkey does not trigger.",
+                            discovered[0],
+                        )
 
         devices = [InputDevice(path) for path in paths]
         for dev in devices:

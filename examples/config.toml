@@ -4,12 +4,18 @@
 sample_rate = 16000
 chunk_ms = 100
 fallback_sample_rate = 48000
+# Optional explicit input device name/index (see: python -m shuvoice --list-audio-devices)
+# audio_device = 2
+# Optional mic gain multiplier (eg. 1.5 if too quiet)
+input_gain = 1.0
 
 [asr]
 model_name = "nvidia/nemotron-speech-streaming-en-0.6b"
 right_context = 1
 # cuda | cpu
 device = "cuda"
+# Keep false unless you have verified CUDA graph decoder stability on your stack
+use_cuda_graph_decoder = false
 
 [overlay]
 font_size = 22
@@ -25,6 +31,8 @@ hotkey = "KEY_RIGHTCTRL"
 hold_threshold_ms = 300
 # Optional explicit /dev/input/eventX device path
 # hotkey_device = "/dev/input/event3"
+# Listen to all matching keyboards (usually keep false to avoid duplicate events)
+hotkey_listen_all_devices = false
 # Optional control socket override
 # control_socket = "/run/user/1000/shuvoice/control.sock"
 

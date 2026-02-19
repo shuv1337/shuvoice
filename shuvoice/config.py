@@ -26,11 +26,14 @@ class Config:
     sample_rate: int = 16000
     chunk_ms: int = 100
     fallback_sample_rate: int = 48000
+    audio_device: str | int | None = None  # sounddevice device name/index
+    input_gain: float = 1.0  # multiply PCM before ASR (eg. 1.5)
 
     # ASR
     model_name: str = "nvidia/nemotron-speech-streaming-en-0.6b"
     right_context: int = 1  # 0=80ms, 1=160ms, 6=560ms, 13=1120ms
     device: str = "cuda"
+    use_cuda_graph_decoder: bool = False
 
     # Overlay
     font_size: int = 22
@@ -43,6 +46,7 @@ class Config:
     hotkey: str = "KEY_RIGHTCTRL"
     hold_threshold_ms: int = 300
     hotkey_device: str | None = None  # /dev/input/eventX; None => auto-detect
+    hotkey_listen_all_devices: bool = False  # default false to avoid duplicate key events
     control_socket: str | None = None  # default: $XDG_RUNTIME_DIR/shuvoice/control.sock
 
     # Text injection

@@ -73,6 +73,16 @@ def _run_preflight(config) -> bool:
             )
         return config.output_mode
 
+    def check_audio_device() -> str:
+        if config.audio_device is None:
+            return "default"
+
+        import sounddevice as sd
+
+        # Raises if the device cannot be resolved as input.
+        sd.check_input_settings(device=config.audio_device, samplerate=config.sample_rate)
+        return str(config.audio_device)
+
     def check_asr_stack() -> str:
         from .asr import ASREngine
 
@@ -86,6 +96,7 @@ def _run_preflight(config) -> bool:
     add_check("Import sounddevice", check_import("sounddevice"))
     add_check("Import evdev", check_import("evdev"))
     add_check("Import gi", check_import("gi"))
+    add_check("Audio input device", check_audio_device)
     add_check("ASR dependencies", check_asr_stack)
     add_check("wtype binary", check_binary("wtype"))
     add_check("wl-copy binary", check_binary("wl-copy"))
@@ -129,6 +140,11 @@ def main():
         help="Check runtime dependencies and exit",
     )
     parser.add_argument(
+        "--list-audio-devices",
+        action="store_true",
+        help="List audio input devices and exit",
+    )
+    parser.add_argument(
         "--control",
         choices=["start", "stop", "toggle", "status", "ping"],
         default=None,
@@ -145,6 +161,24 @@ def main():
         help="Inference device (default: from config)",
     )
     parser.add_argument(
+        "--right-context",
+        type=int,
+        choices=[0, 1, 6, 13],
+        default=None,
+        help="Streaming right context (0,1,6,13 => lower to higher latency/accuracy)",
+    )
+    parser.add_argument(
+        "--audio-device",
+        default=None,
+        help="Audio input device name or index (default: from config)",
+    )
+    parser.add_argument(
+        "--input-gain",
+        type=float,
+        default=None,
+        help="Multiply microphone PCM by this factor before ASR (default: from config)",
+    )
+    parser.add_argument(
         "--hotkey-backend",
         choices=["evdev", "ipc"],
         default=None,
@@ -159,6 +193,11 @@ def main():
         "--hotkey-device",
         default=None,
         help="Explicit /dev/input/eventX path for hotkey capture",
+    )
+    parser.add_argument(
+        "--hotkey-listen-all-devices",
+        action="store_true",
+        help="Listen to all matching keyboard devices (can cause duplicate hotkey events)",
     )
     parser.add_argument(
         "--output-mode",
@@ -185,16 +224,45 @@ def main():
 
     if args.device:
         config.device = args.device
+    if args.right_context is not None:
+        config.right_context = int(args.right_context)
+    if args.audio_device is not None:
+        # Accept numeric indexes or raw device names
+        config.audio_device = (
+            int(args.audio_device) if str(args.audio_device).isdigit() else args.audio_device
+        )
+    if args.input_gain is not None:
+        config.input_gain = float(args.input_gain)
     if args.hotkey_backend:
         config.hotkey_backend = args.hotkey_backend
     if args.hotkey:
         config.hotkey = args.hotkey
     if args.hotkey_device:
         config.hotkey_device = args.hotkey_device
+    if args.hotkey_listen_all_devices:
+        config.hotkey_listen_all_devices = True
     if args.output_mode:
         config.output_mode = args.output_mode
     if args.control_socket:
         config.control_socket = args.control_socket
+
+    if args.list_audio_devices:
+        try:
+            import sounddevice as sd
+
+            devices = sd.query_devices()
+            print("Audio devices:")
+            for idx, dev in enumerate(devices):
+                if dev.get("max_input_channels", 0) > 0:
+                    print(
+                        f"[{idx}] {dev['name']} "
+                        f"(in={dev['max_input_channels']}, "
+                        f"default_sr={dev['default_samplerate']})"
+                    )
+        except Exception as e:
+            print(f"ERROR: Could not list audio devices: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
 
     # Socket control command mode (for Hyprland bind/bindr)
     if args.control:
