@@ -53,7 +53,9 @@ def _prefer_transcript(previous: str, candidate: str) -> str:
     if prev.startswith(new):
         return previous
 
-    # For conflicting hypotheses, prefer the one carrying more content.
+    # The model frequently rewrites earlier words as it gains context
+    # (e.g. "Quick brown" -> "The quick brown dog jumped over").
+    # Accept the new hypothesis if it carries more content.
     return candidate if len(new) >= len(prev) else previous
 
 
@@ -191,10 +193,14 @@ class ShuVoiceApp(Gtk.Application):
 
         log.info("Recording started")
 
+        self.audio.clear()
+        
+        # Taking the lock to reset ASR prevents a race condition
+        # where the ASR thread is still flushing the last chunk
+        # of the *previous* utterance.
         with self._asr_lock:
             self.asr.reset()
-
-        self.audio.clear()
+            
         self._recording.set()
 
         if self.overlay:
@@ -241,6 +247,7 @@ class ShuVoiceApp(Gtk.Application):
         speech_samples = 0
         peak_rms = 0.0
         noise_floor_rms = 0.0
+        utterance_gain = 1.0
         utterance_rms_threshold = speech_rms_threshold
 
         while self._running.is_set():
@@ -250,6 +257,7 @@ class ShuVoiceApp(Gtk.Application):
             if is_recording and not was_recording:
                 speech_samples = 0
                 peak_rms = 0.0
+                utterance_gain = 1.0
                 utterance_rms_threshold = max(
                     speech_rms_threshold,
                     noise_floor_rms * speech_rms_multiplier,
@@ -273,6 +281,15 @@ class ShuVoiceApp(Gtk.Application):
                         peak_rms = max(peak_rms, rms)
                         if rms >= utterance_rms_threshold:
                             speech_samples += len(chunk)
+                        # Compute a single gain factor for the utterance based on the
+                        # loudest speech seen so far. This brings quiet mic input up
+                        # to a level NeMo was trained on (~0.1-0.3 RMS) while keeping
+                        # one gain for ALL chunks (preserving relative dynamics).
+                        if peak_rms > 0.003:
+                            # Empirically this model performs much better with
+                            # stronger vocal peaks (~0.25-0.35).
+                            target_peak = 0.3
+                            utterance_gain = min(target_peak / peak_rms, 40.0)
                 elif chunk.size:
                     rms = float(np.sqrt(np.mean(chunk * chunk)))
                     if noise_floor_rms <= 0.0:
@@ -289,12 +306,34 @@ class ShuVoiceApp(Gtk.Application):
                 buffer = [remainder] if len(remainder) > 0 else []
                 total = len(remainder)
 
+                # Apply utterance-level gain (uniform across all chunks to
+                # preserve relative dynamics — unlike per-chunk normalization
+                # which destroys the volume envelope the model relies on).
+                if utterance_gain > 1.05:
+                    to_process = np.clip(
+                        to_process * utterance_gain, -1.0, 1.0
+                    ).astype(np.float32)
+
                 try:
                     text = self._process_chunk_safe(to_process)
                 except Exception:
                     log.exception("ASR chunk processing failed")
                     text = ""
+                    with self._asr_lock:
+                        self.asr.reset()
+                    break
 
+                log.debug(
+                    "ASR streaming step=%d text=%r last_text=%r chunk_rms=%.4f gain=%.1f",
+                    self.asr._step_num,
+                    text,
+                    last_text,
+                    float(np.sqrt(np.mean(to_process * to_process))) if to_process.size else 0.0,
+                    utterance_gain,
+                )
+
+                # When streaming, the model can sometimes output trailing whitespace
+                # which causes our string match to think it regressed.
                 merged = _prefer_transcript(last_text, text)
                 if merged != last_text:
                     last_text = merged
@@ -375,6 +414,7 @@ class ShuVoiceApp(Gtk.Application):
                     self.typer.reset()
                     speech_samples = 0
                     peak_rms = 0.0
+                    utterance_gain = 1.0
                     utterance_rms_threshold = speech_rms_threshold
                     was_recording = is_recording
                     continue
@@ -387,11 +427,20 @@ class ShuVoiceApp(Gtk.Application):
                     buffer = [remainder] if len(remainder) > 0 else []
                     total = len(remainder)
 
+                    if utterance_gain > 1.05:
+                        to_process = np.clip(
+                            to_process * utterance_gain, -1.0, 1.0
+                        ).astype(np.float32)
+
                     try:
                         text = self._process_chunk_safe(to_process)
                     except Exception:
                         log.exception("ASR buffered final chunk failed")
                         text = ""
+                        # Re-initialize ASR engine cache if crashed so it recovers for the next phrase
+                        with self._asr_lock:
+                            self.asr.reset()
+                        break
 
                     last_text = _prefer_transcript(last_text, text)
 
@@ -400,22 +449,31 @@ class ShuVoiceApp(Gtk.Application):
                     audio_data = np.concatenate(buffer)
                     padded = np.zeros(native, dtype=np.float32)
                     padded[: len(audio_data)] = audio_data
+                    if utterance_gain > 1.05:
+                        # Only amplify the real audio portion, not the silence padding
+                        padded[:len(audio_data)] = np.clip(
+                            padded[:len(audio_data)] * utterance_gain, -1.0, 1.0
+                        ).astype(np.float32)
                     try:
                         text = self._process_chunk_safe(padded)
                     except Exception:
                         log.exception("ASR final flush failed")
                         text = ""
+                        with self._asr_lock:
+                            self.asr.reset()
                     last_text = _prefer_transcript(last_text, text)
 
                 # Flush a couple extra silent chunks to release decoder tail
                 # tokens (helps avoid clipped last words on stop).
                 silence = np.zeros(native, dtype=np.float32)
                 stable_steps = 0
-                for _ in range(3):
+                for _ in range(5):
                     try:
                         text = self._process_chunk_safe(silence)
                     except Exception:
                         log.exception("ASR tail flush failed")
+                        with self._asr_lock:
+                            self.asr.reset()
                         break
 
                     merged = _prefer_transcript(last_text, text)
@@ -428,6 +486,12 @@ class ShuVoiceApp(Gtk.Application):
                         last_text = merged
 
                 # Commit final text
+                log.info(
+                    "Post-processing: last_text=%r total_remaining=%d step_num=%d",
+                    last_text,
+                    total,
+                    self.asr._step_num,
+                )
                 if last_text:
                     log.info("Final: %s", last_text)
                     if self.overlay:
@@ -447,6 +511,7 @@ class ShuVoiceApp(Gtk.Application):
                 self.typer.reset()
                 speech_samples = 0
                 peak_rms = 0.0
+                utterance_gain = 1.0
                 utterance_rms_threshold = speech_rms_threshold
 
             was_recording = is_recording

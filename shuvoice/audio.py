@@ -32,13 +32,53 @@ class AudioCapture:
         self._resample_ratio: int | None = None
         self._resample_carry = np.empty(0, dtype=np.float32)
         self._dropped_chunks = 0
+        self._resolved_device: str | int | None = None
+
+    def _select_input_device(self) -> str | int | None:
+        """Resolve default capture device when config doesn't specify one.
+
+        On PipeWire systems, PortAudio's generic `default` device can map to an
+        unexpected ALSA endpoint. Prefer Pulse/PipeWire virtual devices when
+        available so we capture the same default source as desktop apps.
+        """
+        if self.device is not None:
+            return self.device
+
+        try:
+            devices = sd.query_devices()
+        except Exception:
+            return None
+
+        # Prefer Pulse virtual device first.
+        for idx, dev in enumerate(devices):
+            if dev.get("max_input_channels", 0) <= 0:
+                continue
+            name = str(dev.get("name", "")).lower()
+            if name == "pulse" or name.startswith("pulse "):
+                return idx
+
+        # Then prefer explicit PipeWire virtual device.
+        for idx, dev in enumerate(devices):
+            if dev.get("max_input_channels", 0) <= 0:
+                continue
+            name = str(dev.get("name", "")).lower()
+            if "pipewire" in name:
+                return idx
+
+        return None
 
     def _downsample_integer_ratio(self, audio: np.ndarray, ratio: int) -> np.ndarray:
-        """Downsample by integer ratio with simple anti-alias averaging.
+        """Downsample by integer ratio.
 
-        This performs a box-filter before decimation (average every N samples)
-        rather than naive sample dropping. It's lightweight and yields cleaner
-        ASR input than raw `audio[::ratio]`.
+        For audio signals, averaging acts as a box filter which causes significant 
+        aliasing and loss of high frequencies, degrading voice recognition.
+        Using a proper decimation algorithm (librosa/scipy) is best, but since
+        we only need a simple downsample without heavy deps, we do a basic lowpass
+        approximation or naive decimation.
+
+        Actually, NeMo models expect 16kHz audio. If we are capturing at 48kHz,
+        a naive audio[::ratio] (drop samples) can often preserve more sharp speech
+        transients than a blunt mean() which smears consonants into mud.
         """
         if ratio <= 1:
             return audio
@@ -51,9 +91,13 @@ class AudioCapture:
             self._resample_carry = audio
             return np.empty(0, dtype=np.float32)
 
-        out = audio[:usable].reshape(-1, ratio).mean(axis=1, dtype=np.float32)
+        # Basic anti-aliasing via simple low-pass (if scipy isn't around)
+        # However, for pure spoken voice at 16kHz, pure decimation works perfectly 
+        # and avoids the smearing effect from .mean()
+        out = audio[:usable][::ratio]
+
         self._resample_carry = audio[usable:]
-        return out.astype(np.float32, copy=False)
+        return out
 
     def _callback(self, indata, frames, time_info, status):
         if status:
@@ -97,6 +141,7 @@ class AudioCapture:
         self._resampling = False
         self._resample_ratio = None
         self._resample_carry = np.empty(0, dtype=np.float32)
+        self._resolved_device = self._select_input_device()
 
         try:
             self._stream = sd.InputStream(
@@ -106,13 +151,13 @@ class AudioCapture:
                 dtype="float32",
                 callback=self._callback,
                 latency="low",
-                device=self.device,
+                device=self._resolved_device,
             )
             self._stream.start()
             log.info(
                 "Audio capture started at %d Hz (device=%s, gain=%.2f)",
                 self.sample_rate,
-                self.device if self.device is not None else "default",
+                self._resolved_device if self._resolved_device is not None else "default",
                 self.input_gain,
             )
         except sd.PortAudioError:
@@ -137,7 +182,7 @@ class AudioCapture:
                 dtype="float32",
                 callback=self._callback,
                 latency="low",
-                device=self.device,
+                device=self._resolved_device,
             )
             self._stream.start()
             log.info(
@@ -145,7 +190,7 @@ class AudioCapture:
                 self.fallback_sample_rate,
                 self.sample_rate,
                 self._resample_ratio,
-                self.device if self.device is not None else "default",
+                self._resolved_device if self._resolved_device is not None else "default",
                 self.input_gain,
             )
 

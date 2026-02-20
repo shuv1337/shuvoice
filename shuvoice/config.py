@@ -34,7 +34,9 @@ class Config:
 
     # ASR
     model_name: str = "nvidia/nemotron-speech-streaming-en-0.6b"
-    right_context: int = 1  # 0=80ms, 1=160ms, 6=560ms, 13=1120ms
+    # 13 gives the highest streaming accuracy (at the cost of latency).
+    # Lower values are snappier but significantly reduce recognition quality.
+    right_context: int = 13  # 0=80ms, 1=160ms, 6=560ms, 13=1120ms
     device: str = "cuda"
     use_cuda_graph_decoder: bool = False
 

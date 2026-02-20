@@ -145,9 +145,22 @@ class ASREngine:
         cache_last_channel, cache_last_time, cache_last_channel_len = (
             self.model.encoder.get_initial_cache_state(batch_size=1)
         )
-        self._cache_last_channel = cache_last_channel
-        self._cache_last_time = cache_last_time
-        self._cache_last_channel_len = cache_last_channel_len
+        
+        # Ensure state tensors are actually moved to the correct device
+        if hasattr(cache_last_channel, 'to'):
+            self._cache_last_channel = cache_last_channel.to(self.device).clone()
+        else:
+            self._cache_last_channel = cache_last_channel
+            
+        if hasattr(cache_last_time, 'to'):
+            self._cache_last_time = cache_last_time.to(self.device).clone()
+        else:
+            self._cache_last_time = cache_last_time
+            
+        if hasattr(cache_last_channel_len, 'to'):
+            self._cache_last_channel_len = cache_last_channel_len.to(self.device).clone()
+        else:
+            self._cache_last_channel_len = cache_last_channel_len
 
         # NeMo API compatibility: older versions expose feat_out, newer ones use nfilt.
         featurizer = self.model.preprocessor.featurizer
@@ -198,25 +211,31 @@ class ASREngine:
                 else self.model.encoder.streaming_cfg.drop_extra_pre_encoded
             )
 
-            (
-                self._pred_out_stream,
-                transcribed_texts,
-                self._cache_last_channel,
-                self._cache_last_time,
-                self._cache_last_channel_len,
-                self._previous_hypotheses,
-            ) = self.model.conformer_stream_step(
-                processed_signal=processed_signal,
-                processed_signal_length=processed_signal_length,
-                cache_last_channel=self._cache_last_channel,
-                cache_last_time=self._cache_last_time,
-                cache_last_channel_len=self._cache_last_channel_len,
-                keep_all_outputs=False,
-                previous_hypotheses=self._previous_hypotheses,
-                previous_pred_out=self._pred_out_stream,
-                drop_extra_pre_encoded=drop,
-                return_transcription=True,
-            )
+            try:
+                (
+                    self._pred_out_stream,
+                    transcribed_texts,
+                    self._cache_last_channel,
+                    self._cache_last_time,
+                    self._cache_last_channel_len,
+                    self._previous_hypotheses,
+                ) = self.model.conformer_stream_step(
+                    processed_signal=processed_signal,
+                    processed_signal_length=processed_signal_length,
+                    cache_last_channel=self._cache_last_channel,
+                    cache_last_time=self._cache_last_time,
+                    cache_last_channel_len=self._cache_last_channel_len,
+                    keep_all_outputs=False,
+                    previous_hypotheses=self._previous_hypotheses,
+                    previous_pred_out=self._pred_out_stream,
+                    drop_extra_pre_encoded=drop,
+                    return_transcription=True,
+                )
+            except Exception as e:
+                # If the cache gets corrupted due to race conditions or bad data,
+                # NeMo will throw cryptic shape errors here. Re-raise cleanly.
+                log.exception("NeMo stream step failed. Model state may be corrupted.")
+                raise e
 
             self._step_num += 1
             if not transcribed_texts:
