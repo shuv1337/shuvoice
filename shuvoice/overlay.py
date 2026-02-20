@@ -81,6 +81,9 @@ class CaptionOverlay:
             f"  font-size: {cfg.font_size}px;\n"
             f"  font-weight: bold;\n"
             f"}}\n"
+            f".recording-icon {{\n"
+            f"  color: white;\n"
+            f"}}\n"
         )
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
@@ -89,8 +92,22 @@ class CaptionOverlay:
         )
 
     def _setup_widgets(self):
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        # Use a horizontal box to place icon next to text
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         box.add_css_class("caption-box")
+        box.set_spacing(12)
+
+        # Active microphone icon
+        icon = Gtk.Image.new_from_icon_name("microphone-sensitivity-high-symbolic")
+        # Scale icon with font size (roughly 1.2x)
+        icon_size = int(self._config.font_size * 1.2)
+        icon.set_pixel_size(icon_size)
+        icon.set_valign(Gtk.Align.CENTER)
+        icon.add_css_class("recording-icon")
+        # Accessible name for screen readers
+        icon.get_accessible().set_label("Microphone active")
+
+        box.append(icon)
 
         self._label = Gtk.Label(label="")
         self._label.add_css_class("caption-label")
