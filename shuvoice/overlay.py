@@ -104,8 +104,9 @@ class CaptionOverlay:
         icon.set_pixel_size(icon_size)
         icon.set_valign(Gtk.Align.CENTER)
         icon.add_css_class("recording-icon")
-        # Accessible name for screen readers
-        icon.get_accessible().set_label("Microphone active")
+        # Avoid PyGObject API mismatch across GTK builds (get_accessible may not exist)
+        # Keep a human hint without crashing the overlay init.
+        icon.set_tooltip_text("Microphone active")
 
         box.append(icon)
 
