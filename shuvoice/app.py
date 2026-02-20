@@ -53,6 +53,15 @@ def _prefer_transcript(previous: str, candidate: str) -> str:
     if prev.startswith(new):
         return previous
 
+    # Streaming models with finite context windows can drop the prefix of a
+    # long utterance. Try to stitch the candidate to the previous text if there
+    # is a significant overlap (at least 5 chars to avoid false positives).
+    min_len = min(len(prev), len(new))
+    for i in range(min_len, 5, -1):
+        if prev.endswith(new[:i]):
+            stitched = prev + new[i:]
+            return stitched
+
     # The model frequently rewrites earlier words as it gains context
     # (e.g. "Quick brown" -> "The quick brown dog jumped over").
     # Accept the new hypothesis if it carries more content.
@@ -324,10 +333,10 @@ class ShuVoiceApp(Gtk.Application):
                     break
 
                 log.debug(
-                    "ASR streaming step=%d text=%r last_text=%r chunk_rms=%.4f gain=%.1f",
+                    "ASR step=%d queue_size=%d raw_text=%r chunk_rms=%.4f gain=%.1f",
                     self.asr._step_num,
+                    self.audio.queue.qsize(),
                     text,
-                    last_text,
                     float(np.sqrt(np.mean(to_process * to_process))) if to_process.size else 0.0,
                     utterance_gain,
                 )
@@ -336,6 +345,7 @@ class ShuVoiceApp(Gtk.Application):
                 # which causes our string match to think it regressed.
                 merged = _prefer_transcript(last_text, text)
                 if merged != last_text:
+                    log.debug("Transcript updated: %r -> %r", last_text, merged)
                     last_text = merged
                     if self.overlay:
                         self.overlay.set_text(last_text)

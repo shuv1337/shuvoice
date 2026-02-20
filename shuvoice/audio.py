@@ -26,7 +26,7 @@ class AudioCapture:
         self.device = device
         self.input_gain = float(input_gain)
 
-        self.queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=200)
+        self.queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=0)
         self._stream: sd.InputStream | None = None
         self._resampling = False
         self._resample_ratio: int | None = None
