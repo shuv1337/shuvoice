@@ -78,3 +78,24 @@ def test_config_helpers_create_dirs(monkeypatch, tmp_path: Path):
 
     assert cdir.exists() and cdir.is_dir()
     assert ddir.exists() and ddir.is_dir()
+
+
+def test_native_chunk_samples_scaling():
+    """Verify chunk size scales with right_context for low latency."""
+
+    # Verify dynamic chunk sizing
+    c = Config(right_context=0)
+    assert c.native_chunk_samples == 1280
+
+    c = Config(right_context=1)
+    assert c.native_chunk_samples == 2560
+
+    c = Config(right_context=6)
+    assert c.native_chunk_samples == 8960
+
+    c = Config(right_context=13)
+    assert c.native_chunk_samples == 17920
+
+    # Fallback/Default
+    c = Config(right_context=999)
+    assert c.native_chunk_samples == 17920
