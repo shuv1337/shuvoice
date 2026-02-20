@@ -6,6 +6,9 @@ dist/
 build/
 *.egg
 .venv/
+.venv*/
 venv/
+.pytest_cache/
+.pi/
 *.so
 .mypy_cache/
