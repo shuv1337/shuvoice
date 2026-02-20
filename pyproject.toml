@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "shuvoice"
 version = "0.1.0"
 description = "Streaming speech-to-text overlay for Hyprland"
+readme = "README.md"
 requires-python = ">=3.10,<3.13"
 license = "MIT"
 dependencies = [
@@ -34,6 +35,10 @@ dev = [
 
 [project.scripts]
 shuvoice = "shuvoice.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/shuv1337/shuvoice"
+Repository = "https://github.com/shuv1337/shuvoice"
 
 [tool.setuptools.packages.find]
 include = ["shuvoice*"]
