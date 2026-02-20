@@ -93,7 +93,7 @@ python -m shuvoice --output-mode streaming_partial
 python -m shuvoice --hotkey-backend ipc
 python -m shuvoice --list-audio-devices
 python -m shuvoice --audio-device 2 --input-gain 1.5
-python -m shuvoice --right-context 6
+python -m shuvoice --right-context 13
 ```
 
 ## systemd user service
@@ -175,7 +175,7 @@ use_cuda_graph_decoder = false
   - `sudo pacman -S wtype`
 - Recognition quality is poor / start-stop triggers repeatedly
   - Set a single keyboard device in config (`hotkey_device=/dev/input/eventX`) or keep `hotkey_listen_all_devices=false`.
-  - Increase ASR context for accuracy (eg. `right_context=6`).
+  - Increase ASR context for accuracy (eg. `right_context=13`, with higher latency).
   - Select the correct mic (`python -m shuvoice --list-audio-devices`, then set `audio_device`). Prefer device *name* over numeric index, because indices can change between runs.
   - Increase `input_gain` moderately (eg. `1.3` to `1.8`) if your mic is too quiet.
   - If silent presses still produce phantom text (eg. "thank you"), raise `silence_rms_threshold` slightly (eg. `0.010` to `0.015`) and/or increase `silence_rms_multiplier` (eg. `2.0`) in config.

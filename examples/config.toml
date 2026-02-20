@@ -17,7 +17,7 @@ min_speech_ms = 80
 
 [asr]
 model_name = "nvidia/nemotron-speech-streaming-en-0.6b"
-right_context = 1
+right_context = 13
 # cuda | cpu
 device = "cuda"
 # Keep false unless you have verified CUDA graph decoder stability on your stack

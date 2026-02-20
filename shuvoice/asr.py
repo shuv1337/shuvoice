@@ -14,7 +14,7 @@ class ASREngine:
     def __init__(
         self,
         model_name: str = "nvidia/nemotron-speech-streaming-en-0.6b",
-        right_context: int = 1,
+        right_context: int = 13,
         device: str = "cuda",
         use_cuda_graph_decoder: bool = False,
     ):
