@@ -26,7 +26,13 @@ VALID_COMMANDS = {"start", "stop", "toggle", "status", "ping"}
 def default_control_socket_path() -> Path:
     runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
     base = runtime_dir / "shuvoice"
-    base.mkdir(parents=True, exist_ok=True)
+
+    old_umask = os.umask(0o077)
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    finally:
+        os.umask(old_umask)
+
     return base / "control.sock"
 
 
@@ -59,7 +65,12 @@ class ControlServer:
         if self._thread and self._thread.is_alive():
             return
 
-        self.socket_path.parent.mkdir(parents=True, exist_ok=True)
+        old_umask = os.umask(0o077)
+        try:
+            self.socket_path.parent.mkdir(parents=True, exist_ok=True)
+        finally:
+            os.umask(old_umask)
+
         self._running.set()
         self._thread = threading.Thread(
             target=self._run,
@@ -96,7 +107,12 @@ class ControlServer:
         self._server = server
 
         try:
-            server.bind(str(self.socket_path))
+            old_umask = os.umask(0o077)
+            try:
+                server.bind(str(self.socket_path))
+            finally:
+                os.umask(old_umask)
+
             server.listen(8)
             server.settimeout(0.5)
             log.info("Control socket listening: %s", self.socket_path)
