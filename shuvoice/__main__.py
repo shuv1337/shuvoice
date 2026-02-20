@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import logging
+import os
 import shutil
 import sys
 from ctypes import CDLL
@@ -24,10 +25,8 @@ def _run_preflight(config) -> bool:
 
     def check_python() -> str:
         major, minor = sys.version_info[:2]
-        if (major, minor) < (3, 10) or (major, minor) >= (3, 13):
-            raise RuntimeError(
-                f"Unsupported Python {major}.{minor}; expected >=3.10,<3.13"
-            )
+        if (major, minor) < (3, 10):
+            raise RuntimeError(f"Unsupported Python {major}.{minor}; expected >=3.10")
         return f"Python {major}.{minor} is supported"
 
     def check_import(module: str) -> Callable[[], str]:
@@ -213,9 +212,15 @@ def main():
     )
     args = parser.parse_args()
 
+    journald = bool(os.environ.get("JOURNAL_STREAM"))
+    log_format = (
+        "%(levelname)s %(name)s: %(message)s"
+        if journald
+        else "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(levelname)s %(name)s: %(message)s",
+        format=log_format,
     )
 
     from .config import Config
@@ -297,8 +302,7 @@ def main():
         CDLL("libgtk4-layer-shell.so")
     except OSError:
         print(
-            "ERROR: libgtk4-layer-shell.so not found.\n"
-            "Install it with: pacman -S gtk4-layer-shell",
+            "ERROR: libgtk4-layer-shell.so not found.\nInstall it with: pacman -S gtk4-layer-shell",
             file=sys.stderr,
         )
         sys.exit(1)

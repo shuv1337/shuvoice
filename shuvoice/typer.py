@@ -8,6 +8,8 @@ import time
 
 log = logging.getLogger(__name__)
 
+_BACKSPACE_BATCH_SIZE = 50
+
 
 class StreamingTyper:
     """Inject text into the focused Wayland window.
@@ -41,26 +43,34 @@ class StreamingTyper:
                 if attempt == attempts:
                     log.error("%s failed after %d attempt(s): %s", op, attempts, e)
                     return False
-                log.warning(
-                    "%s attempt %d/%d failed: %s",
-                    op,
-                    attempt,
-                    attempts,
-                    e,
-                )
+                log.warning("%s attempt %d/%d failed: %s", op, attempt, attempts, e)
                 if self.retry_delay_s:
                     time.sleep(self.retry_delay_s)
 
         return False
 
-    def _backspace_partial(self) -> bool:
-        if self.last_partial_len <= 0:
+    @staticmethod
+    def _backspace_args(count: int) -> list[str]:
+        args = ["wtype"]
+        for _ in range(count):
+            args.extend(["-k", "BackSpace"])
+        return args
+
+    def _send_backspaces(self, count: int, op: str) -> bool:
+        if count <= 0:
             return True
 
-        args = ["wtype"]
-        for _ in range(self.last_partial_len):
-            args.extend(["-k", "BackSpace"])
-        return self._run(args, "wtype backspace")
+        remaining = count
+        while remaining > 0:
+            batch = min(remaining, _BACKSPACE_BATCH_SIZE)
+            ok = self._run(self._backspace_args(batch), op)
+            if not ok:
+                return False
+            remaining -= batch
+        return True
+
+    def _backspace_partial(self) -> bool:
+        return self._send_backspaces(self.last_partial_len, "wtype backspace")
 
     def _type_direct(self, text: str) -> bool:
         if not text:
@@ -75,7 +85,6 @@ class StreamingTyper:
         if not copied:
             return False
 
-        # Explicit key press for v under Ctrl modifier.
         return self._run(
             ["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"],
             "wtype ctrl+v",
@@ -103,26 +112,27 @@ class StreamingTyper:
         if had_content:
             self._run(["wl-copy", "--", content], "wl-copy restore", attempts=1)
         else:
-            # Clear clipboard if there was no prior text content.
             self._run(["wl-copy", "--clear"], "wl-copy clear", attempts=1)
 
     def update_partial(self, new_text: str):
-        """Replace previous partial text with new partial text via backspace+retype."""
+        """Replace previous partial text with new partial text."""
         if not new_text and self.last_partial_len == 0:
             return
 
-        args = ["wtype"]
-        for _ in range(self.last_partial_len):
-            args.extend(["-k", "BackSpace"])
-        if new_text:
-            args.extend(["--", new_text])
-
-        ok = self._run(args, "wtype partial update")
-        if ok:
-            self.last_partial_len = len(new_text)
-        else:
-            # We no longer know editor state reliably.
+        backspaced = self._send_backspaces(self.last_partial_len, "wtype partial backspace")
+        if not backspaced:
             self.last_partial_len = 0
+            return
+
+        if new_text:
+            typed = self._run(["wtype", "--", new_text], "wtype partial type")
+            if typed:
+                self.last_partial_len = len(new_text)
+            else:
+                self.last_partial_len = 0
+            return
+
+        self.last_partial_len = 0
 
     def commit_final(self, final_text: str):
         """Erase partial text, then paste final text (with direct-typing fallback)."""

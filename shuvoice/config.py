@@ -28,6 +28,7 @@ class Config:
     fallback_sample_rate: int = 48000
     audio_device: str | int | None = None  # sounddevice device name/index
     input_gain: float = 1.0  # multiply PCM before ASR (eg. 1.5)
+    audio_queue_max_size: int = 200
     silence_rms_threshold: float = 0.008  # absolute floor for speech RMS gating
     silence_rms_multiplier: float = 1.8  # dynamic threshold = noise_floor * multiplier
     min_speech_ms: int = 80  # minimum above-threshold speech before committing text
@@ -60,6 +61,18 @@ class Config:
     preserve_clipboard: bool = False
     typing_retry_attempts: int = 2
     typing_retry_delay_ms: int = 40
+    auto_capitalize: bool = True
+
+    # Audio feedback
+    audio_feedback: bool = True
+    feedback_start_freq: int = 880
+    feedback_stop_freq: int = 660
+    feedback_duration_ms: int = 70
+    feedback_volume: float = 0.08
+
+    def __post_init__(self):
+        if int(self.audio_queue_max_size) < 1:
+            raise ValueError("audio_queue_max_size must be >= 1")
 
     @property
     def chunk_samples(self) -> int:
@@ -105,7 +118,6 @@ class Config:
         with open(config_file, "rb") as f:
             data = tomllib.load(f)
 
-        # Flatten nested sections into a single dict
         flat: dict = {}
         for key, value in data.items():
             if isinstance(value, dict):

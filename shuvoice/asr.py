@@ -43,8 +43,7 @@ class ASREngine:
             import torch  # noqa: F401
         except Exception as e:
             errors.append(
-                f"Missing PyTorch dependency: {e}. "
-                "Install torch (or python-pytorch-cuda on Arch)."
+                f"Missing PyTorch dependency: {e}. Install torch (or python-pytorch-cuda on Arch)."
             )
 
         try:
@@ -145,19 +144,19 @@ class ASREngine:
         cache_last_channel, cache_last_time, cache_last_channel_len = (
             self.model.encoder.get_initial_cache_state(batch_size=1)
         )
-        
+
         # Ensure state tensors are actually moved to the correct device
-        if hasattr(cache_last_channel, 'to'):
+        if hasattr(cache_last_channel, "to"):
             self._cache_last_channel = cache_last_channel.to(self.device).clone()
         else:
             self._cache_last_channel = cache_last_channel
-            
-        if hasattr(cache_last_time, 'to'):
+
+        if hasattr(cache_last_time, "to"):
             self._cache_last_time = cache_last_time.to(self.device).clone()
         else:
             self._cache_last_time = cache_last_time
-            
-        if hasattr(cache_last_channel_len, 'to'):
+
+        if hasattr(cache_last_channel_len, "to"):
             self._cache_last_channel_len = cache_last_channel_len.to(self.device).clone()
         else:
             self._cache_last_channel_len = cache_last_channel_len
@@ -199,9 +198,7 @@ class ASREngine:
 
             # Prepend pre-encode cache
             pre_encode_size = self._pre_encode_cache.shape[-1]
-            processed_signal = self._torch.cat(
-                [self._pre_encode_cache, processed_signal], dim=-1
-            )
+            processed_signal = self._torch.cat([self._pre_encode_cache, processed_signal], dim=-1)
             processed_signal_length += pre_encode_size
             self._pre_encode_cache = processed_signal[:, :, -pre_encode_size:].clone()
 

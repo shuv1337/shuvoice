@@ -10,6 +10,15 @@ import sounddevice as sd
 
 log = logging.getLogger(__name__)
 
+DEFAULT_AUDIO_QUEUE_MAX_SIZE = 200
+
+
+def audio_rms(audio: np.ndarray) -> float:
+    """Return RMS for a mono audio chunk."""
+    if audio.size == 0:
+        return 0.0
+    return float(np.sqrt(np.mean(audio * audio)))
+
 
 class AudioCapture:
     def __init__(
@@ -19,6 +28,7 @@ class AudioCapture:
         fallback_sample_rate: int = 48000,
         device: str | int | None = None,
         input_gain: float = 1.0,
+        audio_queue_max_size: int = DEFAULT_AUDIO_QUEUE_MAX_SIZE,
     ):
         self.sample_rate = sample_rate
         self.chunk_samples = chunk_samples
@@ -26,7 +36,8 @@ class AudioCapture:
         self.device = device
         self.input_gain = float(input_gain)
 
-        self.queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=0)
+        queue_max_size = max(1, int(audio_queue_max_size))
+        self.queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=queue_max_size)
         self._stream: sd.InputStream | None = None
         self._resampling = False
         self._resample_ratio: int | None = None
@@ -49,7 +60,6 @@ class AudioCapture:
         except Exception:
             return None
 
-        # Prefer Pulse virtual device first.
         for idx, dev in enumerate(devices):
             if dev.get("max_input_channels", 0) <= 0:
                 continue
@@ -57,7 +67,6 @@ class AudioCapture:
             if name == "pulse" or name.startswith("pulse "):
                 return idx
 
-        # Then prefer explicit PipeWire virtual device.
         for idx, dev in enumerate(devices):
             if dev.get("max_input_channels", 0) <= 0:
                 continue
@@ -68,18 +77,7 @@ class AudioCapture:
         return None
 
     def _downsample_integer_ratio(self, audio: np.ndarray, ratio: int) -> np.ndarray:
-        """Downsample by integer ratio.
-
-        For audio signals, averaging acts as a box filter which causes significant 
-        aliasing and loss of high frequencies, degrading voice recognition.
-        Using a proper decimation algorithm (librosa/scipy) is best, but since
-        we only need a simple downsample without heavy deps, we do a basic lowpass
-        approximation or naive decimation.
-
-        Actually, NeMo models expect 16kHz audio. If we are capturing at 48kHz,
-        a naive audio[::ratio] (drop samples) can often preserve more sharp speech
-        transients than a blunt mean() which smears consonants into mud.
-        """
+        """Downsample by integer ratio using decimation."""
         if ratio <= 1:
             return audio
 
@@ -91,11 +89,7 @@ class AudioCapture:
             self._resample_carry = audio
             return np.empty(0, dtype=np.float32)
 
-        # Basic anti-aliasing via simple low-pass (if scipy isn't around)
-        # However, for pure spoken voice at 16kHz, pure decimation works perfectly 
-        # and avoids the smearing effect from .mean()
         out = audio[:usable][::ratio]
-
         self._resample_carry = audio[usable:]
         return out
 
@@ -103,7 +97,6 @@ class AudioCapture:
         if status:
             log.warning("Audio status: %s", status)
 
-        # Mono float32, must copy — sounddevice reuses callback buffer.
         audio = indata[:, 0].copy()
 
         if self._resampling:
@@ -118,7 +111,6 @@ class AudioCapture:
         try:
             self.queue.put_nowait(audio)
         except queue.Full:
-            # Keep latency low by dropping oldest data and retaining freshest chunk.
             self._dropped_chunks += 1
             try:
                 self.queue.get_nowait()

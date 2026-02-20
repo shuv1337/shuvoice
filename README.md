@@ -17,7 +17,7 @@ Core pipeline + production hardening are implemented:
 
 ### Python
 
-- Python `>=3.10,<3.13`
+- Python `>=3.10`
 
 ### System packages (Arch)
 

@@ -23,23 +23,62 @@ log = logging.getLogger(__name__)
 VALID_COMMANDS = {"start", "stop", "toggle", "status", "ping"}
 
 
-def default_control_socket_path() -> Path:
-    runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
-    base = runtime_dir / "shuvoice"
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
+
+def _allowed_control_roots() -> list[Path]:
+    roots: list[Path] = [Path("/tmp").resolve()]
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime_dir:
+        roots.insert(0, Path(runtime_dir).resolve())
+    return roots
+
+
+def _ensure_secure_directory(path: Path):
     old_umask = os.umask(0o077)
     try:
-        base.mkdir(parents=True, exist_ok=True)
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
     finally:
         os.umask(old_umask)
 
+    try:
+        path.chmod(0o700)
+    except OSError:
+        log.debug("Could not chmod %s to 0700", path)
+
+
+def default_control_socket_path() -> Path:
+    runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")).resolve()
+    base = runtime_dir / "shuvoice"
+    _ensure_secure_directory(base)
     return base / "control.sock"
 
 
 def resolve_control_socket_path(path: str | None) -> Path:
-    if path:
-        return Path(path)
-    return default_control_socket_path()
+    if not path:
+        return default_control_socket_path()
+
+    raw = Path(path)
+    if not raw.is_absolute():
+        raise ValueError("Control socket path must be absolute")
+    if path.endswith(os.sep) or (raw.exists() and raw.is_dir()):
+        raise ValueError("Control socket path must be a .sock file, not a directory")
+    if raw.suffix != ".sock":
+        raise ValueError("Control socket path must end with '.sock'")
+
+    parent = raw.parent.resolve()
+    allowed_roots = _allowed_control_roots()
+    if not any(_is_within(parent, root) for root in allowed_roots):
+        roots_text = ", ".join(str(root) for root in allowed_roots)
+        raise ValueError(f"Control socket parent must live under: {roots_text}")
+
+    _ensure_secure_directory(parent)
+    return parent / raw.name
 
 
 class ControlServer:
@@ -65,11 +104,7 @@ class ControlServer:
         if self._thread and self._thread.is_alive():
             return
 
-        old_umask = os.umask(0o077)
-        try:
-            self.socket_path.parent.mkdir(parents=True, exist_ok=True)
-        finally:
-            os.umask(old_umask)
+        _ensure_secure_directory(self.socket_path.parent)
 
         self._running.set()
         self._thread = threading.Thread(
@@ -82,7 +117,6 @@ class ControlServer:
     def stop(self):
         self._running.clear()
 
-        # Wake accept() so the server can terminate promptly.
         try:
             send_control_command("ping", str(self.socket_path), timeout=0.2)
         except Exception:
@@ -182,9 +216,7 @@ def send_control_command(
     try:
         client.connect(str(path))
     except FileNotFoundError as e:
-        raise RuntimeError(
-            f"Control socket not found at {path}. Is shuvoice running?"
-        ) from e
+        raise RuntimeError(f"Control socket not found at {path}. Is shuvoice running?") from e
     except OSError as e:
         raise RuntimeError(f"Failed to connect to control socket {path}: {e}") from e
 

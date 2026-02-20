@@ -1,22 +1,36 @@
+from __future__ import annotations
 
 import os
 import stat
 import time
-import pytest
 from pathlib import Path
-from shuvoice.control import ControlServer, default_control_socket_path
+
+import pytest
+
+from shuvoice.control import (
+    ControlServer,
+    default_control_socket_path,
+    resolve_control_socket_path,
+)
+
 
 def noop(*args, **kwargs):
-    pass
+    return None
+
 
 @pytest.fixture
-def temp_control_socket(tmp_path):
-    socket_path = tmp_path / "control.sock"
-    return str(socket_path)
+def temp_control_socket(tmp_path: Path):
+    return str(tmp_path / "control.sock")
 
-def test_control_socket_permissions(temp_control_socket):
+
+def _assert_user_only_mode(path: Path):
+    mode = os.stat(path).st_mode
+    assert not (mode & (stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP))
+    assert not (mode & (stat.S_IROTH | stat.S_IWOTH | stat.S_IXOTH))
+
+
+def test_control_socket_permissions(temp_control_socket: str):
     socket_path = Path(temp_control_socket)
-
     server = ControlServer(
         socket_path=str(socket_path),
         on_start=noop,
@@ -27,34 +41,19 @@ def test_control_socket_permissions(temp_control_socket):
 
     server.start()
     try:
-        # Wait for socket to be created
         for _ in range(50):
             if socket_path.exists():
                 break
             time.sleep(0.05)
 
         assert socket_path.exists(), "Socket file not created"
-
-        st = os.stat(socket_path)
-        mode = st.st_mode
-
-        # Check permissions: should be user-only access
-        # Ensure group and others have NO permissions
-        assert not (mode & (stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP)), f"Group has permissions: {oct(mode)}"
-        assert not (mode & (stat.S_IROTH | stat.S_IWOTH | stat.S_IXOTH)), f"Others have permissions: {oct(mode)}"
-
-        # Verify directory permissions (created by ControlServer.start if missing)
-        # In this case tmp_path is created by pytest, but ControlServer.start attempts to create parent if missing.
-        # Since tmp_path exists, it might just use it.
-        # But let's check a nested path to verify creation logic.
-
+        _assert_user_only_mode(socket_path)
     finally:
         server.stop()
 
-def test_control_server_creates_secure_directory(tmp_path):
-    # Use a nested path to force directory creation
-    socket_path = tmp_path / "subdir" / "control.sock"
 
+def test_control_server_creates_secure_directory(tmp_path: Path):
+    socket_path = tmp_path / "subdir" / "control.sock"
     server = ControlServer(
         socket_path=str(socket_path),
         on_start=noop,
@@ -67,29 +66,59 @@ def test_control_server_creates_secure_directory(tmp_path):
     try:
         parent_dir = socket_path.parent
         assert parent_dir.exists()
-
-        st_dir = os.stat(parent_dir)
-        mode_dir = st_dir.st_mode
-
-        assert not (mode_dir & (stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP)), f"Directory group has permissions: {oct(mode_dir)}"
-        assert not (mode_dir & (stat.S_IROTH | stat.S_IWOTH | stat.S_IXOTH)), f"Directory others have permissions: {oct(mode_dir)}"
+        _assert_user_only_mode(parent_dir)
     finally:
         server.stop()
 
-def test_default_socket_path_creation(tmp_path, monkeypatch):
-    # Mock XDG_RUNTIME_DIR to point to tmp_path
+
+def test_default_socket_path_creation(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
 
-    # This function creates the directory immediately
     path = default_control_socket_path()
 
     assert path.name == "control.sock"
     assert path.parent.name == "shuvoice"
     assert path.parent.parent == tmp_path
+    _assert_user_only_mode(path.parent)
 
-    # Check directory permissions
-    st_dir = os.stat(path.parent)
-    mode_dir = st_dir.st_mode
 
-    assert not (mode_dir & (stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP)), f"Default dir group has permissions: {oct(mode_dir)}"
-    assert not (mode_dir & (stat.S_IROTH | stat.S_IWOTH | stat.S_IXOTH)), f"Default dir others have permissions: {oct(mode_dir)}"
+def test_resolve_control_socket_path_rejects_relative_path():
+    with pytest.raises(ValueError, match="absolute"):
+        resolve_control_socket_path("control.sock")
+
+
+def test_resolve_control_socket_path_rejects_directory(tmp_path: Path):
+    sock_dir = tmp_path / "sockdir"
+    sock_dir.mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="directory"):
+        resolve_control_socket_path(str(sock_dir))
+
+
+def test_resolve_control_socket_path_rejects_outside_allowed_roots():
+    with pytest.raises(ValueError, match="under"):
+        resolve_control_socket_path("/var/lib/shuvoice/control.sock")
+
+
+def test_resolve_control_socket_path_requires_sock_suffix(tmp_path: Path):
+    with pytest.raises(ValueError, match=".sock"):
+        resolve_control_socket_path(str(tmp_path / "control.socket"))
+
+
+def test_resolve_control_socket_path_accepts_runtime_dir(monkeypatch, tmp_path: Path):
+    runtime_dir = tmp_path / "runtime"
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime_dir))
+
+    resolved = resolve_control_socket_path(str(runtime_dir / "nested" / "control.sock"))
+
+    assert resolved == (runtime_dir / "nested" / "control.sock").resolve()
+    assert resolved.parent.exists()
+    _assert_user_only_mode(resolved.parent)
+
+
+def test_resolve_control_socket_path_accepts_tmp_path(tmp_path: Path):
+    candidate = tmp_path / "shuvoice" / "custom.sock"
+    resolved = resolve_control_socket_path(str(candidate))
+
+    assert resolved == candidate.resolve()
+    assert resolved.parent.exists()

@@ -4,6 +4,8 @@ IMPORTANT: ctypes.CDLL('libgtk4-layer-shell.so') must be called
 before this module is imported. See __main__.py.
 """
 
+from __future__ import annotations
+
 import logging
 
 import gi
@@ -12,6 +14,12 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gtk4LayerShell", "1.0")
 from gi.repository import Gdk, GLib, Gtk
 from gi.repository import Gtk4LayerShell as LayerShell
+
+from .overlay_state import (
+    OVERLAY_STATE_CLASSES,
+    OVERLAY_STATE_LISTENING,
+    overlay_state_class,
+)
 
 log = logging.getLogger(__name__)
 
@@ -23,11 +31,12 @@ class CaptionOverlay:
         self._config = config
         self._window = Gtk.Window(application=app)
         self._label: Gtk.Label | None = None
+        self._box: Gtk.Box | None = None
         self._visible = False
+        self._state = OVERLAY_STATE_LISTENING
         self._setup_layer_shell()
         self._setup_css()
         self._setup_widgets()
-        # Make pointer-click-through after the window is mapped (fix #1)
         self._window.connect("realize", self._make_click_through)
         self._window.present()
 
@@ -40,17 +49,14 @@ class CaptionOverlay:
         LayerShell.init_for_window(w)
         LayerShell.set_layer(w, LayerShell.Layer.OVERLAY)
         LayerShell.set_keyboard_mode(w, LayerShell.KeyboardMode.NONE)
-        LayerShell.set_exclusive_zone(w, -1)  # Don't reserve screen space
+        LayerShell.set_exclusive_zone(w, -1)
         LayerShell.set_namespace(w, "stt-overlay")
-
-        # Anchor bottom only — auto-centers horizontally on wlroots compositors.
-        # Fix #2: if centering doesn't work, anchor LEFT+RIGHT with margins.
         LayerShell.set_anchor(w, LayerShell.Edge.BOTTOM, True)
         LayerShell.set_margin(w, LayerShell.Edge.BOTTOM, self._config.bottom_margin)
 
     @staticmethod
     def _make_click_through(window):
-        """Set an empty input region so pointer events pass through (fix #1)."""
+        """Set an empty input region so pointer events pass through."""
         try:
             import cairo
 
@@ -61,8 +67,7 @@ class CaptionOverlay:
                 log.debug("Set empty input region for pointer passthrough")
         except Exception as e:
             log.debug(
-                "Could not set input region (%s) — "
-                "pointer passthrough may depend on compositor behavior",
+                "Could not set input region (%s) — pointer passthrough may depend on compositor",
                 e,
             )
 
@@ -71,19 +76,22 @@ class CaptionOverlay:
         css = Gtk.CssProvider()
         css.load_from_string(
             f"window {{ background-color: transparent; }}\n"
-            f".caption-box {{\n"
-            f"  background-color: rgba(0, 0, 0, {cfg.bg_opacity});\n"
+            ".caption-box {\n"
+            "  background-color: rgba(0, 0, 0, 0.75);\n"
             f"  border-radius: {cfg.border_radius}px;\n"
-            f"  padding: 16px 28px;\n"
-            f"}}\n"
-            f".caption-label {{\n"
-            f"  color: white;\n"
+            "  padding: 16px 28px;\n"
+            "}\n"
+            f".caption-box.state-listening {{ background-color: rgba(0, 0, 0, {cfg.bg_opacity}); }}\n"
+            f".caption-box.state-processing {{ background-color: rgba(20, 45, 90, {cfg.bg_opacity}); }}\n"
+            f".caption-box.state-error {{ background-color: rgba(120, 20, 20, {cfg.bg_opacity}); }}\n"
+            ".caption-label {\n"
+            "  color: white;\n"
             f"  font-size: {cfg.font_size}px;\n"
-            f"  font-weight: bold;\n"
-            f"}}\n"
-            f".recording-icon {{\n"
-            f"  color: white;\n"
-            f"}}\n"
+            "  font-weight: bold;\n"
+            "}\n"
+            ".recording-icon {\n"
+            "  color: white;\n"
+            "}\n"
         )
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
@@ -92,40 +100,48 @@ class CaptionOverlay:
         )
 
     def _setup_widgets(self):
-        # Use a horizontal box to place icon next to text
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         box.add_css_class("caption-box")
         box.set_spacing(12)
 
-        # Active microphone icon
         icon = Gtk.Image.new_from_icon_name("microphone-sensitivity-high-symbolic")
-        # Scale icon with font size (roughly 1.2x)
         icon_size = int(self._config.font_size * 1.2)
         icon.set_pixel_size(icon_size)
         icon.set_valign(Gtk.Align.CENTER)
         icon.add_css_class("recording-icon")
-        # Avoid PyGObject API mismatch across GTK builds (get_accessible may not exist)
-        # Keep a human hint without crashing the overlay init.
         icon.set_tooltip_text("Microphone active")
-
         box.append(icon)
 
         self._label = Gtk.Label(label="")
         self._label.add_css_class("caption-label")
         self._label.set_wrap(True)
         self._label.set_max_width_chars(60)
-
         box.append(self._label)
-        self._window.set_child(box)
 
-        # Start hidden
+        self._box = box
+        self._window.set_child(box)
+        self._apply_state(self._state)
+
         self._window.set_visible(False)
         self._visible = False
+
+    def _apply_state(self, state: str):
+        if not self._box:
+            return
+
+        for css_class in OVERLAY_STATE_CLASSES.values():
+            self._box.remove_css_class(css_class)
+
+        self._box.add_css_class(overlay_state_class(state))
+        self._state = state
 
     # -- Thread-safe public API (called from ASR / hotkey threads) ----------
 
     def set_text(self, text: str):
         GLib.idle_add(self._do_set_text, text)
+
+    def set_state(self, state: str):
+        GLib.idle_add(self._do_set_state, state)
 
     def show(self):
         GLib.idle_add(self._do_show)
@@ -142,6 +158,13 @@ class CaptionOverlay:
                 self._do_show()
         return GLib.SOURCE_REMOVE
 
+    def _do_set_state(self, state: str):
+        try:
+            self._apply_state(state)
+        except ValueError:
+            log.debug("Ignoring unknown overlay state: %s", state)
+        return GLib.SOURCE_REMOVE
+
     def _do_show(self):
         if self._window:
             self._window.set_visible(True)
@@ -152,6 +175,7 @@ class CaptionOverlay:
         if self._window:
             self._window.set_visible(False)
             self._visible = False
+            self._apply_state(OVERLAY_STATE_LISTENING)
             if self._label:
                 self._label.set_text("")
         return GLib.SOURCE_REMOVE

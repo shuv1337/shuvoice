@@ -8,6 +8,8 @@ fallback_sample_rate = 48000
 # audio_device = 2
 # Optional mic gain multiplier (eg. 1.5 if too quiet)
 input_gain = 1.0
+# Max queued chunks before dropping oldest (bounded queue for lower latency)
+audio_queue_max_size = 200
 # Absolute RMS floor used to suppress silence hallucinations on empty presses
 silence_rms_threshold = 0.008
 # Dynamic speech threshold multiplier based on ambient noise floor
@@ -49,3 +51,11 @@ use_clipboard_for_final = true
 preserve_clipboard = false
 typing_retry_attempts = 2
 typing_retry_delay_ms = 40
+auto_capitalize = true
+
+[feedback]
+audio_feedback = true
+feedback_start_freq = 880
+feedback_stop_freq = 660
+feedback_duration_ms = 70
+feedback_volume = 0.08

@@ -10,5 +10,7 @@ build/
 venv/
 .pytest_cache/
 .pi/
+.jules/
+.Jules/
 *.so
 .mypy_cache/
