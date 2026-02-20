@@ -67,8 +67,22 @@ class Config:
 
     @property
     def native_chunk_samples(self) -> int:
-        """1120ms at 16kHz = 17920 samples."""
-        return 17920
+        """Return expected audio samples per streaming chunk based on right_context.
+
+        0  = 80ms  = 1280
+        1  = 160ms = 2560
+        6  = 560ms = 8960
+        13 = 1120ms = 17920
+        """
+        match self.right_context:
+            case 0:
+                return 1280
+            case 1:
+                return 2560
+            case 6:
+                return 8960
+            case _:
+                return 17920
 
     @classmethod
     def config_dir(cls) -> Path:
