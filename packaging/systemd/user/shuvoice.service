@@ -1,0 +1,19 @@
+[Unit]
+Description=ShuVoice speech-to-text overlay
+After=graphical-session.target
+Wants=graphical-session.target
+
+[Service]
+Type=simple
+# Packaged install path. For repo/venv workflows, override with:
+#   systemctl --user edit shuvoice.service
+#   [Service]
+#   ExecStart=
+#   ExecStart=%h/repos/shuvoice/.venv312/bin/shuvoice
+ExecStart=/usr/bin/shuvoice
+Restart=on-failure
+RestartSec=2
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

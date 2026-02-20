@@ -59,4 +59,5 @@ package() {
 
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   install -Dm644 examples/config.toml "$pkgdir/usr/share/doc/$pkgname/config.toml.example"
+  install -Dm644 packaging/systemd/user/shuvoice.service "$pkgdir/usr/lib/systemd/user/shuvoice.service"
 }

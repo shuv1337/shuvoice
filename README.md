@@ -96,6 +96,30 @@ python -m shuvoice --audio-device 2 --input-gain 1.5
 python -m shuvoice --right-context 6
 ```
 
+## systemd user service
+
+Repo-managed unit template:
+
+- `packaging/systemd/user/shuvoice.service`
+
+Install and start (from this repo):
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp packaging/systemd/user/shuvoice.service ~/.config/systemd/user/shuvoice.service
+
+# Optional for repo/venv workflows (default template uses /usr/bin/shuvoice)
+systemctl --user edit shuvoice.service
+# [Service]
+# ExecStart=
+# ExecStart=%h/repos/shuvoice/.venv312/bin/shuvoice
+
+systemctl --user daemon-reload
+systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_RUNTIME_DIR HYPRLAND_INSTANCE_SIGNATURE DBUS_SESSION_BUS_ADDRESS XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
+systemctl --user enable --now shuvoice.service
+systemctl --user status shuvoice.service
+```
+
 ## Control socket commands (IPC backend)
 
 When ShuVoice is running, send control commands from another terminal:
