@@ -17,7 +17,7 @@ import numpy as np
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk
 
-from .asr import ASREngine
+from .asr import create_backend
 from .audio import AudioCapture, audio_rms
 from .config import Config
 from .control import ControlServer
@@ -42,12 +42,7 @@ class ShuVoiceApp(Gtk.Application):
         super().__init__(application_id="dev.shuv.shuvoice")
         self.config = config
 
-        self.asr = ASREngine(
-            config.model_name,
-            config.right_context,
-            config.device,
-            config.use_cuda_graph_decoder,
-        )
+        self.asr = create_backend(config.asr_backend, config)
         self.audio = AudioCapture(
             config.sample_rate,
             config.chunk_samples,
@@ -363,7 +358,7 @@ class ShuVoiceApp(Gtk.Application):
             state.utterance_gain = min(target_peak / state.peak_rms, 40.0)
 
     def _transcribe_native_chunk(self, state: _UtteranceState, error_context: str) -> bool:
-        to_process, has_more = state.consume_native_chunk(self.config.native_chunk_samples)
+        to_process, has_more = state.consume_native_chunk(self.asr.native_chunk_samples)
         if to_process.size == 0:
             return False
 
@@ -376,8 +371,8 @@ class ShuVoiceApp(Gtk.Application):
             return False
 
         log.debug(
-            "ASR step=%d queue_size=%d raw_text=%r chunk_rms=%.4f gain=%.1f",
-            self.asr._step_num,
+            "ASR step=%s queue_size=%d raw_text=%r chunk_rms=%.4f gain=%.1f",
+            self.asr.debug_step_num,
             self.audio.queue.qsize(),
             text,
             audio_rms(to_process),
@@ -402,7 +397,7 @@ class ShuVoiceApp(Gtk.Application):
         if self._asr_disabled:
             return
 
-        native = self.config.native_chunk_samples
+        native = self.asr.native_chunk_samples
         silence = np.zeros(native, dtype=np.float32)
 
         for _ in range(self._streaming_stall_flush_chunks):
@@ -427,7 +422,7 @@ class ShuVoiceApp(Gtk.Application):
         while (
             self._recording.is_set()
             and not self._asr_disabled
-            and state.total >= self.config.native_chunk_samples
+            and state.total >= self.asr.native_chunk_samples
         ):
             has_more = self._transcribe_native_chunk(state, "ASR chunk processing failed")
             if not has_more:
@@ -477,7 +472,7 @@ class ShuVoiceApp(Gtk.Application):
         if self._asr_disabled:
             return
 
-        silence = np.zeros(self.config.native_chunk_samples, dtype=np.float32)
+        silence = np.zeros(self.asr.native_chunk_samples, dtype=np.float32)
         stable_steps = 0
         for _ in range(5):
             try:
@@ -543,14 +538,14 @@ class ShuVoiceApp(Gtk.Application):
             self.typer.reset()
             return
 
-        while state.total >= self.config.native_chunk_samples and not self._asr_disabled:
+        while state.total >= self.asr.native_chunk_samples and not self._asr_disabled:
             has_more = self._transcribe_native_chunk(state, "ASR buffered final chunk failed")
             if not has_more:
                 break
 
         if state.total > 0 and not self._asr_disabled:
             audio_data = state.buffer[0] if len(state.buffer) == 1 else np.concatenate(state.buffer)
-            padded = np.zeros(self.config.native_chunk_samples, dtype=np.float32)
+            padded = np.zeros(self.asr.native_chunk_samples, dtype=np.float32)
             padded[: len(audio_data)] = audio_data
             if state.utterance_gain > 1.05:
                 padded[: len(audio_data)] = self._apply_utterance_gain(
@@ -568,10 +563,10 @@ class ShuVoiceApp(Gtk.Application):
         self._flush_tail_silence(state)
 
         log.info(
-            "Post-processing: last_text=%r total_remaining=%d step_num=%d",
+            "Post-processing: last_text=%r total_remaining=%d step_num=%s",
             state.last_text,
             state.total,
-            self.asr._step_num,
+            self.asr.debug_step_num,
         )
 
         self._commit_utterance(state)

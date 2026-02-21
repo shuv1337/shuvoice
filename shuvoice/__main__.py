@@ -83,12 +83,13 @@ def _run_preflight(config) -> bool:
         return str(config.audio_device)
 
     def check_asr_stack() -> str:
-        from .asr import ASREngine
+        from .asr import get_backend_class
 
-        errors = ASREngine.dependency_errors()
+        backend_cls = get_backend_class(config.asr_backend)
+        errors = backend_cls.dependency_errors()
         if errors:
             raise RuntimeError("; ".join(errors))
-        return "torch + nemo ASR dependencies are importable"
+        return f"{config.asr_backend} backend dependencies are importable"
 
     add_check("Python version", check_python)
     add_check("Import numpy", check_import("numpy"))
@@ -131,7 +132,7 @@ def main():
     parser.add_argument(
         "--download-model",
         action="store_true",
-        help="Download the ASR model and exit",
+        help="Download model artifacts for selected backend and exit",
     )
     parser.add_argument(
         "--preflight",
@@ -155,16 +156,78 @@ def main():
         help="Override control socket path (default: $XDG_RUNTIME_DIR/shuvoice/control.sock)",
     )
     parser.add_argument(
+        "--asr-backend",
+        choices=["nemo", "sherpa", "moonshine"],
+        default=None,
+        help="ASR backend selection (default: from config)",
+    )
+    parser.add_argument(
         "--device",
         default=None,
-        help="Inference device (default: from config)",
+        help="Inference device (NeMo backend, default: from config)",
     )
     parser.add_argument(
         "--right-context",
         type=int,
         choices=[0, 1, 6, 13],
         default=None,
-        help="Streaming right context (0,1,6,13 => lower to higher latency/accuracy)",
+        help="NeMo streaming right context (0,1,6,13 => lower to higher latency/accuracy)",
+    )
+    parser.add_argument(
+        "--sherpa-model-dir",
+        default=None,
+        help="Sherpa model directory containing tokens.txt + encoder/decoder/joiner ONNX files",
+    )
+    parser.add_argument(
+        "--sherpa-provider",
+        choices=["cpu", "cuda"],
+        default=None,
+        help="Sherpa execution provider (default: from config)",
+    )
+    parser.add_argument(
+        "--sherpa-num-threads",
+        type=int,
+        default=None,
+        help="Sherpa decoding threads (default: from config)",
+    )
+    parser.add_argument(
+        "--sherpa-chunk-ms",
+        type=int,
+        default=None,
+        help="Sherpa native chunk duration in milliseconds (default: from config)",
+    )
+    parser.add_argument(
+        "--moonshine-model-name",
+        default=None,
+        help="Moonshine model name (for example: moonshine/base, moonshine/tiny)",
+    )
+    parser.add_argument(
+        "--moonshine-model-dir",
+        default=None,
+        help="Local Moonshine model directory (encoder_model.onnx + decoder_model_merged.onnx)",
+    )
+    parser.add_argument(
+        "--moonshine-model-precision",
+        default=None,
+        help="Moonshine model precision variant (default: from config)",
+    )
+    parser.add_argument(
+        "--moonshine-chunk-ms",
+        type=int,
+        default=None,
+        help="Moonshine native chunk duration in milliseconds (default: from config)",
+    )
+    parser.add_argument(
+        "--moonshine-max-window-sec",
+        type=float,
+        default=None,
+        help="Moonshine cumulative decode window in seconds (default: from config)",
+    )
+    parser.add_argument(
+        "--moonshine-max-tokens",
+        type=int,
+        default=None,
+        help="Moonshine max generated tokens per decode (default: from config)",
     )
     parser.add_argument(
         "--audio-device",
@@ -227,10 +290,32 @@ def main():
 
     config = Config.load()
 
+    if args.asr_backend:
+        config.asr_backend = args.asr_backend
     if args.device:
         config.device = args.device
     if args.right_context is not None:
         config.right_context = int(args.right_context)
+    if args.sherpa_model_dir is not None:
+        config.sherpa_model_dir = args.sherpa_model_dir
+    if args.sherpa_provider:
+        config.sherpa_provider = args.sherpa_provider
+    if args.sherpa_num_threads is not None:
+        config.sherpa_num_threads = int(args.sherpa_num_threads)
+    if args.sherpa_chunk_ms is not None:
+        config.sherpa_chunk_ms = int(args.sherpa_chunk_ms)
+    if args.moonshine_model_name is not None:
+        config.moonshine_model_name = args.moonshine_model_name
+    if args.moonshine_model_dir is not None:
+        config.moonshine_model_dir = args.moonshine_model_dir
+    if args.moonshine_model_precision is not None:
+        config.moonshine_model_precision = args.moonshine_model_precision
+    if args.moonshine_chunk_ms is not None:
+        config.moonshine_chunk_ms = int(args.moonshine_chunk_ms)
+    if args.moonshine_max_window_sec is not None:
+        config.moonshine_max_window_sec = float(args.moonshine_max_window_sec)
+    if args.moonshine_max_tokens is not None:
+        config.moonshine_max_tokens = int(args.moonshine_max_tokens)
     if args.audio_device is not None:
         # Accept numeric indexes or raw device names
         config.audio_device = (
@@ -250,6 +335,12 @@ def main():
         config.output_mode = args.output_mode
     if args.control_socket:
         config.control_socket = args.control_socket
+
+    try:
+        config.__post_init__()
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
 
     if args.list_audio_devices:
         try:
@@ -284,13 +375,16 @@ def main():
     if args.preflight:
         sys.exit(0 if _run_preflight(config) else 1)
 
-    # --download-model: fetch the model files and exit
+    # --download-model: fetch backend model files (if supported) and exit
     if args.download_model:
-        from .asr import ASREngine
+        from .asr import get_backend_class
+
+        backend_cls = get_backend_class(config.asr_backend)
 
         try:
-            ASREngine.download_model(config.model_name)
-        except RuntimeError as e:
+            kwargs = {"model_name": config.model_name} if config.asr_backend == "nemo" else {}
+            backend_cls.download_model(**kwargs)
+        except (RuntimeError, ValueError, NotImplementedError) as e:
             print(f"ERROR: {e}", file=sys.stderr)
             sys.exit(1)
 

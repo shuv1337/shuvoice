@@ -22,6 +22,16 @@ asr = [
     "torch>=2.4",
     "nemo-toolkit[asr]>=2.6.0",
 ]
+asr-nemo = [
+    "torch>=2.4",
+    "nemo-toolkit[asr]>=2.6.0",
+]
+asr-sherpa = [
+    "sherpa-onnx",
+]
+asr-moonshine = [
+    "useful-moonshine-onnx",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.9",

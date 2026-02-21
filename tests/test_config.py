@@ -21,6 +21,15 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     assert cfg.auto_capitalize is True
     assert cfg.streaming_stall_guard is True
     assert cfg.streaming_stall_chunks == 4
+    assert cfg.asr_backend == "nemo"
+    assert cfg.sherpa_provider == "cpu"
+    assert cfg.sherpa_num_threads == 2
+    assert cfg.sherpa_chunk_ms == 100
+    assert cfg.moonshine_model_name == "moonshine/base"
+    assert cfg.moonshine_model_precision == "float"
+    assert cfg.moonshine_chunk_ms == 100
+    assert cfg.moonshine_max_window_sec == 32.0
+    assert cfg.moonshine_max_tokens == 192
 
 
 def test_load_flattens_sections_and_ignores_unknown(monkeypatch, tmp_path: Path):
@@ -41,6 +50,22 @@ silence_rms_threshold = 0.007
 silence_rms_multiplier = 2.2
 min_speech_ms = 90
 unknown_audio_key = 999
+
+[asr]
+asr_backend = "sherpa"
+model_name = "nvidia/nemotron-speech-streaming-en-0.6b"
+right_context = 13
+device = "cuda"
+sherpa_model_dir = "/tmp/sherpa-model"
+sherpa_provider = "cuda"
+sherpa_num_threads = 4
+sherpa_chunk_ms = 120
+moonshine_model_name = "moonshine/tiny"
+moonshine_model_dir = "/tmp/moonshine-model"
+moonshine_model_precision = "float"
+moonshine_chunk_ms = 110
+moonshine_max_window_sec = 20.0
+moonshine_max_tokens = 160
 
 [hotkey]
 hotkey_backend = "ipc"
@@ -81,6 +106,17 @@ foo = "bar"
     assert cfg.silence_rms_threshold == 0.007
     assert cfg.silence_rms_multiplier == 2.2
     assert cfg.min_speech_ms == 90
+    assert cfg.asr_backend == "sherpa"
+    assert cfg.sherpa_model_dir == "/tmp/sherpa-model"
+    assert cfg.sherpa_provider == "cuda"
+    assert cfg.sherpa_num_threads == 4
+    assert cfg.sherpa_chunk_ms == 120
+    assert cfg.moonshine_model_name == "moonshine/tiny"
+    assert cfg.moonshine_model_dir == "/tmp/moonshine-model"
+    assert cfg.moonshine_model_precision == "float"
+    assert cfg.moonshine_chunk_ms == 110
+    assert cfg.moonshine_max_window_sec == 20.0
+    assert cfg.moonshine_max_tokens == 160
     assert cfg.hotkey_backend == "ipc"
     assert cfg.hotkey == "KEY_F9"
     assert cfg.hold_threshold_ms == 250
@@ -113,21 +149,49 @@ def test_config_helpers_create_dirs(monkeypatch, tmp_path: Path):
     assert ddir.exists() and ddir.is_dir()
 
 
-def test_native_chunk_samples_scaling():
-    c = Config(right_context=0)
-    assert c.native_chunk_samples == 1280
+def test_asr_backend_validation():
+    with pytest.raises(ValueError, match="asr_backend"):
+        Config(asr_backend="bad-backend")
 
-    c = Config(right_context=1)
-    assert c.native_chunk_samples == 2560
 
-    c = Config(right_context=6)
-    assert c.native_chunk_samples == 8960
+def test_sherpa_provider_validation():
+    with pytest.raises(ValueError, match="sherpa_provider"):
+        Config(sherpa_provider="rocm")
 
-    c = Config(right_context=13)
-    assert c.native_chunk_samples == 17920
 
-    c = Config(right_context=999)
-    assert c.native_chunk_samples == 17920
+def test_sherpa_chunk_ms_validation():
+    with pytest.raises(ValueError, match="sherpa_chunk_ms"):
+        Config(sherpa_chunk_ms=0)
+
+
+def test_sherpa_num_threads_validation():
+    with pytest.raises(ValueError, match="sherpa_num_threads"):
+        Config(sherpa_num_threads=0)
+
+
+def test_moonshine_chunk_ms_validation():
+    with pytest.raises(ValueError, match="moonshine_chunk_ms"):
+        Config(moonshine_chunk_ms=0)
+
+
+def test_moonshine_max_window_sec_validation():
+    with pytest.raises(ValueError, match="moonshine_max_window_sec"):
+        Config(moonshine_max_window_sec=0)
+
+
+def test_moonshine_max_tokens_validation():
+    with pytest.raises(ValueError, match="moonshine_max_tokens"):
+        Config(moonshine_max_tokens=0)
+
+
+def test_moonshine_model_name_validation():
+    with pytest.raises(ValueError, match="moonshine_model_name"):
+        Config(moonshine_model_name="   ")
+
+
+def test_moonshine_model_precision_validation():
+    with pytest.raises(ValueError, match="moonshine_model_precision"):
+        Config(moonshine_model_precision="   ")
 
 
 def test_audio_queue_max_size_validation():

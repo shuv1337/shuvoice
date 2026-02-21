@@ -34,12 +34,27 @@ class Config:
     min_speech_ms: int = 80  # minimum above-threshold speech before committing text
 
     # ASR
+    asr_backend: str = "nemo"  # nemo | sherpa | moonshine
     model_name: str = "nvidia/nemotron-speech-streaming-en-0.6b"
     # 13 gives the highest streaming accuracy (at the cost of latency).
     # Lower values are snappier but significantly reduce recognition quality.
-    right_context: int = 13  # 0=80ms, 1=160ms, 6=560ms, 13=1120ms
+    right_context: int = 13  # 0=80ms, 1=160ms, 6=560ms, 13=1120ms (NeMo-only)
     device: str = "cuda"
     use_cuda_graph_decoder: bool = False
+
+    # Sherpa (when asr_backend = "sherpa")
+    sherpa_model_dir: str | None = None
+    sherpa_provider: str = "cpu"  # cpu | cuda
+    sherpa_num_threads: int = 2
+    sherpa_chunk_ms: int = 100
+
+    # Moonshine ONNX (when asr_backend = "moonshine")
+    moonshine_model_name: str = "moonshine/base"
+    moonshine_model_dir: str | None = None
+    moonshine_model_precision: str = "float"
+    moonshine_chunk_ms: int = 100
+    moonshine_max_window_sec: float = 32.0
+    moonshine_max_tokens: int = 192
 
     # Overlay
     font_size: int = 22
@@ -77,6 +92,37 @@ class Config:
     feedback_volume: float = 0.08
 
     def __post_init__(self):
+        self.asr_backend = str(self.asr_backend).strip().lower()
+        if self.asr_backend not in {"nemo", "sherpa", "moonshine"}:
+            raise ValueError("asr_backend must be one of: nemo, sherpa, moonshine")
+
+        self.sherpa_provider = str(self.sherpa_provider).strip().lower()
+        if self.sherpa_provider not in {"cpu", "cuda"}:
+            raise ValueError("sherpa_provider must be one of: cpu, cuda")
+
+        if int(self.sherpa_chunk_ms) <= 0:
+            raise ValueError("sherpa_chunk_ms must be > 0")
+
+        if int(self.sherpa_num_threads) < 1:
+            raise ValueError("sherpa_num_threads must be >= 1")
+
+        if int(self.moonshine_chunk_ms) <= 0:
+            raise ValueError("moonshine_chunk_ms must be > 0")
+
+        if float(self.moonshine_max_window_sec) <= 0:
+            raise ValueError("moonshine_max_window_sec must be > 0")
+
+        if int(self.moonshine_max_tokens) < 1:
+            raise ValueError("moonshine_max_tokens must be >= 1")
+
+        self.moonshine_model_name = str(self.moonshine_model_name).strip()
+        if not self.moonshine_model_name:
+            raise ValueError("moonshine_model_name must not be empty")
+
+        self.moonshine_model_precision = str(self.moonshine_model_precision).strip().lower()
+        if not self.moonshine_model_precision:
+            raise ValueError("moonshine_model_precision must not be empty")
+
         if int(self.audio_queue_max_size) < 1:
             raise ValueError("audio_queue_max_size must be >= 1")
         if int(self.streaming_stall_chunks) < 1:
@@ -89,25 +135,6 @@ class Config:
     @property
     def chunk_samples(self) -> int:
         return self.sample_rate * self.chunk_ms // 1000
-
-    @property
-    def native_chunk_samples(self) -> int:
-        """Return expected audio samples per streaming chunk based on right_context.
-
-        0  = 80ms  = 1280
-        1  = 160ms = 2560
-        6  = 560ms = 8960
-        13 = 1120ms = 17920
-        """
-        match self.right_context:
-            case 0:
-                return 1280
-            case 1:
-                return 2560
-            case 6:
-                return 8960
-            case _:
-                return 17920
 
     @classmethod
     def config_dir(cls) -> Path:

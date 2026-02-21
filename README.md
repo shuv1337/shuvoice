@@ -1,13 +1,13 @@
 # ShuVoice
 
-Streaming speech-to-text overlay for Hyprland using NVIDIA Nemotron Speech Streaming.
+Streaming speech-to-text overlay for Hyprland with pluggable ASR backends.
 
 ## Status
 
 Core pipeline + production hardening are implemented:
 
 - PipeWire capture (`sounddevice`)
-- Nemotron streaming ASR (`nemo-toolkit`)
+- Pluggable streaming ASR backend layer (`nemo`, `sherpa`, `moonshine`)
 - GTK4 layer-shell overlay
 - evdev hotkey (tap/hold)
 - Hyprland IPC fallback controls via local Unix socket
@@ -32,8 +32,12 @@ sudo pacman -S \
 
 ```bash
 pip install -e .
-# ASR runtime:
+# ASR runtime (NeMo compatibility alias):
 pip install -e .[asr]
+# Explicit backend extras:
+pip install -e .[asr-nemo]
+pip install -e .[asr-sherpa]
+pip install -e .[asr-moonshine]
 # test tooling:
 pip install -e .[dev]
 ```
@@ -42,14 +46,18 @@ Using uv is equivalent:
 
 ```bash
 uv pip install -e .
-uv pip install -e .[asr]
+uv pip install -e .[asr-nemo]
+# or
+uv pip install -e .[asr-sherpa]
+# or
+uv pip install -e .[asr-moonshine]
 ```
 
-For Python 3.14 + uv, prefer the repo override file to avoid
+For Python 3.14 + uv with NeMo, prefer the repo override file to avoid
 `kaldialign` source-build issues:
 
 ```bash
-uv pip install -e .[asr] --overrides packaging/constraints/py314-overrides.txt
+uv pip install -e .[asr-nemo] --overrides packaging/constraints/py314-overrides.txt
 ```
 
 If NeMo wheels are unavailable for your environment:
@@ -86,7 +94,7 @@ Checks include:
 - Python version compatibility
 - importability of key Python modules
 - audio input device validity
-- ASR stack (`torch`, `nemo`)
+- ASR backend dependencies for selected `asr_backend`
 - required binaries (`wtype`, `wl-copy`, `wl-paste`)
 - `libgtk4-layer-shell.so`
 - configured hotkey backend / hotkey / output mode
@@ -102,13 +110,17 @@ Useful flags:
 ```bash
 python -m shuvoice --help
 python -m shuvoice --download-model
+python -m shuvoice --asr-backend nemo --right-context 13
+python -m shuvoice --asr-backend sherpa --sherpa-model-dir /path/to/model
+python -m shuvoice --asr-backend moonshine --moonshine-model-name moonshine/base
 python -m shuvoice --hotkey KEY_F9
 python -m shuvoice --output-mode streaming_partial
 python -m shuvoice --hotkey-backend ipc
 python -m shuvoice --list-audio-devices
 python -m shuvoice --audio-device 2 --input-gain 1.5
-python -m shuvoice --right-context 13
 ```
+
+`--download-model` currently supports NeMo only. Sherpa and Moonshine print setup guidance.
 
 ## systemd user service
 
@@ -162,6 +174,14 @@ Example config:
 
 - `examples/config.toml`
 
+Backend selection is controlled by `asr_backend`:
+
+- `asr_backend = "nemo"` (default): uses `model_name`, `right_context`, `device`
+- `asr_backend = "sherpa"`: requires `sherpa_model_dir` and uses `sherpa_*` settings
+- `asr_backend = "moonshine"`: uses `moonshine_*` settings (16k sample rate expected)
+
+`right_context` applies to NeMo only.
+
 If you hit RNNT CUDA-graph decoder issues on your driver/toolkit combo,
 keep this setting disabled (default):
 
@@ -181,11 +201,15 @@ Use this to reproduce truncation/cut-out behavior with deterministic inputs.
 
 ```bash
 # Uses built-in defaults (writes WAV + CSV under build/tts-roundtrip)
-python scripts/tts_roundtrip.py --device cuda
+python scripts/tts_roundtrip.py --asr-backend nemo --device cuda
+
+# Moonshine backend
+python scripts/tts_roundtrip.py --asr-backend moonshine --moonshine-model-name moonshine/base
 
 # Use fixed phrase fixtures
 python scripts/tts_roundtrip.py \
   --phrases-file examples/tts_roundtrip_phrases.txt \
+  --asr-backend nemo \
   --device cuda
 ```
 
@@ -198,12 +222,22 @@ The script:
 ## Troubleshooting
 
 - `No module named 'torch'` or `No module named 'nemo'`
-  - Install ASR deps (`pip install -e .[asr]`) or Arch CUDA torch package.
+  - Install NeMo ASR deps (`pip install -e .[asr-nemo]` or `.[asr]`) or Arch CUDA torch package.
+- `No module named 'sherpa_onnx'`
+  - Install Sherpa deps (`pip install -e .[asr-sherpa]`).
+- `No module named 'moonshine_onnx'`
+  - Install Moonshine deps (`pip install -e .[asr-moonshine]`).
+- `sherpa_model_dir is required` or missing `encoder/decoder/joiner` artifacts
+  - Point `sherpa_model_dir` to a streaming transducer model directory containing
+    `tokens.txt` and ONNX files for encoder/decoder/joiner.
+- `moonshine_model_dir` missing `encoder_model.onnx` / `decoder_model_merged.onnx`
+  - Point `moonshine_model_dir` to a valid local Moonshine ONNX export, or unset it
+    and let useful-moonshine-onnx fetch weights from Hugging Face.
 - `No module named 'gi'`
   - Install GTK Python bindings (`pip/uv install -e .` now includes `PyGObject`).
   - If build fails, install system deps: `sudo pacman -S python-gobject gtk4 gtk4-layer-shell`.
-- `Failed to build kaldialign` when installing `.[asr]` on Python 3.14
-  - Use: `uv pip install -e .[asr] --overrides packaging/constraints/py314-overrides.txt`.
+- `Failed to build kaldialign` when installing NeMo extras on Python 3.14
+  - Use: `uv pip install -e .[asr-nemo] --overrides packaging/constraints/py314-overrides.txt`.
   - Or use a Python 3.13 virtualenv for ASR installs.
 - `espeak-ng not found` when running `scripts/tts_roundtrip.py`
   - Install with: `sudo pacman -S espeak-ng`.
@@ -224,4 +258,4 @@ The script:
 - Long phrases plateau or cut out mid-sentence
   - Keep `streaming_stall_guard = true` (default) to inject a tiny silent flush when transcript stalls despite speech energy.
   - Tune `streaming_stall_chunks` (try `3` to `6`) and `streaming_stall_rms_ratio` (try `0.6` to `0.9`) in config.
-  - Run `python scripts/tts_roundtrip.py --phrases-file examples/tts_roundtrip_phrases.txt --device cuda` to compare before/after behavior.
+  - Run `python scripts/tts_roundtrip.py --phrases-file examples/tts_roundtrip_phrases.txt --asr-backend nemo --device cuda` to compare before/after behavior.
