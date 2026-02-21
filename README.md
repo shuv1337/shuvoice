@@ -38,6 +38,13 @@ pip install -e .[asr]
 pip install -e .[dev]
 ```
 
+Using uv is equivalent:
+
+```bash
+uv pip install -e .
+uv pip install -e .[asr]
+```
+
 If NeMo wheels are unavailable for your environment:
 
 ```bash
@@ -165,6 +172,9 @@ use_cuda_graph_decoder = false
 
 - `No module named 'torch'` or `No module named 'nemo'`
   - Install ASR deps (`pip install -e .[asr]`) or Arch CUDA torch package.
+- `No module named 'gi'`
+  - Install GTK Python bindings (`pip/uv install -e .` now includes `PyGObject`).
+  - If build fails, install system deps: `sudo pacman -S python-gobject gtk4 gtk4-layer-shell`.
 - `No keyboard device found ... input group`
   - Add user to `input` group and re-login, or use `hotkey_backend = "ipc"`.
 - `Control socket not found ...`
