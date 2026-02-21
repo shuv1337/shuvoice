@@ -25,6 +25,13 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libportaudio2 libasound2 libevdev2 \
+            gobject-introspection libgirepository1.0-dev libcairo2-dev pkg-config
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -53,7 +60,9 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libportaudio2 libasound2t64 libevdev2
+          sudo apt-get install -y \
+            libportaudio2 libasound2t64 libevdev2 \
+            gobject-introspection libgirepository1.0-dev libcairo2-dev pkg-config
 
       - name: Install Python dependencies
         run: |
@@ -77,7 +86,10 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libportaudio2 libasound2t64 libevdev2 python3-gi gir1.2-gtk-4.0
+          sudo apt-get install -y \
+            libportaudio2 libasound2t64 libevdev2 \
+            python3-gi gir1.2-gtk-4.0 \
+            gobject-introspection libgirepository1.0-dev libcairo2-dev pkg-config
 
       - name: Install Python dependencies
         run: |

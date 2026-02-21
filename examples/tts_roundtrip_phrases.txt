@@ -1,0 +1,7 @@
+# Long-phrase reliability fixtures for scripts/tts_roundtrip.py
+
+This is a short sentence for baseline accuracy.
+This is so close to being a good application, but it still feels unreliable with longer phrases.
+We still have issues with recording cutting out on long sentences, and we need deterministic regression tests.
+Used for testing and returning back to speech to text, this sentence intentionally includes repeated structure.
+If this script catches truncation reliably, we can compare results before and after each change.

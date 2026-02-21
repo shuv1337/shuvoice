@@ -18,6 +18,8 @@ class _UtteranceState:
     peak_rms: float = 0.0
     utterance_gain: float = 1.0
     utterance_rms_threshold: float = 0.0
+    unchanged_steps: int = 0
+    last_chunk_rms: float = 0.0
 
     def reset(self, rms_threshold: float = 0.0):
         self.buffer.clear()
@@ -27,6 +29,8 @@ class _UtteranceState:
         self.peak_rms = 0.0
         self.utterance_gain = 1.0
         self.utterance_rms_threshold = rms_threshold
+        self.unchanged_steps = 0
+        self.last_chunk_rms = 0.0
 
     def add_chunk(self, chunk: np.ndarray):
         if chunk.size == 0:

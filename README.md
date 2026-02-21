@@ -25,7 +25,7 @@ Core pipeline + production hardening are implemented:
 sudo pacman -S \
   gtk4 gtk4-layer-shell python-gobject \
   portaudio pipewire pipewire-audio pipewire-alsa \
-  wtype wl-clipboard
+  wtype wl-clipboard espeak-ng
 ```
 
 ### Python packages
@@ -36,6 +36,20 @@ pip install -e .
 pip install -e .[asr]
 # test tooling:
 pip install -e .[dev]
+```
+
+Using uv is equivalent:
+
+```bash
+uv pip install -e .
+uv pip install -e .[asr]
+```
+
+For Python 3.14 + uv, prefer the repo override file to avoid
+`kaldialign` source-build issues:
+
+```bash
+uv pip install -e .[asr] --overrides packaging/constraints/py314-overrides.txt
 ```
 
 If NeMo wheels are unavailable for your environment:
@@ -161,10 +175,38 @@ use_cuda_graph_decoder = false
 ./scripts/smoke-test.sh
 ```
 
+## Long-phrase round-trip harness (TTS -> STT)
+
+Use this to reproduce truncation/cut-out behavior with deterministic inputs.
+
+```bash
+# Uses built-in defaults (writes WAV + CSV under build/tts-roundtrip)
+python scripts/tts_roundtrip.py --device cuda
+
+# Use fixed phrase fixtures
+python scripts/tts_roundtrip.py \
+  --phrases-file examples/tts_roundtrip_phrases.txt \
+  --device cuda
+```
+
+The script:
+- generates WAV files via `espeak-ng`
+- streams each file through ShuVoice ASR chunking logic
+- prints reference vs hypothesis similarity
+- writes `build/tts-roundtrip/roundtrip.csv`
+
 ## Troubleshooting
 
 - `No module named 'torch'` or `No module named 'nemo'`
   - Install ASR deps (`pip install -e .[asr]`) or Arch CUDA torch package.
+- `No module named 'gi'`
+  - Install GTK Python bindings (`pip/uv install -e .` now includes `PyGObject`).
+  - If build fails, install system deps: `sudo pacman -S python-gobject gtk4 gtk4-layer-shell`.
+- `Failed to build kaldialign` when installing `.[asr]` on Python 3.14
+  - Use: `uv pip install -e .[asr] --overrides packaging/constraints/py314-overrides.txt`.
+  - Or use a Python 3.13 virtualenv for ASR installs.
+- `espeak-ng not found` when running `scripts/tts_roundtrip.py`
+  - Install with: `sudo pacman -S espeak-ng`.
 - `No keyboard device found ... input group`
   - Add user to `input` group and re-login, or use `hotkey_backend = "ipc"`.
 - `Control socket not found ...`
@@ -179,3 +221,7 @@ use_cuda_graph_decoder = false
   - Select the correct mic (`python -m shuvoice --list-audio-devices`, then set `audio_device`). Prefer device *name* over numeric index, because indices can change between runs.
   - Increase `input_gain` moderately (eg. `1.3` to `1.8`) if your mic is too quiet.
   - If silent presses still produce phantom text (eg. "thank you"), raise `silence_rms_threshold` slightly (eg. `0.010` to `0.015`) and/or increase `silence_rms_multiplier` (eg. `2.0`) in config.
+- Long phrases plateau or cut out mid-sentence
+  - Keep `streaming_stall_guard = true` (default) to inject a tiny silent flush when transcript stalls despite speech energy.
+  - Tune `streaming_stall_chunks` (try `3` to `6`) and `streaming_stall_rms_ratio` (try `0.6` to `0.9`) in config.
+  - Run `python scripts/tts_roundtrip.py --phrases-file examples/tts_roundtrip_phrases.txt --device cuda` to compare before/after behavior.
