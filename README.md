@@ -25,7 +25,7 @@ Core pipeline + production hardening are implemented:
 sudo pacman -S \
   gtk4 gtk4-layer-shell python-gobject \
   portaudio pipewire pipewire-audio pipewire-alsa \
-  wtype wl-clipboard
+  wtype wl-clipboard espeak-ng
 ```
 
 ### Python packages
@@ -175,6 +175,26 @@ use_cuda_graph_decoder = false
 ./scripts/smoke-test.sh
 ```
 
+## Long-phrase round-trip harness (TTS -> STT)
+
+Use this to reproduce truncation/cut-out behavior with deterministic inputs.
+
+```bash
+# Uses built-in defaults (writes WAV + CSV under build/tts-roundtrip)
+python scripts/tts_roundtrip.py --device cuda
+
+# Use fixed phrase fixtures
+python scripts/tts_roundtrip.py \
+  --phrases-file examples/tts_roundtrip_phrases.txt \
+  --device cuda
+```
+
+The script:
+- generates WAV files via `espeak-ng`
+- streams each file through ShuVoice ASR chunking logic
+- prints reference vs hypothesis similarity
+- writes `build/tts-roundtrip/roundtrip.csv`
+
 ## Troubleshooting
 
 - `No module named 'torch'` or `No module named 'nemo'`
@@ -185,6 +205,8 @@ use_cuda_graph_decoder = false
 - `Failed to build kaldialign` when installing `.[asr]` on Python 3.14
   - Use: `uv pip install -e .[asr] --overrides packaging/constraints/py314-overrides.txt`.
   - Or use a Python 3.13 virtualenv for ASR installs.
+- `espeak-ng not found` when running `scripts/tts_roundtrip.py`
+  - Install with: `sudo pacman -S espeak-ng`.
 - `No keyboard device found ... input group`
   - Add user to `input` group and re-login, or use `hotkey_backend = "ipc"`.
 - `Control socket not found ...`
