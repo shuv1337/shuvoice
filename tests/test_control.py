@@ -4,11 +4,13 @@ import os
 import stat
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from shuvoice.control import (
     ControlServer,
+    _ensure_secure_directory,
     default_control_socket_path,
     resolve_control_socket_path,
 )
@@ -122,3 +124,43 @@ def test_resolve_control_socket_path_accepts_tmp_path(tmp_path: Path):
 
     assert resolved == candidate.resolve()
     assert resolved.parent.exists()
+
+
+def test_ensure_secure_directory_rejects_unsafe_ownership(tmp_path: Path):
+    """
+    Test that _ensure_secure_directory raises an error if the directory
+    is owned by another user (e.g., pre-created by an attacker in /tmp).
+    """
+    unsafe_dir = tmp_path / "unsafe_dir"
+    unsafe_dir.mkdir()
+
+    # Mock os.stat to simulate ownership by another user (uid=9999)
+    # Since we are running as current user, os.getuid() will be different.
+
+    # Mock stat_result with a different UID (9999)
+    # We need a real stat result to base ours on, so we get one from the real file
+    st = unsafe_dir.stat()
+    fake_stat = os.stat_result(
+        (
+            st.st_mode,
+            st.st_ino,
+            st.st_dev,
+            st.st_nlink,
+            9999,  # Fake UID
+            st.st_gid,
+            st.st_size,
+            st.st_atime,
+            st.st_mtime,
+            st.st_ctime,
+        )
+    )
+
+    # Patch pathlib.Path.stat specifically.
+    # Since _ensure_secure_directory calls path.stat(), and path is an instance of Path,
+    # we can patch the stat method on the Path class or specifically for the instance if we could intercept it.
+    # Patching Path.stat is safer than os.stat as it avoids global side effects and path resolution issues.
+    with patch("pathlib.Path.stat", return_value=fake_stat):
+        # The test should fail effectively demonstrating the vulnerability
+        # We expect RuntimeError with message "not owned by current user"
+        with pytest.raises(RuntimeError, match="not owned by current user"):
+            _ensure_secure_directory(unsafe_dir)

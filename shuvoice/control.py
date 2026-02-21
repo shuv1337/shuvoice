@@ -51,6 +51,9 @@ def _ensure_secure_directory(path: Path):
     except OSError:
         log.debug("Could not chmod %s to 0700", path)
 
+    if path.stat().st_uid != os.getuid():
+        raise RuntimeError(f"Control socket directory {path} is not owned by current user")
+
 
 def default_control_socket_path() -> Path:
     runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")).resolve()
@@ -167,8 +170,9 @@ class ControlServer:
                         payload = conn.recv(1024)
                         command = payload.decode("utf-8", errors="replace").strip().lower()
                         response = self._handle_command(command)
-                    except Exception as e:
-                        response = f"ERROR {e}"
+                    except Exception:
+                        log.exception("Error handling control command")
+                        response = "ERROR internal error"
 
                     try:
                         conn.sendall((response + "\n").encode("utf-8"))
