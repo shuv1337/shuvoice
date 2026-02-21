@@ -17,7 +17,9 @@ from gi.repository import Gtk4LayerShell as LayerShell
 
 from .overlay_state import (
     OVERLAY_STATE_CLASSES,
+    OVERLAY_STATE_ERROR,
     OVERLAY_STATE_LISTENING,
+    OVERLAY_STATE_PROCESSING,
     overlay_state_class,
 )
 
@@ -104,13 +106,13 @@ class CaptionOverlay:
         box.add_css_class("caption-box")
         box.set_spacing(12)
 
-        icon = Gtk.Image.new_from_icon_name("microphone-sensitivity-high-symbolic")
+        self._icon = Gtk.Image.new_from_icon_name("microphone-sensitivity-high-symbolic")
         icon_size = int(self._config.font_size * 1.2)
-        icon.set_pixel_size(icon_size)
-        icon.set_valign(Gtk.Align.CENTER)
-        icon.add_css_class("recording-icon")
-        icon.set_tooltip_text("Microphone active")
-        box.append(icon)
+        self._icon.set_pixel_size(icon_size)
+        self._icon.set_valign(Gtk.Align.CENTER)
+        self._icon.add_css_class("recording-icon")
+        self._icon.set_tooltip_text("Microphone active")
+        box.append(self._icon)
 
         self._label = Gtk.Label(label="")
         self._label.add_css_class("caption-label")
@@ -134,6 +136,15 @@ class CaptionOverlay:
 
         self._box.add_css_class(overlay_state_class(state))
         self._state = state
+
+        if self._icon:
+            status_text = {
+                OVERLAY_STATE_LISTENING: "Listening…",
+                OVERLAY_STATE_PROCESSING: "Processing…",
+                OVERLAY_STATE_ERROR: "Error",
+            }.get(state, state)
+            self._icon.set_tooltip_text(status_text)
+            self._icon.update_property([Gtk.AccessibleProperty.LABEL], [status_text])
 
     # -- Thread-safe public API (called from ASR / hotkey threads) ----------
 
