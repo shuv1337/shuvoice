@@ -138,37 +138,36 @@ def test_ensure_secure_directory_rejects_unsafe_ownership(tmp_path: Path):
     # Since we are running as current user, os.getuid() will be different.
 
     original_stat = os.stat
-    unsafe_dir_str = str(unsafe_dir)
+    unsafe_dir_abs = unsafe_dir.resolve()
 
     def mock_stat(path, *args, **kwargs):
-        # Handle path being a Path object or string
-        path_str = str(path)
-
         # Call original stat to get real values first
         try:
             st = original_stat(path, *args, **kwargs)
         except Exception:
             raise
 
-        # Check if this is the directory we are testing
-        # We assume strict path match for the test simplicity to avoid recursion
-        if path_str == unsafe_dir_str:
-            # Return a stat_result with a different UID (9999)
-            # st_mode, st_ino, st_dev, st_nlink, st_uid, st_gid, st_size, st_atime, st_mtime, st_ctime
-            return os.stat_result(
-                (
-                    st.st_mode,
-                    st.st_ino,
-                    st.st_dev,
-                    st.st_nlink,
-                    9999,
-                    st.st_gid,
-                    st.st_size,
-                    st.st_atime,
-                    st.st_mtime,
-                    st.st_ctime,
+        # Robust check if this is the directory we are testing
+        try:
+            # Resolve the path being checked to compare canonical paths
+            if Path(path).resolve() == unsafe_dir_abs:
+                # Return a stat_result with a different UID (9999)
+                return os.stat_result(
+                    (
+                        st.st_mode,
+                        st.st_ino,
+                        st.st_dev,
+                        st.st_nlink,
+                        9999,
+                        st.st_gid,
+                        st.st_size,
+                        st.st_atime,
+                        st.st_mtime,
+                        st.st_ctime,
+                    )
                 )
-            )
+        except Exception:
+            pass
         return st
 
     # Only patch os.stat. pathlib.Path.stat calls os.stat internally.
