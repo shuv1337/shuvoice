@@ -45,6 +45,13 @@ uv pip install -e .
 uv pip install -e .[asr]
 ```
 
+For Python 3.14 + uv, prefer the repo override file to avoid
+`kaldialign` source-build issues:
+
+```bash
+uv pip install -e .[asr] --overrides packaging/constraints/py314-overrides.txt
+```
+
 If NeMo wheels are unavailable for your environment:
 
 ```bash
@@ -175,6 +182,9 @@ use_cuda_graph_decoder = false
 - `No module named 'gi'`
   - Install GTK Python bindings (`pip/uv install -e .` now includes `PyGObject`).
   - If build fails, install system deps: `sudo pacman -S python-gobject gtk4 gtk4-layer-shell`.
+- `Failed to build kaldialign` when installing `.[asr]` on Python 3.14
+  - Use: `uv pip install -e .[asr] --overrides packaging/constraints/py314-overrides.txt`.
+  - Or use a Python 3.13 virtualenv for ASR installs.
 - `No keyboard device found ... input group`
   - Add user to `input` group and re-login, or use `hotkey_backend = "ipc"`.
 - `Control socket not found ...`

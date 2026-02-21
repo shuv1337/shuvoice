@@ -1,0 +1,11 @@
+# uv override pins for Python 3.14 environments.
+#
+# Why:
+# - nemo-toolkit[asr] currently constrains kaldialign<=0.9.1
+# - kaldialign<=0.9.1 often falls back to source builds on cp314
+# - source builds can fail in modern CMake/pybind11 toolchains
+#
+# Use with:
+#   uv pip install -e .[asr] --overrides packaging/constraints/py314-overrides.txt
+
+kaldialign==0.9.3
