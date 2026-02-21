@@ -14,6 +14,8 @@ def test_reset_clears_all_fields():
         peak_rms=0.5,
         utterance_gain=2.0,
         utterance_rms_threshold=0.1,
+        unchanged_steps=3,
+        last_chunk_rms=0.2,
     )
 
     state.reset(rms_threshold=0.33)
@@ -25,6 +27,8 @@ def test_reset_clears_all_fields():
     assert state.peak_rms == 0.0
     assert state.utterance_gain == 1.0
     assert state.utterance_rms_threshold == 0.33
+    assert state.unchanged_steps == 0
+    assert state.last_chunk_rms == 0.0
 
 
 def test_add_chunk_increments_total():

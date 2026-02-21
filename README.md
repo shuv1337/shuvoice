@@ -221,3 +221,7 @@ The script:
   - Select the correct mic (`python -m shuvoice --list-audio-devices`, then set `audio_device`). Prefer device *name* over numeric index, because indices can change between runs.
   - Increase `input_gain` moderately (eg. `1.3` to `1.8`) if your mic is too quiet.
   - If silent presses still produce phantom text (eg. "thank you"), raise `silence_rms_threshold` slightly (eg. `0.010` to `0.015`) and/or increase `silence_rms_multiplier` (eg. `2.0`) in config.
+- Long phrases plateau or cut out mid-sentence
+  - Keep `streaming_stall_guard = true` (default) to inject a tiny silent flush when transcript stalls despite speech energy.
+  - Tune `streaming_stall_chunks` (try `3` to `6`) and `streaming_stall_rms_ratio` (try `0.6` to `0.9`) in config.
+  - Run `python scripts/tts_roundtrip.py --phrases-file examples/tts_roundtrip_phrases.txt --device cuda` to compare before/after behavior.

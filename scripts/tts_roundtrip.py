@@ -169,7 +169,9 @@ def normalize_text(text: str) -> str:
     return text.strip()
 
 
-def stream_transcribe(engine: ASREngine, audio: np.ndarray, native_chunk: int, flush_chunks: int) -> str:
+def stream_transcribe(
+    engine: ASREngine, audio: np.ndarray, native_chunk: int, flush_chunks: int
+) -> str:
     engine.reset()
 
     transcript = ""

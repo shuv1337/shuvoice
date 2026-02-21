@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from shuvoice.transcript import MIN_OVERLAP_CHARS, prefer_transcript
+from shuvoice.transcript import MIN_OVERLAP_CHARS, MIN_OVERLAP_WORDS, prefer_transcript
 
 
 def test_normal_growth_prefers_candidate():
@@ -48,3 +48,19 @@ def test_overlap_threshold_at_eight_chars_stitches():
     candidate = "1234beta and gamma"
     # overlap is exactly 8 chars ("1234beta")
     assert prefer_transcript(previous, candidate) == "alpha1234beta and gamma"
+
+
+def test_word_overlap_stitches_shifted_context():
+    assert MIN_OVERLAP_WORDS == 2
+    previous = "But I would definitely like to see"
+    candidate = "to see how cross platform we can make it"
+    assert (
+        prefer_transcript(previous, candidate)
+        == "But I would definitely like to see how cross platform we can make it"
+    )
+
+
+def test_word_overlap_requires_new_suffix():
+    previous = "we are done now"
+    candidate = "are done now"
+    assert prefer_transcript(previous, candidate) == previous
