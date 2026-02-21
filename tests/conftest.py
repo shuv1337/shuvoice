@@ -2,6 +2,13 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
+
+# Mock sounddevice/evdev/gi to prevent import errors in CI/headless environments
+if "sounddevice" not in sys.modules:
+    mock_sd = MagicMock()
+    mock_sd.PortAudioError = OSError
+    sys.modules["sounddevice"] = mock_sd
 
 import pytest
 

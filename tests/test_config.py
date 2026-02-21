@@ -19,6 +19,8 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     assert cfg.audio_queue_max_size == 200
     assert cfg.audio_feedback is True
     assert cfg.auto_capitalize is True
+    assert cfg.streaming_stall_guard is True
+    assert cfg.streaming_stall_chunks == 4
 
 
 def test_load_flattens_sections_and_ignores_unknown(monkeypatch, tmp_path: Path):
@@ -54,6 +56,12 @@ typing_retry_attempts = 3
 typing_retry_delay_ms = 20
 auto_capitalize = false
 
+[streaming]
+streaming_stall_guard = false
+streaming_stall_chunks = 6
+streaming_stall_rms_ratio = 0.9
+streaming_stall_flush_chunks = 2
+
 [feedback]
 audio_feedback = false
 feedback_start_freq = 500
@@ -83,6 +91,10 @@ foo = "bar"
     assert cfg.typing_retry_attempts == 3
     assert cfg.typing_retry_delay_ms == 20
     assert cfg.auto_capitalize is False
+    assert cfg.streaming_stall_guard is False
+    assert cfg.streaming_stall_chunks == 6
+    assert cfg.streaming_stall_rms_ratio == 0.9
+    assert cfg.streaming_stall_flush_chunks == 2
     assert cfg.audio_feedback is False
     assert cfg.feedback_start_freq == 500
     assert cfg.feedback_stop_freq == 400
@@ -121,3 +133,14 @@ def test_native_chunk_samples_scaling():
 def test_audio_queue_max_size_validation():
     with pytest.raises(ValueError):
         Config(audio_queue_max_size=0)
+
+
+def test_streaming_stall_validation():
+    with pytest.raises(ValueError):
+        Config(streaming_stall_chunks=0)
+
+    with pytest.raises(ValueError):
+        Config(streaming_stall_flush_chunks=0)
+
+    with pytest.raises(ValueError):
+        Config(streaming_stall_rms_ratio=0)

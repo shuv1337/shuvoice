@@ -53,6 +53,13 @@ typing_retry_attempts = 2
 typing_retry_delay_ms = 40
 auto_capitalize = true
 
+[streaming]
+# Stall guard injects a short silent flush when transcript stalls despite speech energy.
+streaming_stall_guard = true
+streaming_stall_chunks = 4
+streaming_stall_rms_ratio = 0.7
+streaming_stall_flush_chunks = 1
+
 [feedback]
 audio_feedback = true
 feedback_start_freq = 880

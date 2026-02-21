@@ -25,6 +25,7 @@ from .feedback import play_tone
 from .hotkey import HotkeyListener
 from .overlay import CaptionOverlay
 from .postprocess import capitalize_first
+from .streaming_health import should_trigger_stall_flush
 from .transcript import prefer_transcript
 from .typer import StreamingTyper
 from .utterance_state import _UtteranceState
@@ -108,6 +109,11 @@ class ShuVoiceApp(Gtk.Application):
             self.config.sample_rate * max(0, int(self.config.min_speech_ms)) // 1000,
         )
         self._noise_floor_rms = 0.0
+
+        self._streaming_stall_guard = bool(self.config.streaming_stall_guard)
+        self._streaming_stall_chunks = max(1, int(self.config.streaming_stall_chunks))
+        self._streaming_stall_rms_ratio = max(0.0, float(self.config.streaming_stall_rms_ratio))
+        self._streaming_stall_flush_chunks = max(1, int(self.config.streaming_stall_flush_chunks))
 
     def load_model(self):
         """Load the ASR model. Call before run() — this blocks."""
@@ -348,6 +354,7 @@ class ShuVoiceApp(Gtk.Application):
     def _append_recording_chunk(self, state: _UtteranceState, chunk: np.ndarray):
         state.add_chunk(chunk)
         chunk_rms = audio_rms(chunk)
+        state.last_chunk_rms = chunk_rms
         state.peak_rms = max(state.peak_rms, chunk_rms)
         if chunk_rms >= state.utterance_rms_threshold:
             state.speech_samples += len(chunk)
@@ -381,12 +388,40 @@ class ShuVoiceApp(Gtk.Application):
         if merged != state.last_text:
             log.debug("Transcript updated: %r -> %r", state.last_text, merged)
             state.last_text = merged
+            state.unchanged_steps = 0
             if self.overlay:
                 self.overlay.set_text(state.last_text)
             if self.config.output_mode == "streaming_partial":
                 self.typer.update_partial(state.last_text)
+        else:
+            state.unchanged_steps += 1
 
         return has_more
+
+    def _flush_streaming_stall(self, state: _UtteranceState):
+        if self._asr_disabled:
+            return
+
+        native = self.config.native_chunk_samples
+        silence = np.zeros(native, dtype=np.float32)
+
+        for _ in range(self._streaming_stall_flush_chunks):
+            try:
+                text = self._process_chunk_safe(silence)
+            except Exception:
+                self._recover_asr_after_failure("ASR stall-guard flush failed")
+                break
+
+            merged = prefer_transcript(state.last_text, text)
+            if merged != state.last_text:
+                log.debug("Transcript updated after stall flush: %r -> %r", state.last_text, merged)
+                state.last_text = merged
+                if self.overlay:
+                    self.overlay.set_text(state.last_text)
+                if self.config.output_mode == "streaming_partial":
+                    self.typer.update_partial(state.last_text)
+
+        state.unchanged_steps = 0
 
     def _process_recording_chunks(self, state: _UtteranceState):
         while (
@@ -397,6 +432,21 @@ class ShuVoiceApp(Gtk.Application):
             has_more = self._transcribe_native_chunk(state, "ASR chunk processing failed")
             if not has_more:
                 break
+
+            if self._streaming_stall_guard and should_trigger_stall_flush(
+                unchanged_steps=state.unchanged_steps,
+                chunk_rms=state.last_chunk_rms,
+                utterance_threshold=state.utterance_rms_threshold,
+                stall_chunks=self._streaming_stall_chunks,
+                stall_rms_ratio=self._streaming_stall_rms_ratio,
+            ):
+                log.debug(
+                    "Streaming stall guard triggered (unchanged_steps=%d, chunk_rms=%.4f, threshold=%.4f)",
+                    state.unchanged_steps,
+                    state.last_chunk_rms,
+                    state.utterance_rms_threshold,
+                )
+                self._flush_streaming_stall(state)
 
     def _drain_and_buffer(self, state: _UtteranceState):
         drained = self.audio.drain_pending_chunks()
