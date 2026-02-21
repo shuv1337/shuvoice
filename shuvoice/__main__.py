@@ -307,7 +307,18 @@ def main():
         )
         sys.exit(1)
 
-    from .app import ShuVoiceApp
+    try:
+        from .app import ShuVoiceApp
+    except ModuleNotFoundError as e:
+        if e.name == "gi":
+            print(
+                "ERROR: Missing PyGObject (module 'gi').\n"
+                "Install Python deps with: pip install -e .\n"
+                "If that fails, install system packages: pacman -S python-gobject gtk4 gtk4-layer-shell",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        raise
 
     try:
         app = ShuVoiceApp(config)

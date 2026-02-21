@@ -63,6 +63,12 @@ class Config:
     typing_retry_delay_ms: int = 40
     auto_capitalize: bool = True
 
+    # Streaming stability
+    streaming_stall_guard: bool = True
+    streaming_stall_chunks: int = 4
+    streaming_stall_rms_ratio: float = 0.7
+    streaming_stall_flush_chunks: int = 1
+
     # Audio feedback
     audio_feedback: bool = True
     feedback_start_freq: int = 880
@@ -73,6 +79,12 @@ class Config:
     def __post_init__(self):
         if int(self.audio_queue_max_size) < 1:
             raise ValueError("audio_queue_max_size must be >= 1")
+        if int(self.streaming_stall_chunks) < 1:
+            raise ValueError("streaming_stall_chunks must be >= 1")
+        if int(self.streaming_stall_flush_chunks) < 1:
+            raise ValueError("streaming_stall_flush_chunks must be >= 1")
+        if float(self.streaming_stall_rms_ratio) <= 0:
+            raise ValueError("streaming_stall_rms_ratio must be > 0")
 
     @property
     def chunk_samples(self) -> int:
