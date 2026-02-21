@@ -137,41 +137,29 @@ def test_ensure_secure_directory_rejects_unsafe_ownership(tmp_path: Path):
     # Mock os.stat to simulate ownership by another user (uid=9999)
     # Since we are running as current user, os.getuid() will be different.
 
-    original_stat = os.stat
-    unsafe_dir_abs = unsafe_dir.resolve()
+    # Mock stat_result with a different UID (9999)
+    # We need a real stat result to base ours on, so we get one from the real file
+    st = unsafe_dir.stat()
+    fake_stat = os.stat_result(
+        (
+            st.st_mode,
+            st.st_ino,
+            st.st_dev,
+            st.st_nlink,
+            9999,  # Fake UID
+            st.st_gid,
+            st.st_size,
+            st.st_atime,
+            st.st_mtime,
+            st.st_ctime,
+        )
+    )
 
-    def mock_stat(path, *args, **kwargs):
-        # Call original stat to get real values first
-        try:
-            st = original_stat(path, *args, **kwargs)
-        except Exception:
-            raise
-
-        # Robust check if this is the directory we are testing
-        try:
-            # Resolve the path being checked to compare canonical paths
-            if Path(path).resolve() == unsafe_dir_abs:
-                # Return a stat_result with a different UID (9999)
-                return os.stat_result(
-                    (
-                        st.st_mode,
-                        st.st_ino,
-                        st.st_dev,
-                        st.st_nlink,
-                        9999,
-                        st.st_gid,
-                        st.st_size,
-                        st.st_atime,
-                        st.st_mtime,
-                        st.st_ctime,
-                    )
-                )
-        except Exception:
-            pass
-        return st
-
-    # Only patch os.stat. pathlib.Path.stat calls os.stat internally.
-    with patch("os.stat", side_effect=mock_stat):
+    # Patch pathlib.Path.stat specifically.
+    # Since _ensure_secure_directory calls path.stat(), and path is an instance of Path,
+    # we can patch the stat method on the Path class or specifically for the instance if we could intercept it.
+    # Patching Path.stat is safer than os.stat as it avoids global side effects and path resolution issues.
+    with patch("pathlib.Path.stat", return_value=fake_stat):
         # The test should fail effectively demonstrating the vulnerability
         # We expect RuntimeError with message "not owned by current user"
         with pytest.raises(RuntimeError, match="not owned by current user"):
