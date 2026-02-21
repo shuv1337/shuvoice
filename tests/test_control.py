@@ -4,11 +4,13 @@ import os
 import stat
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from shuvoice.control import (
     ControlServer,
+    _ensure_secure_directory,
     default_control_socket_path,
     resolve_control_socket_path,
 )
@@ -122,3 +124,56 @@ def test_resolve_control_socket_path_accepts_tmp_path(tmp_path: Path):
 
     assert resolved == candidate.resolve()
     assert resolved.parent.exists()
+
+
+def test_ensure_secure_directory_rejects_unsafe_ownership(tmp_path: Path):
+    """
+    Test that _ensure_secure_directory raises an error if the directory
+    is owned by another user (e.g., pre-created by an attacker in /tmp).
+    """
+    unsafe_dir = tmp_path / "unsafe_dir"
+    unsafe_dir.mkdir()
+
+    # Mock os.stat to simulate ownership by another user (uid=9999)
+    # Since we are running as current user, os.getuid() will be different.
+
+    original_stat = os.stat
+    unsafe_dir_str = str(unsafe_dir)
+
+    def mock_stat(path, *args, **kwargs):
+        # Handle path being a Path object or string
+        path_str = str(path)
+
+        # Call original stat to get real values first
+        try:
+            st = original_stat(path, *args, **kwargs)
+        except Exception:
+            raise
+
+        # Check if this is the directory we are testing
+        # We assume strict path match for the test simplicity to avoid recursion
+        if path_str == unsafe_dir_str:
+            # Return a stat_result with a different UID (9999)
+            # st_mode, st_ino, st_dev, st_nlink, st_uid, st_gid, st_size, st_atime, st_mtime, st_ctime
+            return os.stat_result(
+                (
+                    st.st_mode,
+                    st.st_ino,
+                    st.st_dev,
+                    st.st_nlink,
+                    9999,
+                    st.st_gid,
+                    st.st_size,
+                    st.st_atime,
+                    st.st_mtime,
+                    st.st_ctime,
+                )
+            )
+        return st
+
+    # Only patch os.stat. pathlib.Path.stat calls os.stat internally.
+    with patch("os.stat", side_effect=mock_stat):
+        # The test should fail effectively demonstrating the vulnerability
+        # We expect RuntimeError with message "not owned by current user"
+        with pytest.raises(RuntimeError, match="not owned by current user"):
+            _ensure_secure_directory(unsafe_dir)
