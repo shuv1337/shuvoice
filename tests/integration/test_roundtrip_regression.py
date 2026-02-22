@@ -48,9 +48,13 @@ def test_manual_phrase_roundtrip_regression(tmp_path: Path):
     timeout_sec = int(_env("SHUVOICE_ROUNDTRIP_TIMEOUT_SEC", "1800"))
 
     max_empty_ratio_total = float(_env("SHUVOICE_ROUNDTRIP_MAX_EMPTY_RATIO", "0.10"))
-    max_empty_ratio_per_phrase = float(_env("SHUVOICE_ROUNDTRIP_MAX_EMPTY_RATIO_PER_PHRASE", "0.20"))
+    max_empty_ratio_per_phrase = float(
+        _env("SHUVOICE_ROUNDTRIP_MAX_EMPTY_RATIO_PER_PHRASE", "0.20")
+    )
     min_median_similarity_total = float(_env("SHUVOICE_ROUNDTRIP_MIN_MEDIAN_SIM", "0.90"))
-    min_median_similarity_per_phrase = float(_env("SHUVOICE_ROUNDTRIP_MIN_MEDIAN_SIM_PER_PHRASE", "0.88"))
+    min_median_similarity_per_phrase = float(
+        _env("SHUVOICE_ROUNDTRIP_MIN_MEDIAN_SIM_PER_PHRASE", "0.88")
+    )
 
     phrase_lines: list[str] = []
     for phrase in MANUAL_REGRESSION_PHRASES:
@@ -79,7 +83,9 @@ def test_manual_phrase_roundtrip_regression(tmp_path: Path):
     elif backend == "sherpa":
         sherpa_model_dir = _env("SHUVOICE_SHERPA_MODEL_DIR", "")
         if not sherpa_model_dir:
-            pytest.skip("SHUVOICE_SHERPA_MODEL_DIR is required when SHUVOICE_ROUNDTRIP_BACKEND=sherpa")
+            pytest.skip(
+                "SHUVOICE_SHERPA_MODEL_DIR is required when SHUVOICE_ROUNDTRIP_BACKEND=sherpa"
+            )
         cmd.extend(["--sherpa-model-dir", sherpa_model_dir])
         cmd.extend(["--sherpa-provider", _env("SHUVOICE_SHERPA_PROVIDER", "cpu")])
     elif backend == "moonshine":
@@ -138,7 +144,9 @@ def test_manual_phrase_roundtrip_regression(tmp_path: Path):
 
         phrase_empty = sum(1 for row in phrase_rows if not row["hypothesis"].strip())
         phrase_empty_ratio = phrase_empty / len(phrase_rows)
-        phrase_median_similarity = statistics.median(float(row["similarity"]) for row in phrase_rows)
+        phrase_median_similarity = statistics.median(
+            float(row["similarity"]) for row in phrase_rows
+        )
 
         assert phrase_empty_ratio <= max_empty_ratio_per_phrase, (
             "Per-phrase empty hypothesis ratio exceeded threshold. "

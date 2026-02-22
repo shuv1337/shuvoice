@@ -408,9 +408,7 @@ class ShuVoiceApp(Gtk.Application):
 
         merged = prefer_transcript(state.last_text, text)
         if merged != state.last_text:
-            log.debug(
-                "Transcript updated: len %d -> %d", len(state.last_text), len(merged)
-            )
+            log.debug("Transcript updated: len %d -> %d", len(state.last_text), len(merged))
             state.last_text = merged
             state.unchanged_steps = 0
             if self.overlay:
