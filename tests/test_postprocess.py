@@ -49,6 +49,12 @@ def test_apply_text_replacements_deletion():
     assert apply_text_replacements("um", replacements) == ""
 
 
+def test_apply_text_replacements_treats_replacement_as_literal_text():
+    replacements = {"token": r"\1 literal"}
+
+    assert apply_text_replacements("token", replacements) == r"\1 literal"
+
+
 def test_apply_text_replacements_noop_cases():
     assert apply_text_replacements("", {"a": "b"}) == ""
     assert apply_text_replacements("hello", {}) == "hello"

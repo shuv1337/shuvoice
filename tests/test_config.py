@@ -242,6 +242,13 @@ def test_text_replacements_validation():
     with pytest.raises(ValueError, match="text_replacements"):
         Config(text_replacements="nope")
 
+    # Non-string key/value types
+    with pytest.raises(ValueError, match="keys must be strings"):
+        Config(text_replacements={1: "value"})
+
+    with pytest.raises(ValueError, match="values must be strings"):
+        Config(text_replacements={"um": 1})
+
     # Empty/whitespace key
     with pytest.raises(ValueError, match="keys must not be empty"):
         Config(text_replacements={"   ": "value"})

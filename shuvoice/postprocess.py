@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import re
 
 
@@ -18,12 +19,14 @@ def capitalize_first(text: str) -> str:
     return "".join(chars)
 
 
-def apply_text_replacements(text: str, replacements: dict[str, str]) -> str:
+def apply_text_replacements(text: str, replacements: Mapping[str, str] | None) -> str:
     """Apply custom whole-word/phrase replacements case-insensitively.
 
     Longer source phrases are matched first to prevent partial overlaps.
     Empty replacement values delete the matched word/phrase, and any
     resulting multi-space runs are collapsed to a single space.
+
+    Replacement values are treated literally (not as regex backreferences).
     """
     if not text or not replacements:
         return text
@@ -33,7 +36,8 @@ def apply_text_replacements(text: str, replacements: dict[str, str]) -> str:
         if not source:
             continue
         pattern = re.compile(rf"(?<!\w){re.escape(source)}(?!\w)", re.IGNORECASE)
-        result = pattern.sub(replacements[source], result)
+        replacement = replacements[source]
+        result = pattern.sub(lambda _m, replacement=replacement: replacement, result)
 
     # Collapse double-spaces left by deletions (empty replacements).
     result = re.sub(r" {2,}", " ", result).strip()

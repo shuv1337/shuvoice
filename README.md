@@ -254,6 +254,18 @@ Backend selection is controlled by `asr_backend`:
 
 `right_context` applies to NeMo only.
 
+Final text corrections can be configured with `[typing.text_replacements]`:
+
+```toml
+[typing.text_replacements]
+"shove voice" = "ShuVoice"
+"hyper land" = "Hyprland"
+"um" = ""
+```
+
+Matches are case-insensitive and only apply to whole words/phrases (longest
+source phrases first). Empty values delete the matched word/phrase.
+
 If you hit RNNT CUDA-graph decoder issues on your driver/toolkit combo,
 keep this setting disabled (default):
 

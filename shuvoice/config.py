@@ -142,16 +142,21 @@ class Config:
         if float(self.streaming_stall_rms_ratio) <= 0:
             raise ValueError("streaming_stall_rms_ratio must be > 0")
 
-        # Normalize text_replacements: strip whitespace, reject bad types/empty keys.
+        # Normalize text_replacements: strip whitespace and validate string types.
         # Empty values are allowed (they delete the matched word/phrase).
         if not isinstance(self.text_replacements, dict):
             raise ValueError("text_replacements must be a table/map of string keys to values")
         normalized_replacements: dict[str, str] = {}
         for key, value in self.text_replacements.items():
-            key_text = str(key).strip()
+            if not isinstance(key, str):
+                raise ValueError("text_replacements keys must be strings")
+            if not isinstance(value, str):
+                raise ValueError("text_replacements values must be strings")
+
+            key_text = key.strip()
             if not key_text:
                 raise ValueError("text_replacements keys must not be empty or whitespace-only")
-            normalized_replacements[key_text] = str(value).strip()
+            normalized_replacements[key_text] = value.strip()
         self.text_replacements = normalized_replacements
 
     @property
