@@ -24,7 +24,7 @@ from .control import ControlServer
 from .feedback import play_tone
 from .hotkey import HotkeyListener
 from .overlay import CaptionOverlay
-from .postprocess import capitalize_first
+from .postprocess import apply_text_replacements, capitalize_first
 from .streaming_health import should_trigger_stall_flush
 from .transcript import prefer_transcript
 from .typer import StreamingTyper
@@ -598,6 +598,10 @@ class ShuVoiceApp(Gtk.Application):
 
     def _commit_utterance(self, state: _UtteranceState):
         final_text = state.last_text.strip()
+        if not final_text:
+            return
+
+        final_text = apply_text_replacements(final_text, self.config.text_replacements)
         if not final_text:
             return
 
