@@ -16,6 +16,11 @@ silence_rms_threshold = 0.008
 silence_rms_multiplier = 1.8
 # Minimum above-threshold speech to consider an utterance valid
 min_speech_ms = 80
+# App-side per-utterance auto-gain (used by backends that do not request raw audio,
+# currently Sherpa). NeMo and Moonshine bypass this gain path.
+auto_gain_target_peak = 0.15
+auto_gain_max = 10.0
+auto_gain_settle_chunks = 2
 
 [asr]
 # nemo | sherpa | moonshine

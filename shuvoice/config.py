@@ -32,6 +32,9 @@ class Config:
     silence_rms_threshold: float = 0.008  # absolute floor for speech RMS gating
     silence_rms_multiplier: float = 1.8  # dynamic threshold = noise_floor * multiplier
     min_speech_ms: int = 80  # minimum above-threshold speech before committing text
+    auto_gain_target_peak: float = 0.15  # per-utterance RMS target for app-side gain
+    auto_gain_max: float = 10.0  # max app-side gain multiplier
+    auto_gain_settle_chunks: int = 2  # speech-level chunks before gain updates
 
     # ASR
     asr_backend: str = "nemo"  # nemo | sherpa | moonshine
@@ -125,6 +128,12 @@ class Config:
 
         if int(self.audio_queue_max_size) < 1:
             raise ValueError("audio_queue_max_size must be >= 1")
+        if float(self.auto_gain_target_peak) <= 0:
+            raise ValueError("auto_gain_target_peak must be > 0")
+        if float(self.auto_gain_max) < 1:
+            raise ValueError("auto_gain_max must be >= 1")
+        if int(self.auto_gain_settle_chunks) < 1:
+            raise ValueError("auto_gain_settle_chunks must be >= 1")
         if int(self.streaming_stall_chunks) < 1:
             raise ValueError("streaming_stall_chunks must be >= 1")
         if int(self.streaming_stall_flush_chunks) < 1:

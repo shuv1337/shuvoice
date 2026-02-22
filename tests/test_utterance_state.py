@@ -11,6 +11,7 @@ def test_reset_clears_all_fields():
         total=2,
         last_text="hello",
         speech_samples=5,
+        speech_chunks_seen=3,
         peak_rms=0.5,
         utterance_gain=2.0,
         utterance_rms_threshold=0.1,
@@ -24,6 +25,7 @@ def test_reset_clears_all_fields():
     assert state.total == 0
     assert state.last_text == ""
     assert state.speech_samples == 0
+    assert state.speech_chunks_seen == 0
     assert state.peak_rms == 0.0
     assert state.utterance_gain == 1.0
     assert state.utterance_rms_threshold == 0.33

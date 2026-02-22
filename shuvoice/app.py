@@ -103,6 +103,9 @@ class ShuVoiceApp(Gtk.Application):
             0,
             self.config.sample_rate * max(0, int(self.config.min_speech_ms)) // 1000,
         )
+        self._auto_gain_target_peak = max(1e-4, float(self.config.auto_gain_target_peak))
+        self._auto_gain_max = max(1.0, float(self.config.auto_gain_max))
+        self._auto_gain_settle_chunks = max(1, int(self.config.auto_gain_settle_chunks))
         self._noise_floor_rms = 0.0
 
         self._streaming_stall_guard = bool(self.config.streaming_stall_guard)
@@ -351,11 +354,24 @@ class ShuVoiceApp(Gtk.Application):
         chunk_rms = audio_rms(chunk)
         state.last_chunk_rms = chunk_rms
         state.peak_rms = max(state.peak_rms, chunk_rms)
+
         if chunk_rms >= state.utterance_rms_threshold:
             state.speech_samples += len(chunk)
+            state.speech_chunks_seen += 1
+
+        # Backends with internal normalization (e.g. NeMo/Moonshine) bypass
+        # app-side gain entirely.
+        if self.asr.wants_raw_audio:
+            return
+
+        if state.speech_chunks_seen < self._auto_gain_settle_chunks:
+            return
+
         if state.peak_rms > 0.003:
-            target_peak = 0.3
-            state.utterance_gain = min(target_peak / state.peak_rms, 40.0)
+            state.utterance_gain = min(
+                self._auto_gain_target_peak / state.peak_rms,
+                self._auto_gain_max,
+            )
 
     def _transcribe_native_chunk(self, state: _UtteranceState, error_context: str) -> bool:
         to_process, has_more = state.consume_native_chunk(self.asr.native_chunk_samples)
@@ -399,6 +415,8 @@ class ShuVoiceApp(Gtk.Application):
             return
 
         native = self.asr.native_chunk_samples
+        # Intentionally feed raw digital silence here; this path is a short
+        # stall nudge and should not apply utterance gain.
         silence = np.zeros(native, dtype=np.float32)
 
         for _ in range(self._streaming_stall_flush_chunks):
@@ -469,27 +487,63 @@ class ShuVoiceApp(Gtk.Application):
                     state.total,
                 )
 
+    def _make_flush_noise(self, n_samples: int) -> np.ndarray:
+        """Generate low-amplitude noise at the ambient noise floor level.
+
+        Streaming transducers (e.g. Sherpa) may not flush buffered hypotheses
+        when fed perfect digital silence (np.zeros).  Ambient-level noise
+        better simulates the end-of-speech condition the model was trained on.
+        """
+        rms = max(self._noise_floor_rms, 1e-4)
+        noise = np.random.default_rng().normal(0.0, rms, size=n_samples).astype(np.float32)
+        return np.clip(noise, -1.0, 1.0)
+
     def _flush_tail_silence(self, state: _UtteranceState):
         if self._asr_disabled:
             return
 
-        silence = np.zeros(self.asr.native_chunk_samples, dtype=np.float32)
+        native = self.asr.native_chunk_samples
         stable_steps = 0
-        for _ in range(5):
+        ever_had_text = bool(state.last_text.strip())
+        # Generous budget: streaming transducers (e.g. Sherpa) may need many
+        # silence frames to flush internally-buffered hypotheses after
+        # the user stops speaking.
+        max_flush = 20
+        stable_required = 5
+
+        for i in range(max_flush):
+            # Use ambient-level noise at the same gain scale the model has
+            # been seeing, so streaming transducers recognise end-of-speech.
+            flush_audio = self._make_flush_noise(native)
+            if not self.asr.wants_raw_audio:
+                flush_audio = self._apply_utterance_gain(flush_audio, state.utterance_gain)
+
             try:
-                text = self._process_chunk_safe(silence)
+                text = self._process_chunk_safe(flush_audio)
             except Exception:
                 self._recover_asr_after_failure("ASR tail flush failed")
                 break
 
             merged = prefer_transcript(state.last_text, text)
-            if merged == state.last_text:
-                stable_steps += 1
-                if stable_steps >= 2:
-                    break
-            else:
-                stable_steps = 0
+            if merged != state.last_text:
+                log.debug(
+                    "Tail flush step %d: %r -> %r",
+                    i,
+                    state.last_text,
+                    merged,
+                )
                 state.last_text = merged
+                stable_steps = 0
+                ever_had_text = True
+                if self.overlay:
+                    self.overlay.set_text(state.last_text)
+            else:
+                stable_steps += 1
+                # Once we've seen text, converge quickly; otherwise keep
+                # flushing longer in case the model is still buffering.
+                needed = stable_required if ever_had_text else 5
+                if stable_steps >= needed:
+                    break
 
     def _commit_utterance(self, state: _UtteranceState):
         final_text = state.last_text.strip()

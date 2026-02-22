@@ -17,6 +17,9 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     assert cfg.hotkey_backend == "evdev"
     assert cfg.output_mode == "final_only"
     assert cfg.audio_queue_max_size == 200
+    assert cfg.auto_gain_target_peak == 0.15
+    assert cfg.auto_gain_max == 10.0
+    assert cfg.auto_gain_settle_chunks == 2
     assert cfg.audio_feedback is True
     assert cfg.auto_capitalize is True
     assert cfg.streaming_stall_guard is True
@@ -49,6 +52,9 @@ audio_queue_max_size = 55
 silence_rms_threshold = 0.007
 silence_rms_multiplier = 2.2
 min_speech_ms = 90
+auto_gain_target_peak = 0.11
+auto_gain_max = 7.5
+auto_gain_settle_chunks = 3
 unknown_audio_key = 999
 
 [asr]
@@ -106,6 +112,9 @@ foo = "bar"
     assert cfg.silence_rms_threshold == 0.007
     assert cfg.silence_rms_multiplier == 2.2
     assert cfg.min_speech_ms == 90
+    assert cfg.auto_gain_target_peak == 0.11
+    assert cfg.auto_gain_max == 7.5
+    assert cfg.auto_gain_settle_chunks == 3
     assert cfg.asr_backend == "sherpa"
     assert cfg.sherpa_model_dir == "/tmp/sherpa-model"
     assert cfg.sherpa_provider == "cuda"
@@ -197,6 +206,17 @@ def test_moonshine_model_precision_validation():
 def test_audio_queue_max_size_validation():
     with pytest.raises(ValueError):
         Config(audio_queue_max_size=0)
+
+
+def test_auto_gain_validation():
+    with pytest.raises(ValueError, match="auto_gain_target_peak"):
+        Config(auto_gain_target_peak=0)
+
+    with pytest.raises(ValueError, match="auto_gain_max"):
+        Config(auto_gain_max=0.9)
+
+    with pytest.raises(ValueError, match="auto_gain_settle_chunks"):
+        Config(auto_gain_settle_chunks=0)
 
 
 def test_streaming_stall_validation():

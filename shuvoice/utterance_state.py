@@ -15,6 +15,7 @@ class _UtteranceState:
     total: int = 0
     last_text: str = ""
     speech_samples: int = 0
+    speech_chunks_seen: int = 0
     peak_rms: float = 0.0
     utterance_gain: float = 1.0
     utterance_rms_threshold: float = 0.0
@@ -26,6 +27,7 @@ class _UtteranceState:
         self.total = 0
         self.last_text = ""
         self.speech_samples = 0
+        self.speech_chunks_seen = 0
         self.peak_rms = 0.0
         self.utterance_gain = 1.0
         self.utterance_rms_threshold = rms_threshold

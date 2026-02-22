@@ -81,6 +81,20 @@ def test_nemo_debug_step_num_property():
     assert engine.debug_step_num == 7
 
 
+def test_wants_raw_audio_by_backend(tmp_path: Path):
+    nemo = create_backend("nemo", Config())
+    assert nemo.wants_raw_audio is True
+
+    moonshine = create_backend("moonshine", Config(asr_backend="moonshine"))
+    assert moonshine.wants_raw_audio is True
+
+    sherpa = create_backend(
+        "sherpa",
+        Config(asr_backend="sherpa", sherpa_model_dir=str(tmp_path)),
+    )
+    assert sherpa.wants_raw_audio is False
+
+
 def test_get_backend_class_resolves_known_backends():
     assert get_backend_class("nemo").__name__ == "NemoBackend"
     assert get_backend_class("sherpa").__name__ == "SherpaBackend"

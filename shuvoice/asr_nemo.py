@@ -61,6 +61,10 @@ class NemoBackend(ASRBackend):
                 return 17920
 
     @property
+    def wants_raw_audio(self) -> bool:
+        return True
+
+    @property
     def debug_step_num(self) -> int | None:
         return self._step_num
 
