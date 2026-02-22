@@ -15,7 +15,9 @@ pytestmark = pytest.mark.e2e
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _run_control_cli(command: str, socket_path: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def _run_control_cli(
+    command: str, socket_path: Path, env: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             sys.executable,
