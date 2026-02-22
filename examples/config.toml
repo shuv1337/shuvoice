@@ -76,6 +76,8 @@ preserve_clipboard = false
 typing_retry_attempts = 2
 typing_retry_delay_ms = 40
 auto_capitalize = true
+# Optional speech correction map (case-insensitive whole word/phrase replacements)
+# custom_text_mappings = { "shove voice" = "ShuVoice", "speech to text" = "speech-to-text", "hyper land" = "Hyprland" }
 
 [streaming]
 # Stall guard injects a short silent flush when transcript stalls despite speech energy.

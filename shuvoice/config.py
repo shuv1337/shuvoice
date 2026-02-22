@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 try:  # Python 3.11+
@@ -80,6 +80,7 @@ class Config:
     typing_retry_attempts: int = 2
     typing_retry_delay_ms: int = 40
     auto_capitalize: bool = True
+    custom_text_mappings: dict[str, str] = field(default_factory=dict)
 
     # Streaming stability
     streaming_stall_guard: bool = True
@@ -140,6 +141,12 @@ class Config:
             raise ValueError("streaming_stall_flush_chunks must be >= 1")
         if float(self.streaming_stall_rms_ratio) <= 0:
             raise ValueError("streaming_stall_rms_ratio must be > 0")
+
+        self.custom_text_mappings = {
+            str(source).strip(): str(target).strip()
+            for source, target in dict(self.custom_text_mappings or {}).items()
+            if str(source).strip() and str(target).strip()
+        }
 
     @property
     def chunk_samples(self) -> int:

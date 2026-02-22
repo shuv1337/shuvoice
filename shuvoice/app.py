@@ -24,7 +24,7 @@ from .control import ControlServer
 from .feedback import play_tone
 from .hotkey import HotkeyListener
 from .overlay import CaptionOverlay
-from .postprocess import capitalize_first
+from .postprocess import apply_text_mappings, capitalize_first
 from .streaming_health import should_trigger_stall_flush
 from .transcript import prefer_transcript
 from .typer import StreamingTyper
@@ -600,6 +600,8 @@ class ShuVoiceApp(Gtk.Application):
         final_text = state.last_text.strip()
         if not final_text:
             return
+
+        final_text = apply_text_mappings(final_text, self.config.custom_text_mappings)
 
         if self.config.auto_capitalize:
             final_text = capitalize_first(final_text)

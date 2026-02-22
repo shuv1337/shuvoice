@@ -128,6 +128,16 @@ Applied only for backends that do **not** request raw audio.
 | `auto_gain_max` | `10.0` | Upper cap for utterance gain |
 | `auto_gain_settle_chunks` | `2` | Speech chunks required before gain updates |
 
+### Typing text mappings
+
+Use `[typing].custom_text_mappings` for case-insensitive whole-word/phrase replacements
+on final committed text. This is useful for fixing recurring ASR confusions.
+
+```toml
+[typing]
+custom_text_mappings = { "shove voice" = "ShuVoice", "speech to text" = "speech-to-text", "hyper land" = "Hyprland" }
+```
+
 ---
 
 ## ASR Backends
