@@ -497,14 +497,31 @@ class ShuVoiceApp(Gtk.Application):
                     state.total,
                 )
 
-    def _make_flush_noise(self, n_samples: int) -> np.ndarray:
-        """Generate low-amplitude noise at the ambient noise floor level.
+    # Minimum RMS for tail-flush noise.  In very quiet rooms the measured
+    # noise floor can be ~0.001 which, even after utterance gain, is too
+    # quiet for streaming transducers (e.g. Sherpa) to emit buffered tokens.
+    # 0.005 pre-gain produces ~0.05–0.10 RMS after typical gain (10–20×),
+    # matching the ambient level that reliably triggers flushing.
+    _FLUSH_NOISE_MIN_RMS = 0.005
+    # Escalation factor applied per stalled flush step.  When the model
+    # doesn't emit new text, each subsequent step increases the noise RMS
+    # by this multiplier, up to ``_FLUSH_NOISE_MAX_RMS``.
+    _FLUSH_NOISE_ESCALATION = 1.4
+    _FLUSH_NOISE_MAX_RMS = 0.08
+
+    def _make_flush_noise(self, n_samples: int, escalation: float = 1.0) -> np.ndarray:
+        """Generate low-amplitude noise for flushing streaming transducers.
 
         Streaming transducers (e.g. Sherpa) may not flush buffered hypotheses
-        when fed perfect digital silence (np.zeros).  Ambient-level noise
-        better simulates the end-of-speech condition the model was trained on.
+        when fed perfect digital silence.  Ambient-level noise better
+        simulates the end-of-speech condition the model was trained on.
+
+        The ``escalation`` multiplier (≥1.0) is applied on top of the base
+        RMS so that stalled flush steps progressively increase amplitude,
+        ensuring even very quiet environments eventually trigger emission.
         """
-        rms = max(self._noise_floor_rms, 1e-4)
+        base_rms = max(self._noise_floor_rms, self._FLUSH_NOISE_MIN_RMS)
+        rms = min(base_rms * escalation, self._FLUSH_NOISE_MAX_RMS)
         noise = np.random.default_rng().normal(0.0, rms, size=n_samples).astype(np.float32)
         return np.clip(noise, -1.0, 1.0)
 
@@ -520,6 +537,8 @@ class ShuVoiceApp(Gtk.Application):
         # the user stops speaking.
         max_flush = 20
         stable_required = 5
+        # Track consecutive stalled steps so we can escalate noise amplitude.
+        stalled_consecutive = 0
 
         for i in range(max_flush):
             # Abort tail flush if a new recording has started to avoid
@@ -530,7 +549,11 @@ class ShuVoiceApp(Gtk.Application):
 
             # Use ambient-level noise at the same gain scale the model has
             # been seeing, so streaming transducers recognise end-of-speech.
-            flush_audio = self._make_flush_noise(native)
+            # Escalate amplitude on stalled steps so even very quiet
+            # environments eventually produce enough energy to trigger
+            # token emission.
+            escalation = self._FLUSH_NOISE_ESCALATION ** stalled_consecutive
+            flush_audio = self._make_flush_noise(native, escalation=escalation)
             if not self.asr.wants_raw_audio:
                 flush_audio = self._apply_utterance_gain(flush_audio, state.utterance_gain)
 
@@ -543,18 +566,21 @@ class ShuVoiceApp(Gtk.Application):
             merged = prefer_transcript(state.last_text, text)
             if merged != state.last_text:
                 log.debug(
-                    "Tail flush step %d: %r -> %r",
+                    "Tail flush step %d: %r -> %r (escalation=%.2f)",
                     i,
                     state.last_text,
                     merged,
+                    escalation,
                 )
                 state.last_text = merged
                 stable_steps = 0
+                stalled_consecutive = 0
                 ever_had_text = True
                 if self.overlay:
                     self.overlay.set_text(state.last_text)
             else:
                 stable_steps += 1
+                stalled_consecutive += 1
                 # Once we've seen text, converge quickly; otherwise keep
                 # flushing longer in case the model is still buffering.
                 needed = stable_required if ever_had_text else 5

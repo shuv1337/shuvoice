@@ -89,11 +89,13 @@ def test_flush_tail_silence_aborts_when_new_recording_already_started():
         _asr_disabled=False,
         _recording=recording,
         asr=SimpleNamespace(native_chunk_samples=1600, wants_raw_audio=True),
-        _make_flush_noise=lambda _n: None,
+        _make_flush_noise=lambda _n, escalation=1.0: None,
         _process_chunk_safe=process_chunk,
         _recover_asr_after_failure=Mock(),
         overlay=None,
         config=SimpleNamespace(output_mode="final_only"),
+        _FLUSH_NOISE_ESCALATION=ShuVoiceApp._FLUSH_NOISE_ESCALATION,
+        _FLUSH_NOISE_MAX_RMS=ShuVoiceApp._FLUSH_NOISE_MAX_RMS,
     )
 
     ShuVoiceApp._flush_tail_silence(app, state)
@@ -116,11 +118,13 @@ def test_flush_tail_silence_aborts_if_recording_restarts_mid_flush():
         _asr_disabled=False,
         _recording=recording,
         asr=SimpleNamespace(native_chunk_samples=1600, wants_raw_audio=True),
-        _make_flush_noise=lambda n: [0.0] * n,
+        _make_flush_noise=lambda n, escalation=1.0: [0.0] * n,
         _process_chunk_safe=process_chunk,
         _recover_asr_after_failure=Mock(),
         overlay=None,
         config=SimpleNamespace(output_mode="final_only"),
+        _FLUSH_NOISE_ESCALATION=ShuVoiceApp._FLUSH_NOISE_ESCALATION,
+        _FLUSH_NOISE_MAX_RMS=ShuVoiceApp._FLUSH_NOISE_MAX_RMS,
     )
 
     ShuVoiceApp._flush_tail_silence(app, state)
