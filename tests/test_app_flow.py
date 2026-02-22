@@ -215,3 +215,52 @@ def test_handle_recording_stop_commits_when_speech_threshold_met():
     assert commit_calls == 1
     app.overlay.hide.assert_called_once()
     app.typer.reset.assert_called_once()
+
+
+def test_render_transcript_text_applies_replacements_and_capitalize():
+    app = SimpleNamespace(
+        config=SimpleNamespace(
+            text_replacements={"shove voice": "ShuVoice", "um": ""},
+            auto_capitalize=True,
+        )
+    )
+
+    rendered = ShuVoiceApp._render_transcript_text(app, "shove voice um")
+
+    assert rendered == "ShuVoice"
+
+
+def test_commit_utterance_uses_rendered_text_for_overlay_and_typing():
+    overlay = SimpleNamespace(set_text=Mock())
+    typer = SimpleNamespace(commit_final=Mock(), update_partial=Mock(), reset=Mock())
+    app = SimpleNamespace(
+        _render_transcript_text=lambda _text: "Rendered final",
+        overlay=overlay,
+        typer=typer,
+        config=SimpleNamespace(use_clipboard_for_final=True),
+    )
+    state = _UtteranceState(last_text="raw transcript")
+
+    ShuVoiceApp._commit_utterance(app, state)
+
+    overlay.set_text.assert_called_once_with("Rendered final")
+    typer.commit_final.assert_called_once_with("Rendered final")
+    typer.update_partial.assert_not_called()
+
+
+def test_commit_utterance_skips_when_rendered_text_is_empty():
+    overlay = SimpleNamespace(set_text=Mock())
+    typer = SimpleNamespace(commit_final=Mock(), update_partial=Mock(), reset=Mock())
+    app = SimpleNamespace(
+        _render_transcript_text=lambda _text: "",
+        overlay=overlay,
+        typer=typer,
+        config=SimpleNamespace(use_clipboard_for_final=True),
+    )
+    state = _UtteranceState(last_text="um")
+
+    ShuVoiceApp._commit_utterance(app, state)
+
+    overlay.set_text.assert_not_called()
+    typer.commit_final.assert_not_called()
+    typer.update_partial.assert_not_called()

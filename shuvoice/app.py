@@ -329,6 +329,20 @@ class ShuVoiceApp(Gtk.Application):
             return "processing"
         return "idle"
 
+    def _render_transcript_text(self, text: str) -> str:
+        """Render transcript text for preview/final output consistency."""
+        if not text:
+            return text
+
+        rendered = apply_text_replacements(text, self.config.text_replacements)
+        if not rendered:
+            return rendered
+
+        if self.config.auto_capitalize:
+            rendered = capitalize_first(rendered)
+
+        return rendered
+
     # -- ASR processing helpers ---------------------------------------------
 
     def _apply_utterance_gain(self, audio: np.ndarray, gain: float) -> np.ndarray:
@@ -420,10 +434,11 @@ class ShuVoiceApp(Gtk.Application):
             log.debug("Transcript updated: %r -> %r", state.last_text, merged)
             state.last_text = merged
             state.unchanged_steps = 0
+            rendered_text = self._render_transcript_text(state.last_text)
             if self.overlay:
-                self.overlay.set_text(state.last_text)
+                self.overlay.set_text(rendered_text)
             if self.config.output_mode == "streaming_partial":
-                self.typer.update_partial(state.last_text)
+                self.typer.update_partial(rendered_text)
         else:
             state.unchanged_steps += 1
 
@@ -449,10 +464,11 @@ class ShuVoiceApp(Gtk.Application):
             if merged != state.last_text:
                 log.debug("Transcript updated after stall flush: %r -> %r", state.last_text, merged)
                 state.last_text = merged
+                rendered_text = self._render_transcript_text(state.last_text)
                 if self.overlay:
-                    self.overlay.set_text(state.last_text)
+                    self.overlay.set_text(rendered_text)
                 if self.config.output_mode == "streaming_partial":
-                    self.typer.update_partial(state.last_text)
+                    self.typer.update_partial(rendered_text)
 
         state.unchanged_steps = 0
 
@@ -586,7 +602,7 @@ class ShuVoiceApp(Gtk.Application):
                 stalled_consecutive = 0
                 ever_had_text = True
                 if self.overlay:
-                    self.overlay.set_text(state.last_text)
+                    self.overlay.set_text(self._render_transcript_text(state.last_text))
             else:
                 stable_steps += 1
                 stalled_consecutive += 1
@@ -601,12 +617,9 @@ class ShuVoiceApp(Gtk.Application):
         if not final_text:
             return
 
-        final_text = apply_text_replacements(final_text, self.config.text_replacements)
+        final_text = self._render_transcript_text(final_text)
         if not final_text:
             return
-
-        if self.config.auto_capitalize:
-            final_text = capitalize_first(final_text)
 
         log.info("Final: %s", final_text)
         if self.overlay:
