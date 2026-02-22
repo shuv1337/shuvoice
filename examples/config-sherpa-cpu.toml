@@ -1,0 +1,30 @@
+# ShuVoice example: Sherpa ONNX on CPU
+
+[audio]
+sample_rate = 16000
+chunk_ms = 100
+fallback_sample_rate = 48000
+input_gain = 1.0
+audio_queue_max_size = 200
+silence_rms_threshold = 0.006
+silence_rms_multiplier = 1.3
+min_speech_ms = 80
+auto_gain_target_peak = 0.15
+auto_gain_max = 10.0
+auto_gain_settle_chunks = 2
+
+[asr]
+asr_backend = "sherpa"
+# Update this path for your host if needed.
+sherpa_model_dir = "/home/shuv/repos/shuvoice/build/asr-models/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
+sherpa_provider = "cpu"
+sherpa_num_threads = 4
+sherpa_chunk_ms = 100
+
+[hotkey]
+hotkey_backend = "ipc"
+control_socket = "/run/user/1000/shuvoice/control.sock"
+
+[typing]
+output_mode = "final_only"
+use_clipboard_for_final = true

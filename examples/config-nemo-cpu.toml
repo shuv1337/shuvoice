@@ -1,0 +1,25 @@
+# ShuVoice example: NeMo on CPU (fallback only; high latency)
+
+[audio]
+sample_rate = 16000
+chunk_ms = 100
+fallback_sample_rate = 48000
+input_gain = 1.8
+silence_rms_threshold = 0.008
+silence_rms_multiplier = 1.8
+min_speech_ms = 80
+
+[asr]
+asr_backend = "nemo"
+model_name = "nvidia/nemotron-speech-streaming-en-0.6b"
+right_context = 6
+device = "cpu"
+use_cuda_graph_decoder = false
+
+[hotkey]
+hotkey_backend = "ipc"
+control_socket = "/run/user/1000/shuvoice/control.sock"
+
+[typing]
+output_mode = "final_only"
+use_clipboard_for_final = true

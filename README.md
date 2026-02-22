@@ -174,7 +174,12 @@ Config file path:
 
 Example config:
 
-- `examples/config.toml`
+- `examples/config.toml` (full reference)
+- `examples/config-nemo-cuda.toml`
+- `examples/config-nemo-cpu.toml`
+- `examples/config-sherpa-cuda.toml`
+- `examples/config-sherpa-cpu.toml`
+- `examples/config-moonshine-cpu.toml`
 
 Backend selection is controlled by `asr_backend`:
 
@@ -223,6 +228,14 @@ SHUVOICE_RUN_ROUNDTRIP=1 \
 SHUVOICE_ROUNDTRIP_BACKEND=nemo \
 SHUVOICE_ROUNDTRIP_DEVICE=cuda \
 pytest -m integration -k roundtrip_regression -v
+```
+
+Sherpa GPU low-noise regression suite (from field notes):
+
+```bash
+SHUVOICE_RUN_SHERPA_LOW_NOISE=1 \
+SHUVOICE_SHERPA_PROVIDER=cuda \
+pytest -m integration -k sherpa_gpu_low_noise_phrase_regression -v
 ```
 
 To remove local build/test artifacts generated during development:
