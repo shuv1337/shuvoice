@@ -20,10 +20,10 @@ class MoonshineBackend(ASRBackend):
 
     Performance notes
     -----------------
-    Moonshine is a *batch* encoder-decoder: every ``process_chunk`` call
-    re-encodes the full accumulated audio buffer and autoregressively
-    decodes up to ``max_tokens`` output tokens.  Three mechanisms keep
-    inference viable for real-time streaming:
+    Moonshine is a *batch* encoder-decoder: every inference re-encodes
+    the full accumulated audio buffer and autoregressively decodes up to
+    ``max_tokens`` output tokens.  Four mechanisms keep inference viable
+    for real-time streaming:
 
     1. **Inference throttling** — only run the encoder+decoder when at
        least ``_INFER_INTERVAL_S`` seconds of *new* audio have been
@@ -32,7 +32,10 @@ class MoonshineBackend(ASRBackend):
        preserved.
     2. **Tokenizer caching** — the HuggingFace tokenizer is loaded once
        at ``load()`` time instead of on every call.
-    3. **Repetition guard** — hallucinated repetition loops (a known
+    3. **Deferred buffer concatenation** — incoming chunks are queued and
+       coalesced only when an inference step is due, avoiding repeated
+       O(n) array copies on every 100 ms chunk.
+    4. **Repetition guard** — hallucinated repetition loops (a known
        transformer failure mode) are detected and truncated before the
        result is returned.
     """
@@ -75,7 +78,17 @@ class MoonshineBackend(ASRBackend):
         self._model: Any = None
         self._tokenizer: Any = None
 
+        self._sample_rate = int(self.config.sample_rate)
+        self._max_window_samples = int(float(self.config.moonshine_max_window_sec) * self._sample_rate)
+        self._min_segment_samples = int(self._MIN_SEGMENT_S * self._sample_rate)
+        self._min_infer_samples = int(self._INFER_INTERVAL_S * self._sample_rate)
+
+        # Committed cumulative buffer used for model inference.
         self._audio_buffer = np.zeros(0, dtype=np.float32)
+        # Newly arrived chunks since last inference; merged lazily.
+        self._pending_chunks: list[np.ndarray] = []
+        self._pending_samples = 0
+
         self._last_text = ""
         self._step_num = 0
         self._samples_since_infer = 0
@@ -86,7 +99,7 @@ class MoonshineBackend(ASRBackend):
 
     @property
     def native_chunk_samples(self) -> int:
-        return int(self.config.sample_rate) * int(self.config.moonshine_chunk_ms) // 1000
+        return self._sample_rate * int(self.config.moonshine_chunk_ms) // 1000
 
     @property
     def debug_step_num(self) -> int | None:
@@ -192,6 +205,8 @@ class MoonshineBackend(ASRBackend):
             raise RuntimeError("ASR backend is not loaded. Call load() first.")
 
         self._audio_buffer = np.zeros(0, dtype=np.float32)
+        self._pending_chunks = []
+        self._pending_samples = 0
         self._last_text = ""
         self._step_num = 0
         self._samples_since_infer = 0
@@ -208,16 +223,13 @@ class MoonshineBackend(ASRBackend):
             return self._last_text
 
         # --- buffer management ---
-        self._audio_buffer = np.concatenate([self._audio_buffer, waveform])
+        # Queue chunk and coalesce only when inference is actually due.
+        # This avoids repeated O(n) concatenations on every chunk.
+        self._pending_chunks.append(waveform.copy())
+        self._pending_samples += waveform.size
 
-        max_samples = int(
-            float(self.config.moonshine_max_window_sec) * int(self.config.sample_rate)
-        )
-        if self._audio_buffer.size > max_samples:
-            self._audio_buffer = self._audio_buffer[-max_samples:]
-
-        min_samples = int(self._MIN_SEGMENT_S * int(self.config.sample_rate))
-        if self._audio_buffer.size <= min_samples:
+        total_buffered = self._audio_buffer.size + self._pending_samples
+        if total_buffered <= self._min_segment_samples:
             return self._last_text
 
         # --- inference throttle ---
@@ -227,11 +239,12 @@ class MoonshineBackend(ASRBackend):
         # chunks (tail-flush padding from app.py) always run so that the
         # decoder can finalize output at utterance boundaries.
         self._samples_since_infer += waveform.size
-        is_silence = float(np.max(np.abs(waveform))) == 0.0
-        min_infer_samples = int(self._INFER_INTERVAL_S * int(self.config.sample_rate))
-        if not is_silence and self._samples_since_infer < min_infer_samples:
+        is_silence = not np.any(waveform)
+        if not is_silence and self._samples_since_infer < self._min_infer_samples:
             return self._last_text
         self._samples_since_infer = 0
+
+        self._commit_pending_audio()
 
         # --- buffer-level normalization ---
         # Raw microphone audio is very quiet (~0.01 RMS).  Normalize the
@@ -256,12 +269,34 @@ class MoonshineBackend(ASRBackend):
             raise RuntimeError("Moonshine inference failed")
 
         # --- repetition guard ---
-        audio_seconds = self._audio_buffer.size / float(self.config.sample_rate)
+        audio_seconds = self._audio_buffer.size / float(self._sample_rate)
         text = self._guard_repetition(text, audio_seconds)
 
         self._last_text = text
         self._step_num += 1
         return text
+
+    def _commit_pending_audio(self) -> None:
+        """Merge queued chunks into the committed inference buffer."""
+        if not self._pending_chunks:
+            return
+
+        if len(self._pending_chunks) == 1:
+            pending = self._pending_chunks[0]
+        else:
+            pending = np.concatenate(self._pending_chunks)
+
+        if self._audio_buffer.size == 0:
+            merged = pending
+        else:
+            merged = np.concatenate([self._audio_buffer, pending])
+
+        if merged.size > self._max_window_samples:
+            merged = merged[-self._max_window_samples :]
+
+        self._audio_buffer = merged
+        self._pending_chunks = []
+        self._pending_samples = 0
 
     @classmethod
     def _normalize_buffer(cls, buf: np.ndarray) -> np.ndarray:

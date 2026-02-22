@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import numpy as np
+
 from shuvoice.asr_moonshine import MoonshineBackend
+from shuvoice.config import Config
 
 
 def test_guard_truncates_hyphenated_token_repetition():
@@ -44,3 +47,23 @@ def test_guard_keeps_short_non_pathological_text_unchanged():
     text = "all systems nominal now"
 
     assert MoonshineBackend._guard_repetition(text, audio_seconds=2.0) == text
+
+
+def test_commit_pending_audio_merges_once_and_trims_window():
+    cfg = Config(asr_backend="moonshine", moonshine_max_window_sec=0.5)
+    backend = MoonshineBackend(cfg)
+
+    existing = np.arange(6000, dtype=np.float32)
+    p1 = np.full(3000, 1.0, dtype=np.float32)
+    p2 = np.full(3000, 2.0, dtype=np.float32)
+
+    backend._audio_buffer = existing
+    backend._pending_chunks = [p1, p2]
+    backend._pending_samples = p1.size + p2.size
+
+    backend._commit_pending_audio()
+
+    expected = np.concatenate([existing, p1, p2])[-backend._max_window_samples :]
+    assert np.array_equal(backend._audio_buffer, expected)
+    assert backend._pending_chunks == []
+    assert backend._pending_samples == 0

@@ -39,15 +39,16 @@ same 10-utterance phrase set used by `tests/integration/test_roundtrip_regressio
 
 | Model/profile | Median similarity | Mean similarity | Empty ratio | Wall time (10 utt) | RTF (wall/audio, lower is faster) |
 |---|---:|---:|---:|---:|---:|
-| NeMo `nvidia/nemotron-speech-streaming-en-0.6b` (`device=cuda`) | 0.776 | 0.775 | 0.000 | 8.95s | 0.28 |
-| Sherpa `...kroko-2025-08-06` (`provider=cuda`) | 0.720 | 0.720 | 0.000 | 2.68s | 0.08 |
-| Sherpa `...kroko-2025-08-06` (`provider=cpu`) | 0.720 | 0.720 | 0.000 | 1.45s | 0.04 |
-| Moonshine `moonshine/base` | 0.625 | 0.625 | 0.000 | 29.79s | 0.92 |
-| Moonshine `moonshine/tiny` | 0.795 | 0.795 | 0.000 | 15.41s | 0.48 |
+| NeMo `nvidia/nemotron-speech-streaming-en-0.6b` (`device=cuda`) | 0.776 | 0.775 | 0.000 | 8.33s | 0.26 |
+| Sherpa `...kroko-2025-08-06` (`provider=cuda`) | 0.720 | 0.720 | 0.000 | 2.52s | 0.08 |
+| Sherpa `...kroko-2025-08-06` (`provider=cpu`) | 0.720 | 0.720 | 0.000 | 1.62s | 0.05 |
+| Moonshine `moonshine/base` | 0.625 | 0.625 | 0.000 | 21.93s | 0.68 |
+| Moonshine `moonshine/tiny` | 0.795 | 0.795 | 0.000 | 10.03s | 0.31 |
 
 Notes:
 - This is a **regression stress fixture**, not a universal quality ranking.
 - Numbers include model load + full roundtrip harness runtime.
+- Moonshine throughput improved via deferred chunk-buffer coalescing in `MoonshineBackend.process_chunk()`.
 - For day-to-day dictation quality, run your own workload-specific benchmark before choosing defaults.
 
 ## Requirements
