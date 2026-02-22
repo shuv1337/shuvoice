@@ -336,6 +336,16 @@ class ShuVoiceApp(Gtk.Application):
             self._noise_floor_rms = 0.98 * self._noise_floor_rms + 0.02 * chunk_rms
 
     def _begin_utterance(self, state: _UtteranceState):
+        # Defensive reset: ensure ASR model is clean after any potential
+        # contamination from tail flush race conditions.
+        with self._asr_lock:
+            if not self._asr_disabled:
+                try:
+                    self.asr.reset()
+                except Exception:
+                    log.exception("ASR reset failed at utterance start")
+                    self._recover_asr_after_failure("ASR reset at utterance start")
+
         threshold = max(
             self._speech_rms_threshold,
             self._noise_floor_rms * self._speech_rms_multiplier,
@@ -512,6 +522,12 @@ class ShuVoiceApp(Gtk.Application):
         stable_required = 5
 
         for i in range(max_flush):
+            # Abort tail flush if a new recording has started to avoid
+            # contaminating the fresh ASR state with noise.
+            if self._recording.is_set():
+                log.debug("Aborting tail flush: new recording started")
+                break
+
             # Use ambient-level noise at the same gain scale the model has
             # been seeing, so streaming transducers recognise end-of-speech.
             flush_audio = self._make_flush_noise(native)

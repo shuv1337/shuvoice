@@ -208,6 +208,23 @@ ruff format --check shuvoice tests
 pytest -m "not gui" -v
 ```
 
+IPC end-to-end smoke tests (CLI -> control socket):
+
+```bash
+pytest -m e2e -k ipc_smoke -v
+```
+
+Manual phrase regression (opt-in integration test harness):
+
+```bash
+# Runs deterministic TTS->STT regression checks for the two manual phrases
+# (quick brown fox + moonshine sentence), repeated multiple times.
+SHUVOICE_RUN_ROUNDTRIP=1 \
+SHUVOICE_ROUNDTRIP_BACKEND=nemo \
+SHUVOICE_ROUNDTRIP_DEVICE=cuda \
+pytest -m integration -k roundtrip_regression -v
+```
+
 To remove local build/test artifacts generated during development:
 
 ```bash

@@ -72,6 +72,9 @@ shuvoice = ["py.typed"]
 markers = [
     "unit: headless-safe default test tier",
     "gui: tests that require GTK/GI runtime",
+    "integration: deterministic backend regression tests (opt-in)",
+    "gpu: tests that require CUDA/GPU runtime",
+    "e2e: subprocess/socket end-to-end tests",
 ]
 
 [tool.ruff]
