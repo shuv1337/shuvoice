@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 try:  # Python 3.11+
@@ -80,6 +80,7 @@ class Config:
     typing_retry_attempts: int = 2
     typing_retry_delay_ms: int = 40
     auto_capitalize: bool = True
+    text_replacements: dict[str, str] = field(default_factory=dict)
 
     # Streaming stability
     streaming_stall_guard: bool = True
@@ -140,6 +141,19 @@ class Config:
             raise ValueError("streaming_stall_flush_chunks must be >= 1")
         if float(self.streaming_stall_rms_ratio) <= 0:
             raise ValueError("streaming_stall_rms_ratio must be > 0")
+
+        if not isinstance(self.text_replacements, dict):
+            raise ValueError("text_replacements must be a table/map of string keys to values")
+        normalized_replacements: dict[str, str] = {}
+        for key, value in self.text_replacements.items():
+            key_text = str(key).strip()
+            value_text = str(value).strip()
+            if not key_text:
+                raise ValueError("text_replacements keys must not be empty")
+            if not value_text:
+                raise ValueError("text_replacements values must not be empty")
+            normalized_replacements[key_text] = value_text
+        self.text_replacements = normalized_replacements
 
     @property
     def chunk_samples(self) -> int:

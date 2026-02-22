@@ -76,6 +76,10 @@ preserve_clipboard = false
 typing_retry_attempts = 2
 typing_retry_delay_ms = 40
 auto_capitalize = true
+# Optional phrase/word corrections (case-insensitive, whole phrase matches)
+# [typing.text_replacements]
+# "shove voice" = "ShuVoice"
+# "hyper land" = "Hyprland"
 
 [streaming]
 # Stall guard injects a short silent flush when transcript stalls despite speech energy.

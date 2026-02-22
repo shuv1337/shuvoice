@@ -22,6 +22,7 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     assert cfg.auto_gain_settle_chunks == 2
     assert cfg.audio_feedback is True
     assert cfg.auto_capitalize is True
+    assert cfg.text_replacements == {}
     assert cfg.streaming_stall_guard is True
     assert cfg.streaming_stall_chunks == 4
     assert cfg.asr_backend == "nemo"
@@ -87,6 +88,10 @@ typing_retry_attempts = 3
 typing_retry_delay_ms = 20
 auto_capitalize = false
 
+[typing.text_replacements]
+"shove voice" = "ShuVoice"
+"hyper land" = "Hyprland"
+
 [streaming]
 streaming_stall_guard = false
 streaming_stall_chunks = 6
@@ -136,6 +141,7 @@ foo = "bar"
     assert cfg.typing_retry_attempts == 3
     assert cfg.typing_retry_delay_ms == 20
     assert cfg.auto_capitalize is False
+    assert cfg.text_replacements == {"shove voice": "ShuVoice", "hyper land": "Hyprland"}
     assert cfg.streaming_stall_guard is False
     assert cfg.streaming_stall_chunks == 6
     assert cfg.streaming_stall_rms_ratio == 0.9
@@ -228,3 +234,14 @@ def test_streaming_stall_validation():
 
     with pytest.raises(ValueError):
         Config(streaming_stall_rms_ratio=0)
+
+
+def test_text_replacements_validation():
+    with pytest.raises(ValueError, match="text_replacements"):
+        Config(text_replacements="nope")
+
+    with pytest.raises(ValueError, match="keys must not be empty"):
+        Config(text_replacements={"   ": "value"})
+
+    with pytest.raises(ValueError, match="values must not be empty"):
+        Config(text_replacements={"word": "   "})

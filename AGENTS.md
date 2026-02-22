@@ -110,6 +110,7 @@ WantedBy=default.target
 
 Config sections map to `shuvoice/config.py::Config`:
 `[audio]`, `[asr]`, `[overlay]`, `[hotkey]`, `[typing]`, `[streaming]`, `[feedback]`.
+Nested table: `[typing.text_replacements]` for custom phrase corrections.
 
 **Example config**: `examples/config.toml`.
 
@@ -127,6 +128,18 @@ Applied only for backends that do **not** request raw audio.
 | `auto_gain_target_peak` | `0.15` | Target RMS peak for utterance gain |
 | `auto_gain_max` | `10.0` | Upper cap for utterance gain |
 | `auto_gain_settle_chunks` | `2` | Speech chunks required before gain updates |
+
+### Typing text replacements
+
+Use `[typing.text_replacements]` to correct common ASR mistakes with exact replacement text.
+Matches are case-insensitive and applied to whole words/phrases only.
+
+```toml
+[typing.text_replacements]
+"shove voice" = "ShuVoice"
+"speech to text" = "speech-to-text"
+"hyper land" = "Hyprland"
+```
 
 ---
 
