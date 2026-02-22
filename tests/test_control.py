@@ -127,40 +127,31 @@ def test_resolve_control_socket_path_accepts_tmp_path(tmp_path: Path):
 
 
 def test_ensure_secure_directory_rejects_unsafe_ownership(tmp_path: Path):
-    """
-    Test that _ensure_secure_directory raises an error if the directory
-    is owned by another user (e.g., pre-created by an attacker in /tmp).
-    """
+    """_ensure_secure_directory must reject directories owned by another user."""
     unsafe_dir = tmp_path / "unsafe_dir"
     unsafe_dir.mkdir()
 
-    # Mock os.stat to simulate ownership by another user (uid=9999)
-    # Since we are running as current user, os.getuid() will be different.
+    real_stat = unsafe_dir.stat()
+    fake_stat = os.stat_result((
+        real_stat.st_mode,
+        real_stat.st_ino,
+        real_stat.st_dev,
+        real_stat.st_nlink,
+        9999,  # UID that differs from os.getuid()
+        real_stat.st_gid,
+        real_stat.st_size,
+        real_stat.st_atime,
+        real_stat.st_mtime,
+        real_stat.st_ctime,
+    ))
 
-    # Mock stat_result with a different UID (9999)
-    # We need a real stat result to base ours on, so we get one from the real file
-    st = unsafe_dir.stat()
-    fake_stat = os.stat_result(
-        (
-            st.st_mode,
-            st.st_ino,
-            st.st_dev,
-            st.st_nlink,
-            9999,  # Fake UID
-            st.st_gid,
-            st.st_size,
-            st.st_atime,
-            st.st_mtime,
-            st.st_ctime,
-        )
-    )
+    _original_stat = Path.stat
 
-    # Patch pathlib.Path.stat specifically.
-    # Since _ensure_secure_directory calls path.stat(), and path is an instance of Path,
-    # we can patch the stat method on the Path class or specifically for the instance if we could intercept it.
-    # Patching Path.stat is safer than os.stat as it avoids global side effects and path resolution issues.
-    with patch("pathlib.Path.stat", return_value=fake_stat):
-        # The test should fail effectively demonstrating the vulnerability
-        # We expect RuntimeError with message "not owned by current user"
+    def _selective_stat(self, *args, **kwargs):
+        if self == unsafe_dir:
+            return fake_stat
+        return _original_stat(self, *args, **kwargs)
+
+    with patch("pathlib.Path.stat", _selective_stat):
         with pytest.raises(RuntimeError, match="not owned by current user"):
             _ensure_secure_directory(unsafe_dir)
