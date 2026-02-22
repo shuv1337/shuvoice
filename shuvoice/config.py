@@ -53,7 +53,7 @@ class Config:
     moonshine_model_dir: str | None = None
     moonshine_model_precision: str = "float"
     moonshine_chunk_ms: int = 100
-    moonshine_max_window_sec: float = 32.0
+    moonshine_max_window_sec: float = 10.0
     moonshine_max_tokens: int = 192
 
     # Overlay

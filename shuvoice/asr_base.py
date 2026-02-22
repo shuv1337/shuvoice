@@ -28,6 +28,21 @@ class ASRBackend(ABC):
         """Backend-preferred chunk size in PCM samples."""
 
     @property
+    def wants_raw_audio(self) -> bool:
+        """If True the app must **not** apply per-chunk utterance gain.
+
+        Batch encoder-decoder backends (e.g. Moonshine) re-encode the
+        full accumulated buffer on every inference call.  Per-chunk gain
+        creates wildly inconsistent levels (40× on early noise, 5× on
+        speech) which degrades quality.  These backends receive raw
+        audio and apply their own uniform normalization at inference time.
+
+        Streaming backends (NeMo, Sherpa) process chunks incrementally
+        and benefit from the app's per-chunk gain, so they return False.
+        """
+        return False
+
+    @property
     def debug_step_num(self) -> int | None:
         """Optional backend step counter for diagnostics/logging."""
         return None

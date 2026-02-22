@@ -28,7 +28,7 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     assert cfg.moonshine_model_name == "moonshine/base"
     assert cfg.moonshine_model_precision == "float"
     assert cfg.moonshine_chunk_ms == 100
-    assert cfg.moonshine_max_window_sec == 32.0
+    assert cfg.moonshine_max_window_sec == 10.0
     assert cfg.moonshine_max_tokens == 192
 
 

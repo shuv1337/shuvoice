@@ -362,7 +362,8 @@ class ShuVoiceApp(Gtk.Application):
         if to_process.size == 0:
             return False
 
-        to_process = self._apply_utterance_gain(to_process, state.utterance_gain)
+        if not self.asr.wants_raw_audio:
+            to_process = self._apply_utterance_gain(to_process, state.utterance_gain)
 
         try:
             text = self._process_chunk_safe(to_process)
@@ -547,7 +548,7 @@ class ShuVoiceApp(Gtk.Application):
             audio_data = state.buffer[0] if len(state.buffer) == 1 else np.concatenate(state.buffer)
             padded = np.zeros(self.asr.native_chunk_samples, dtype=np.float32)
             padded[: len(audio_data)] = audio_data
-            if state.utterance_gain > 1.05:
+            if not self.asr.wants_raw_audio and state.utterance_gain > 1.05:
                 padded[: len(audio_data)] = self._apply_utterance_gain(
                     padded[: len(audio_data)],
                     state.utterance_gain,
