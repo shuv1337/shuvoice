@@ -1,228 +1,327 @@
 # PLAN: Fix Moonshine Repetition Guard & Performance (#12, #13)
 
+## Plan QA Summary (Implementation Readiness)
+
+Pre-implementation review checks:
+
+- ✅ #12/#13 causality corrected (guard correctness vs perf knobs)
+- ✅ Guard ordering explicitly handles short/single-token runaway text
+- ✅ Files list includes all impacted defaults/docs/tests
+- ✅ Benchmark commands are reproducible (explicit Moonshine flags)
+- ✅ Test expectations are deterministic (no “or similar” assertions)
+
+**Status: IMPLEMENTED — core tasks complete; benchmark improvement targets partially unmet**
+
+---
+
 ## Objective
 
-Address the two open Moonshine issues:
+Address:
 
-- **#12** — Repetition guard fails on hyphenated patterns, clause-level loops,
-  and digit repetition, producing garbage output hundreds of characters long.
-- **#13** — Base model takes 63s wall / 22min CPU for 8 phrases; both models
-  are an order of magnitude slower than NeMo and Sherpa.
+- **#12**: Moonshine repetition guard misses token-level loops (hyphen/digits)
+  and long repeated clauses.
+- **#13**: Moonshine CPU-time/latency is too high vs NeMo/Sherpa.
 
-These are tackled together because the repetition guard fix (#12) directly
-reduces wasted inference time (#13) — runaway hallucination loops are the
-dominant contributor to the base model's extreme CPU usage.
+Important framing:
 
----
-
-## Phase 1: Harden the repetition guard (#12)
-
-The current `_guard_repetition()` in `shuvoice/asr_moonshine.py` (line ~266)
-has three blind spots.  Each needs a targeted fix.
-
-### Task 1.1 — Character-level repetition detection
-
-**Problem**: Hyphenated tokens like `"six-six-hake-hake-hake-hake-..."` are a
-single word when split by spaces.  Digit runs like `"127000000000..."` are
-also a single token.  The word-level n-gram loop never sees them.
-
-**Fix**: Add a regex-based character-level check *before* the word-level
-checks.  Detect any substring of 1–10 characters repeating ≥4 consecutive
-times and truncate to a single occurrence.
-
-```python
-import re
-_CHAR_REPETITION_RE = re.compile(r'(.{1,10}?)\1{3,}')
-```
-
-**File**: `shuvoice/asr_moonshine.py` — `_guard_repetition()`
-
-- [ ] Add `_CHAR_REPETITION_RE` class constant (compiled regex)
-- [ ] Insert character-level scan at the top of `_guard_repetition()`,
-      before the word split
-- [ ] On match: truncate text to `text[:match.start() + len(match.group(1))]`
-- [ ] Add `log.debug()` when triggered
-
-### Task 1.2 — Character-count cap
-
-**Problem**: Even if word count is within bounds, a single "word" can be
-hundreds of characters (hyphenated loops, digit spam).  There is no
-character-level length cap.
-
-**Fix**: Add `_MAX_CHARS_PER_SEC` constant and enforce it alongside the
-existing `_MAX_WORDS_PER_SEC` word cap.
-
-```python
-_MAX_CHARS_PER_SEC = 40.0  # generous; typical speech ≈ 15-20 cps
-```
-
-**File**: `shuvoice/asr_moonshine.py` — `_guard_repetition()`
-
-- [ ] Add `_MAX_CHARS_PER_SEC = 40.0` class constant
-- [ ] After the word-count cap, add a character-count cap:
-      `max_chars = max(100, int(audio_seconds * cls._MAX_CHARS_PER_SEC) + 20)`
-- [ ] If `len(text) > max_chars`, truncate at the last word boundary:
-      `text = text[:max_chars].rsplit(' ', 1)[0]`
-- [ ] Add `log.debug()` when triggered
-
-### Task 1.3 — Expand n-gram window for clause-level repetition
-
-**Problem**: The n-gram loop only checks patterns of 1–4 words.  Clause-level
-repetition like `"and we still have issues with recording cutting out on long
-sentences"` (11 words) is invisible to it.
-
-**Fix**: Increase the max pattern length from 4 to 12 words.  Also expand the
-starting-position search window from 8 to cover more of the output.
-
-**File**: `shuvoice/asr_moonshine.py` — `_guard_repetition()`, inner loop
-
-- [ ] Change `range(1, 5)` to `range(1, 13)` for pattern length
-- [ ] Change the start-position limit from `8` to `min(len(words), 20)`
-- [ ] Reduce threshold from 4 to 3 consecutive repeats for patterns >4 words
-      (long clause patterns rarely repeat 4× but 3× is already pathological)
-
-### Task 1.4 — Unit tests for repetition guard
-
-**File**: `tests/test_asr.py` (or new `tests/test_moonshine_guard.py`)
-
-- [ ] Test: hyphenated repetition `"The six-six-hake-hake-hake-hake-..."` →
-      truncated to `"The six-six-hake"` or similar
-- [ ] Test: digit repetition `"Invoice 4827 totals 12700000000..."` →
-      truncated to `"Invoice 4827 totals 127"`
-- [ ] Test: clause-level repetition (11-word pattern repeated 3×) → truncated
-      to a single occurrence
-- [ ] Test: character-count cap fires for long single-token output
-- [ ] Test: normal text (no repetition) passes through unchanged
-- [ ] Test: short text (≤5 words) passes through unchanged (existing behavior)
+- #12 is a **quality/safety guard** fix.
+- #13 gains come primarily from reducing encoder/decoder work
+  (window size, token budget, inference cadence).
 
 ---
 
-## Phase 2: Performance improvements (#13)
+## Scope
 
-### Task 2.1 — Reduce default `moonshine_max_window_sec` from 10.0 to 5.0
+### In scope
 
-**Rationale**: The encoder re-processes the full buffer every inference call.
-At 10s × 16kHz = 160,000 samples per call.  Halving to 5s cuts encoder work
-by 50%.  Most push-to-talk utterances are <5s.
+- `shuvoice/asr_moonshine.py`: guard robustness, infer throttle, startup warning
+- `shuvoice/config.py`: Moonshine defaults
+- `tests/test_asr_moonshine.py`: new Moonshine guard tests
+- `tests/test_config.py`: update default assertions
+- `examples/config.toml`, `examples/config-moonshine-cpu.toml`: sync defaults
+- `AGENTS.md`: sync Moonshine defaults/caveats + issue status
 
-**Files**:
-- `shuvoice/config.py` — change default `moonshine_max_window_sec: float = 5.0`
-- `examples/config.toml` — update example comment
-- `AGENTS.md` — update Moonshine config table
+### Out of scope
 
-- [ ] Change default in `config.py`
-- [ ] Update `examples/config.toml`
-- [ ] Update `AGENTS.md` config keys table
-
-### Task 2.2 — Reduce default `moonshine_max_tokens` from 192 to 128
-
-**Rationale**: Autoregressive decoding is O(n) in token count.  192 tokens is
-generous for spoken utterances; 128 covers ~30s of speech.  Shorter cap also
-limits how long a hallucination loop can run before the guard catches it.
-
-**Files**:
-- `shuvoice/config.py` — change default `moonshine_max_tokens: int = 128`
-- `examples/config.toml` — update example
-- `AGENTS.md` — update Moonshine config table
-
-- [ ] Change default in `config.py`
-- [ ] Update `examples/config.toml`
-- [ ] Update `AGENTS.md`
-
-### Task 2.3 — Increase inference throttle interval
-
-**Rationale**: `_INFER_INTERVAL_S = 0.30` means ~17 full re-encode calls for
-a 5s utterance.  Increasing to 0.50s reduces to ~10 calls with only slightly
-chunkier streaming updates.
-
-**File**: `shuvoice/asr_moonshine.py`
-
-- [ ] Change `_INFER_INTERVAL_S` from `0.30` to `0.50`
-- [ ] Update class docstring to reflect new value
-
-### Task 2.4 — Add startup warning for Moonshine on CPU
-
-**Rationale**: Users selecting Moonshine should be aware of the performance
-characteristics.  Log a warning at `load()` time.
-
-**File**: `shuvoice/asr_moonshine.py` — `load()`
-
-- [ ] After successful model load, emit:
-      `log.warning("Moonshine runs on CPU only and is significantly slower "
-      "than NeMo (CUDA) or Sherpa. Best suited for short utterances (<5s) "
-      "on systems without GPU support.")`
+- Non-Moonshine backend behavior changes (except regression validation)
+- Moonshine model architecture changes upstream
 
 ---
 
-## Phase 3: Benchmark & validate
+## Phase 0 — Baseline capture (required before code changes)
 
-### Task 3.1 — Re-run roundtrip benchmark after changes
-
-Using the same 8-phrase benchmark set from the original evaluation.
+Run baseline with explicit settings to avoid local config drift:
 
 ```bash
-.venv312/bin/python scripts/tts_roundtrip.py \
+/usr/bin/time -f "wall=%e user=%U sys=%S cpu=%P" \
+  .venv312/bin/python scripts/tts_roundtrip.py \
+  --phrases-file build/benchmark-phrases.txt \
+  --output-dir build/benchmark-moonshine-base-baseline \
+  --asr-backend moonshine --moonshine-model-name moonshine/base \
+  --moonshine-max-window-sec 10 --moonshine-max-tokens 192 \
+  --flush-chunks 5
+
+/usr/bin/time -f "wall=%e user=%U sys=%S cpu=%P" \
+  .venv312/bin/python scripts/tts_roundtrip.py \
+  --phrases-file build/benchmark-phrases.txt \
+  --output-dir build/benchmark-moonshine-tiny-baseline \
+  --asr-backend moonshine --moonshine-model-name moonshine/tiny \
+  --moonshine-max-window-sec 10 --moonshine-max-tokens 192 \
+  --flush-chunks 5
+```
+
+### Acceptance criteria
+
+- [x] Baseline wall/user/sys metrics recorded for base + tiny
+- [x] Baseline CSV outputs saved in both output dirs
+
+Execution note: `/usr/bin/time` was unavailable on this host; bash `time` with
+`TIMEFORMAT='wall=%R user=%U sys=%S cpu=%P'` was used instead.
+
+---
+
+## Phase 1 — Repetition guard correctness (#12)
+
+### Task 1.1 — Token-scoped repetition regex (before word checks)
+
+Implementation:
+
+- [x] Add `import re` in `shuvoice/asr_moonshine.py`
+- [x] Add class-level token repetition regex (1–10 chars, >=4 repeats)
+- [x] Apply regex over non-space spans (tokens), not across arbitrary spaces
+- [x] Truncate to one occurrence on match and emit `log.debug(...)`
+
+### Acceptance criteria
+
+- [x] Hyphen token loop truncates deterministically
+- [x] Digit token loop truncates deterministically
+- [x] No cross-word false positive from regex spanning spaces
+- [x] Debug log fires when rule triggers
+
+---
+
+### Task 1.2 — Character cap applies even for short/single-token text
+
+Implementation:
+
+- [x] Add `_MAX_CHARS_PER_SEC = 40.0`
+- [x] Compute `max_chars = max(100, int(audio_seconds * cls._MAX_CHARS_PER_SEC) + 20)`
+- [x] If `len(text) > max_chars`, truncate safely
+  - prefer word boundary when possible
+  - preserve non-empty output for single-token text
+- [x] Run this cap **before** any `len(words) <= 5` early return
+- [x] Add `log.debug(...)` when cap triggers
+
+### Acceptance criteria
+
+- [x] Very long 1-token output is truncated
+- [x] Short non-pathological text (<=5 words) remains unchanged
+- [x] Character cap never returns empty string unless input is empty
+- [x] Debug log fires when cap triggers
+
+---
+
+### Task 1.3 — Expand clause-level n-gram repetition detection
+
+Implementation:
+
+- [x] Expand `plen` from `1..4` to `1..12`
+- [x] Increase start scan window cap from `8` to `20`
+- [x] Preserve feasibility bound:
+      `start_limit = min(len(words) - plen * threshold + 1, 20)`
+- [x] Dynamic repetition threshold:
+  - `4` for `plen <= 4`
+  - `3` for `plen > 4`
+
+### Acceptance criteria
+
+- [x] 11-word clause repeated 3x truncates to one clause
+- [x] Existing short n-gram behavior remains effective
+- [x] No index/loop bounds errors on small inputs
+
+---
+
+### Task 1.4 — Add deterministic Moonshine guard tests
+
+Implementation:
+
+- [x] Create `tests/test_asr_moonshine.py`
+- [x] Add tests:
+  - hyphen loop truncation (exact expected output)
+  - digit loop truncation with repeatable input (`127127127127` style)
+  - 11-word clause repetition truncation
+  - char-cap for long single-token text
+  - normal text unchanged
+  - short non-pathological text unchanged
+
+### Acceptance criteria
+
+- [x] `tests/test_asr_moonshine.py` passes locally
+- [x] Assertions are deterministic and exact (no fuzzy “similar” wording)
+
+---
+
+## Phase 2 — Performance knobs and defaults (#13)
+
+### Task 2.1 — Reduce default `moonshine_max_window_sec` to 5.0
+
+Implementation:
+
+- [x] Update `shuvoice/config.py` default to `5.0`
+- [x] Update `tests/test_config.py` default assertions
+- [x] Update `examples/config.toml`
+- [x] Update `examples/config-moonshine-cpu.toml`
+- [x] Update `AGENTS.md` Moonshine snippet and config table
+
+### Acceptance criteria
+
+- [x] Code default is `5.0`
+- [x] Tests assert `5.0`
+- [x] Both example configs and AGENTS show `5.0`
+
+---
+
+### Task 2.2 — Reduce default `moonshine_max_tokens` to 128
+
+Implementation:
+
+- [x] Update `shuvoice/config.py` default to `128`
+- [x] Update `tests/test_config.py` default assertions
+- [x] Update `examples/config.toml`
+- [x] Update `examples/config-moonshine-cpu.toml`
+- [x] Update `AGENTS.md` Moonshine snippet and config table
+
+### Acceptance criteria
+
+- [x] Code default is `128`
+- [x] Tests assert `128`
+- [x] Both example configs and AGENTS show `128`
+
+---
+
+### Task 2.3 — Increase Moonshine inference throttle interval
+
+Implementation:
+
+- [x] Change `_INFER_INTERVAL_S` from `0.30` to `0.50`
+- [x] Update nearby comments/docstring to match
+
+### Acceptance criteria
+
+- [x] Constant is `0.50` in `shuvoice/asr_moonshine.py`
+- [x] Comments/docs in same file are consistent
+
+---
+
+### Task 2.4 — Add startup CPU-only performance warning
+
+Implementation:
+
+- [x] In `load()`, after successful init, log warning that Moonshine is CPU-only
+      and slower than NeMo/Sherpa
+- [x] Keep warning actionable (best for short utterances / no-GPU setups)
+
+### Acceptance criteria
+
+- [x] Warning appears once on successful Moonshine backend load
+- [x] Wording is clear and non-alarming
+
+---
+
+## Phase 3 — Validation and regression safety
+
+### Task 3.1 — Post-change benchmark run
+
+```bash
+/usr/bin/time -f "wall=%e user=%U sys=%S cpu=%P" \
+  .venv312/bin/python scripts/tts_roundtrip.py \
   --phrases-file build/benchmark-phrases.txt \
   --output-dir build/benchmark-moonshine-base-fixed \
   --asr-backend moonshine --moonshine-model-name moonshine/base \
+  --moonshine-max-window-sec 5 --moonshine-max-tokens 128 \
   --flush-chunks 5
 
-.venv312/bin/python scripts/tts_roundtrip.py \
+/usr/bin/time -f "wall=%e user=%U sys=%S cpu=%P" \
+  .venv312/bin/python scripts/tts_roundtrip.py \
   --phrases-file build/benchmark-phrases.txt \
   --output-dir build/benchmark-moonshine-tiny-fixed \
   --asr-backend moonshine --moonshine-model-name moonshine/tiny \
+  --moonshine-max-window-sec 5 --moonshine-max-tokens 128 \
   --flush-chunks 5
 ```
 
-- [ ] Verify no phrase produces >100 characters of repeated pattern
-- [ ] Verify wall time for base model drops significantly (target: <30s)
-- [ ] Verify wall time for tiny model drops (target: <15s)
-- [ ] Compare median similarity before/after (should improve or hold steady,
-      since truncating garbage improves the score)
+### Acceptance criteria
 
-### Task 3.2 — Run full test suite
+- [x] No runaway repeated segment >100 chars in hypotheses
+- [ ] Relative wall-time improvement vs baseline:
+  - base: **>=35% faster** target
+  - tiny: **>=25% faster** target
+- [ ] Median similarity is maintained or improved
+
+Observed benchmark results (current implementation):
+- base wall: 39.633s → 29.392s (**25.84% faster**, target not met)
+- tiny wall: 26.383s → 22.510s (**14.68% faster**, target not met)
+- base median similarity: 0.840 → 0.834 (slight decrease)
+- tiny median similarity: 0.809 → 0.798 (slight decrease)
+
+---
+
+### Task 3.2 — Unit test suite
 
 ```bash
+.venv312/bin/python -m pytest tests/test_asr_moonshine.py tests/test_config.py -v
 .venv312/bin/python -m pytest tests/ -x --ignore=tests/integration --ignore=tests/e2e -v
 ```
 
-- [ ] All unit tests pass
-- [ ] No regressions in NeMo or Sherpa backend tests
+### Acceptance criteria
 
-### Task 3.3 — Update AGENTS.md
+- [x] New Moonshine guard tests pass
+- [x] Config default tests pass
+- [x] No regressions in NeMo/Sherpa unit tests
 
-- [ ] Update Moonshine "Characteristics" section with realistic performance
-      expectations and the CPU-only caveat
-- [ ] Update Known Issues table to reference #12 and #13 status
+---
+
+### Task 3.3 — Documentation consistency
+
+Implementation:
+
+- [x] Update Moonshine caveats/perf language in `AGENTS.md`
+- [x] Ensure AGENTS Moonshine snippet and config table are consistent
+- [x] Update Known Issues entries for #12/#13 status
+
+### Acceptance criteria
+
+- [x] AGENTS has no internal default mismatch for Moonshine
+- [x] Known Issues reflects post-change state
 
 ---
 
 ## Implementation order
 
+```text
+Phase 0 (baseline):          0
+Phase 1 (correctness):       1.1 → 1.2 → 1.3 → 1.4
+Phase 2 (performance):       2.1 → 2.2 → 2.3 → 2.4
+Phase 3 (validation/docs):   3.1 → 3.2 → 3.3
 ```
-Phase 1 (accuracy):  1.1 → 1.2 → 1.3 → 1.4 (test)
-Phase 2 (perf):      2.1 → 2.2 → 2.3 → 2.4
-Phase 3 (validate):  3.1 → 3.2 → 3.3
-```
 
-Phase 1 and Phase 2 are independent and can be committed separately.
-Phase 3 must run after both.
+---
 
-## Expected commits
+## Suggested commits
 
-1. `fix: harden Moonshine repetition guard for char-level and clause-level loops (#12)`
-2. `perf: reduce Moonshine defaults and increase inference throttle (#13)`
-3. `docs: update AGENTS.md with Moonshine performance caveats`
+1. `fix(moonshine): harden repetition guard for token and clause loops (#12)`
+2. `perf(moonshine): reduce defaults and increase inference throttle (#13)`
+3. `test(moonshine): add guard regressions and update config default assertions`
+4. `docs: sync Moonshine defaults/caveats in AGENTS and examples`
 
 ---
 
 ## Files touched
 
-| File | Changes |
-|------|---------|
-| `shuvoice/asr_moonshine.py` | Repetition guard overhaul, throttle increase, startup warning |
-| `shuvoice/config.py` | Default `moonshine_max_window_sec` 10→5, `moonshine_max_tokens` 192→128 |
-| `tests/test_asr.py` (or new file) | Repetition guard regression tests |
-| `tests/test_app_flow.py` | No changes expected |
-| `examples/config.toml` | Updated defaults |
-| `AGENTS.md` | Performance caveats, config table updates |
+- `shuvoice/asr_moonshine.py`
+- `shuvoice/config.py`
+- `tests/test_asr_moonshine.py` (new)
+- `tests/test_config.py`
+- `examples/config.toml`
+- `examples/config-moonshine-cpu.toml`
+- `AGENTS.md`

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +47,7 @@ class MoonshineBackend(ASRBackend):
     # Only run inference after accumulating this much new audio.  Between
     # inference calls the cached ``_last_text`` is returned immediately.
     # Silence chunks (all zeros, used for tail-flush) bypass the throttle.
-    _INFER_INTERVAL_S = 0.30
+    _INFER_INTERVAL_S = 0.50
 
     # Buffer-level normalization target.  Raw microphone audio is
     # typically 0.01–0.05 RMS; Moonshine expects levels closer to what
@@ -58,7 +59,15 @@ class MoonshineBackend(ASRBackend):
 
     # Repetition guard limits
     _MAX_WORDS_PER_SEC = 6.0  # generous cap; typical speech ≈ 2-3 wps
+    _MAX_CHARS_PER_SEC = 40.0  # generous cap; typical speech ≈ 15-20 chars/s
     _REPETITION_THRESHOLD = 4  # consecutive pattern repeats to trigger cut
+    _LONG_REPETITION_THRESHOLD = 3
+    _MAX_PATTERN_WORDS = 12
+    _MAX_PATTERN_STARTS = 20
+    _TOKEN_SPAN_RE = re.compile(r"\S+")
+    # Detect token-local repetition (including hyphen-delimited loops) before
+    # word-level checks. Examples: "hake-hake-hake-hake", "127127127127".
+    _TOKEN_REPETITION_RE = re.compile(r"(.{1,10}?)(?:-?\1){3,}")
 
     def __init__(self, config: Config):
         self.config = config
@@ -170,6 +179,12 @@ class MoonshineBackend(ASRBackend):
                 "Check moonshine_model_name/model_precision/model_dir configuration."
             ) from e
 
+        log.warning(
+            "Moonshine runs on CPU only and is significantly slower than NeMo (CUDA) "
+            "or Sherpa. Best suited for short utterances (<5s) on systems without "
+            "GPU support."
+        )
+
         self.reset()
 
     def reset(self) -> None:
@@ -195,7 +210,9 @@ class MoonshineBackend(ASRBackend):
         # --- buffer management ---
         self._audio_buffer = np.concatenate([self._audio_buffer, waveform])
 
-        max_samples = int(float(self.config.moonshine_max_window_sec) * int(self.config.sample_rate))
+        max_samples = int(
+            float(self.config.moonshine_max_window_sec) * int(self.config.sample_rate)
+        )
         if self._audio_buffer.size > max_samples:
             self._audio_buffer = self._audio_buffer[-max_samples:]
 
@@ -266,18 +283,58 @@ class MoonshineBackend(ASRBackend):
     def _guard_repetition(cls, text: str, audio_seconds: float) -> str:
         """Detect and truncate repetitive hallucination output.
 
-        Two checks:
-        1. **Word-count cap** — at most ~6 words per second of audio.
-           Hallucination loops easily exceed this (e.g. 200 words for 2s
-           of audio).
-        2. **Pattern detection** — any 1-4 word n-gram repeating ≥ 4
-           consecutive times is truncated to a single occurrence.
+        Checks are applied in this order:
+        1. **Token-local repetition** — catches loops inside a single token,
+           such as ``hake-hake-hake-hake`` or ``127127127127``.
+        2. **Character-count cap** — bounds huge single-token outputs that can
+           bypass word-count limits.
+        3. **Word-count cap** — at most ~6 words per second of audio.
+        4. **N-gram repetition** — catches repeated clauses in 1–12 word windows.
         """
+        if not text:
+            return text
+
+        # 0. Token-level repetition guard (before word split / short-text return).
+        for token_match in cls._TOKEN_SPAN_RE.finditer(text):
+            token = token_match.group(0)
+            repeated = cls._TOKEN_REPETITION_RE.search(token)
+            if repeated is None:
+                continue
+
+            kept_len = repeated.start() + len(repeated.group(1))
+            kept_token = token[:kept_len]
+            text = f"{text[:token_match.start()]}{kept_token}{text[token_match.end():]}"
+            log.debug(
+                "Repetition guard: token %r has repeated pattern %r, truncating token",
+                token,
+                repeated.group(1),
+            )
+            break
+
+        # 1. Character-count cap catches long single-token runs.
+        max_chars = max(100, int(audio_seconds * cls._MAX_CHARS_PER_SEC) + 20)
+        if len(text) > max_chars:
+            truncated = text[:max_chars]
+            if " " in truncated:
+                boundary = truncated.rsplit(" ", 1)[0]
+                if boundary:
+                    truncated = boundary
+            if not truncated:
+                truncated = text[:max_chars]
+
+            log.debug(
+                "Repetition guard: char count %d exceeds cap %d for %.1fs audio",
+                len(text),
+                max_chars,
+                audio_seconds,
+            )
+            text = truncated
+
         words = text.split()
         if len(words) <= 5:
             return text
 
-        # 1. Hard cap: prevent returning enormous hallucinated strings
+        # 2. Hard cap: prevent returning enormous hallucinated strings.
         max_words = max(10, int(audio_seconds * cls._MAX_WORDS_PER_SEC) + 5)
         if len(words) > max_words:
             log.debug(
@@ -288,13 +345,17 @@ class MoonshineBackend(ASRBackend):
             )
             words = words[:max_words]
 
-        # 2. N-gram repetition: find patterns (1–4 words) repeating 4+ times
-        threshold = cls._REPETITION_THRESHOLD
-        for plen in range(1, 5):
-            if len(words) < plen * threshold:
+        # 3. N-gram repetition: find repeated 1–12 word patterns.
+        for plen in range(1, cls._MAX_PATTERN_WORDS + 1):
+            threshold = (
+                cls._REPETITION_THRESHOLD if plen <= 4 else cls._LONG_REPETITION_THRESHOLD
+            )
+            min_words = plen * threshold
+            if len(words) < min_words:
                 continue
-            # Check starting positions within the first few words
-            for start in range(min(len(words) - plen * threshold + 1, 8)):
+
+            start_limit = min(len(words) - min_words + 1, cls._MAX_PATTERN_STARTS)
+            for start in range(start_limit):
                 pattern = tuple(w.lower().strip(".,!?;:'\"") for w in words[start : start + plen])
                 count = 0
                 pos = start
@@ -307,14 +368,17 @@ class MoonshineBackend(ASRBackend):
                         pos += plen
                     else:
                         break
+
                 if count >= threshold:
-                    # Keep everything before the run + one instance
                     kept = words[: start + plen]
                     log.debug(
-                        "Repetition guard: pattern %r repeated %d× at word %d, truncating",
+                        "Repetition guard: pattern %r repeated %d× at word %d "
+                        "(plen=%d threshold=%d), truncating",
                         pattern,
                         count,
                         start,
+                        plen,
+                        threshold,
                     )
                     return " ".join(kept)
 

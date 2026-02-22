@@ -330,7 +330,7 @@ asr_backend = "moonshine"
 moonshine_model_name = "moonshine/tiny"
 moonshine_model_precision = "float"
 moonshine_chunk_ms = 100
-moonshine_max_window_sec = 10.0
+moonshine_max_window_sec = 5.0
 moonshine_max_tokens = 128
 ```
 
@@ -342,8 +342,8 @@ moonshine_max_tokens = 128
 | `moonshine_model_dir`      | *none*             | Optional local model path |
 | `moonshine_model_precision`| `float`            | ONNX precision |
 | `moonshine_chunk_ms`       | `100`              | Chunk duration |
-| `moonshine_max_window_sec` | `10.0`             | Max audio window before reset |
-| `moonshine_max_tokens`     | `192`              | Max generated tokens per window |
+| `moonshine_max_window_sec` | `5.0`              | Max audio window before reset |
+| `moonshine_max_tokens`     | `128`              | Max generated tokens per window |
 
 #### Dependencies
 
@@ -356,10 +356,11 @@ Models are downloaded automatically from HuggingFace on first use.
 
 #### Characteristics
 
-- Very lightweight — CPU-only, no GPU needed
-- Fastest startup time
+- CPU-only backend (ONNX runtime)
+- Fast startup, but significantly slower than NeMo (CUDA) and Sherpa
+- Best suited for short utterances (typically <5 seconds)
 - Lower accuracy than NeMo, especially for technical terms
-- Best for low-resource systems or when GPU is unavailable
+- Good fallback when GPU ASR is unavailable
 
 ---
 
@@ -433,6 +434,8 @@ pip install -e ".[asr-nemo,asr-sherpa,asr-moonshine,dev]"
 | Issue | Description | Status |
 |-------|-------------|--------|
 | [#7](https://github.com/shuv1337/shuvoice/issues/7) | Sherpa drops trailing words on early key release | Open — tail flush partially working |
+| [#12](https://github.com/shuv1337/shuvoice/issues/12) | Moonshine repetition guard misses token/long-clause loops | Fixes implemented locally in `PLAN-12-13-moonshine-fixes.md`; benchmark validation pending |
+| [#13](https://github.com/shuv1337/shuvoice/issues/13) | Moonshine base/tiny throughput is significantly slower than NeMo/Sherpa | Default tuning + throttle changes implemented; benchmark validation pending |
 | — | Sherpa GPU requires source-built wheel + CUDA 12 compat libs | Documented above; `PLAN-sherpa-gpu-enable.md` |
 | — | Pre-built sherpa-onnx CUDA wheels incompatible with CUDA 13.1 | Permanent until upstream adds CUDA 13 support |
 

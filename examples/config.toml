@@ -46,8 +46,8 @@ use_cuda_graph_decoder = false
 # moonshine_model_dir = "/path/to/local/moonshine-model"   # optional
 # moonshine_model_precision = "float"
 # moonshine_chunk_ms = 100
-# moonshine_max_window_sec = 32.0
-# moonshine_max_tokens = 192
+# moonshine_max_window_sec = 5.0
+# moonshine_max_tokens = 128
 
 [overlay]
 font_size = 22

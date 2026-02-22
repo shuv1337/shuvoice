@@ -15,8 +15,8 @@ asr_backend = "moonshine"
 moonshine_model_name = "moonshine/base"
 moonshine_model_precision = "float"
 moonshine_chunk_ms = 100
-moonshine_max_window_sec = 10.0
-moonshine_max_tokens = 192
+moonshine_max_window_sec = 5.0
+moonshine_max_tokens = 128
 
 [hotkey]
 hotkey_backend = "ipc"

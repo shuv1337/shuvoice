@@ -15,6 +15,22 @@ Core pipeline + production hardening are implemented:
 - Hyprland IPC fallback controls via local Unix socket
 - `wtype` / clipboard text injection with retry + fallback
 
+## Current backend models & providers
+
+| Backend (`asr_backend`) | Current model(s) | Provider setting | Supported providers |
+|---|---|---|---|
+| `nemo` | `nvidia/nemotron-speech-streaming-en-0.6b` | `device` | `cuda` (default), `cpu` |
+| `sherpa` | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` (local model dir) | `sherpa_provider` | `cpu` (default), `cuda` |
+| `moonshine` | `moonshine/base` (also `moonshine/tiny`) | N/A (CPU runtime) | `cpu` |
+
+Model locations in this repo/runtime:
+
+- NeMo model ID: `nvidia/nemotron-speech-streaming-en-0.6b` (downloaded to Hugging Face cache)
+- Sherpa model dir: `build/asr-models/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06/`
+- Moonshine models: Hugging Face `UsefulSensors/moonshine` (`base`/`tiny`)
+
+> Note: Sherpa CUDA requires a source-built `sherpa-onnx` GPU wheel plus CUDA 12 compatibility libs on this host stack.
+
 ## Requirements
 
 ### Python
