@@ -2,6 +2,8 @@
 
 Thanks for your interest in contributing to ShuVoice!
 
+Need logo assets for docs or release notes? See `docs/BRANDING.md`.
+
 ## Development setup
 
 1. Clone the repository.

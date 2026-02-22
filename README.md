@@ -1,5 +1,13 @@
 # ShuVoice
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/branding/shuvoice-variant-dark-lockup.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/branding/shuvoice-variant-light-lockup.png">
+    <img src="docs/assets/branding/shuvoice-variant-dark-lockup.png" alt="ShuVoice logo" width="760">
+  </picture>
+</p>
+
 Streaming speech-to-text overlay for Hyprland with pluggable ASR backends.
 
 [![CI](https://github.com/shuv1337/shuvoice/actions/workflows/ci.yml/badge.svg)](https://github.com/shuv1337/shuvoice/actions/workflows/ci.yml)
@@ -330,6 +338,7 @@ The script:
 - Contribution guidelines: `CONTRIBUTING.md`
 - Code of Conduct: `CODE_OF_CONDUCT.md`
 - Security policy: `SECURITY.md`
+- Brand assets: `docs/BRANDING.md`
 
 ## License
 
