@@ -5,9 +5,48 @@ from __future__ import annotations
 MIN_OVERLAP_CHARS = 8
 MIN_OVERLAP_WORDS = 2
 
+# Guard against pathological repetition bursts emitted by some backends
+# under noisy/unstable conditions (e.g. "just just just ..." hundreds of times).
+REPETITION_MIN_WORDS = 20
+REPETITION_MAX_RUN = 8
+REPETITION_MAX_UNIQUE_RATIO = 0.2
+
 
 def _normalize_word(word: str) -> str:
     return word.strip(".,!?;:\"'()[]{}").lower()
+
+
+def _max_consecutive_run(words: list[str]) -> int:
+    if not words:
+        return 0
+
+    best = 1
+    current = 1
+    last = words[0]
+    for word in words[1:]:
+        if word == last:
+            current += 1
+            best = max(best, current)
+        else:
+            current = 1
+            last = word
+
+    return best
+
+
+def _is_pathological_repetition(text: str) -> bool:
+    words = [_normalize_word(word) for word in text.split()]
+    words = [word for word in words if word]
+    if len(words) < REPETITION_MIN_WORDS:
+        return False
+
+    max_run = _max_consecutive_run(words)
+    unique_ratio = len(set(words)) / max(1, len(words))
+
+    if max_run >= REPETITION_MAX_RUN:
+        return True
+
+    return unique_ratio <= REPETITION_MAX_UNIQUE_RATIO
 
 
 def _stitch_by_word_overlap(previous: str, candidate: str) -> str | None:
@@ -39,6 +78,8 @@ def prefer_transcript(previous: str, candidate: str) -> str:
 
     Rules:
     - Empty candidate never replaces non-empty previous text.
+    - Pathological repetition candidates are rejected.
+    - If previous text is pathological repetition and candidate is sane, candidate replaces it.
     - Candidate that extends previous text is accepted.
     - Candidate that is a shorter prefix is rejected.
     - Candidate can be stitched when overlap is strong (>= MIN_OVERLAP_CHARS).
@@ -53,7 +94,14 @@ def prefer_transcript(previous: str, candidate: str) -> str:
 
     if not new:
         return previous_raw
+
+    if _is_pathological_repetition(new):
+        return previous_raw
+
     if not prev:
+        return candidate_raw
+
+    if _is_pathological_repetition(prev):
         return candidate_raw
 
     if new.startswith(prev):

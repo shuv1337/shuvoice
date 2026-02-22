@@ -64,3 +64,18 @@ def test_word_overlap_requires_new_suffix():
     previous = "we are done now"
     candidate = "are done now"
     assert prefer_transcript(previous, candidate) == previous
+
+
+def test_pathological_repetition_candidate_is_rejected():
+    candidate = ("just " * 120).strip()
+    assert prefer_transcript("", candidate) == ""
+
+
+def test_pathological_previous_can_be_replaced_by_sane_shorter_candidate():
+    previous = ("testing, " * 120).strip()
+    candidate = "testing moonshine provider"
+    assert prefer_transcript(previous, candidate) == candidate
+
+
+def test_short_repetition_is_kept():
+    assert prefer_transcript("", "no no no no") == "no no no no"
