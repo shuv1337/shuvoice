@@ -8,6 +8,7 @@ import logging
 import os
 import shutil
 import sys
+import time
 from ctypes import CDLL
 from typing import Callable
 
@@ -154,6 +155,15 @@ def main():
         "--control-socket",
         default=None,
         help="Override control socket path (default: $XDG_RUNTIME_DIR/shuvoice/control.sock)",
+    )
+    parser.add_argument(
+        "--control-wait-sec",
+        type=float,
+        default=2.0,
+        help=(
+            "When sending stop/toggle, wait up to this many seconds for post-stop "
+            "processing to finish (0 disables wait)."
+        ),
     )
     parser.add_argument(
         "--asr-backend",
@@ -364,8 +374,31 @@ def main():
     if args.control:
         from .control import send_control_command
 
+        status_before = ""
+        if args.control == "toggle" and args.control_wait_sec > 0:
+            try:
+                status_before = send_control_command("status", config.control_socket)
+            except Exception:
+                status_before = ""
+
         try:
             response = send_control_command(args.control, config.control_socket)
+
+            should_wait = False
+            if args.control_wait_sec > 0:
+                if args.control == "stop":
+                    should_wait = True
+                elif args.control == "toggle":
+                    should_wait = status_before.strip().endswith("recording")
+
+            if should_wait:
+                deadline = time.monotonic() + float(args.control_wait_sec)
+                while time.monotonic() < deadline:
+                    status = send_control_command("status", config.control_socket)
+                    state = status[3:].strip() if status.startswith("OK ") else status.strip()
+                    if state != "processing":
+                        break
+                    time.sleep(0.05)
         except Exception as e:
             print(f"ERROR: {e}", file=sys.stderr)
             sys.exit(1)

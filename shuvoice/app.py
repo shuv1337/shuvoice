@@ -87,6 +87,7 @@ class ShuVoiceApp(Gtk.Application):
         self.overlay: CaptionOverlay | None = None
 
         self._recording = threading.Event()
+        self._processing = threading.Event()
         self._running = threading.Event()
         self._running.set()
 
@@ -150,6 +151,7 @@ class ShuVoiceApp(Gtk.Application):
         log.info("Shutting down…")
         self._running.clear()
         self._recording.clear()
+        self._processing.clear()
         self.control.stop()
         self.audio.stop()
         Gtk.Application.do_shutdown(self)
@@ -171,6 +173,7 @@ class ShuVoiceApp(Gtk.Application):
     def _disable_asr(self, reason: str):
         self._asr_disabled = True
         self._recording.clear()
+        self._processing.clear()
         log.critical(reason)
         self._show_overlay_error("⚠ ASR error — restart ShuVoice")
 
@@ -283,6 +286,7 @@ class ShuVoiceApp(Gtk.Application):
 
             self.audio.clear()
 
+        self._processing.clear()
         self._recording.set()
         log.info("Recording started")
 
@@ -300,6 +304,7 @@ class ShuVoiceApp(Gtk.Application):
 
         log.info("Recording stopped")
         self._recording.clear()
+        self._processing.set()
         self._play_feedback_tone(is_start=False)
 
         if self.overlay:
@@ -318,7 +323,11 @@ class ShuVoiceApp(Gtk.Application):
             return "error:asr_thread_dead"
         if self.hotkey and not self._hotkey_thread_alive:
             return "error:hotkey_thread_dead"
-        return "recording" if self._recording.is_set() else "idle"
+        if self._recording.is_set():
+            return "recording"
+        if self._processing.is_set():
+            return "processing"
+        return "idle"
 
     # -- ASR processing helpers ---------------------------------------------
 
@@ -697,7 +706,10 @@ class ShuVoiceApp(Gtk.Application):
                 self._process_recording_chunks(state)
 
             if was_recording and not is_recording:
-                self._handle_recording_stop(state)
+                try:
+                    self._handle_recording_stop(state)
+                finally:
+                    self._processing.clear()
 
             was_recording = is_recording
 

@@ -17,6 +17,7 @@ def test_recording_start_stop_transitions():
 
     app = SimpleNamespace(
         _recording=threading.Event(),
+        _processing=threading.Event(),
         _asr_thread_alive=True,
         _show_overlay_error=Mock(),
         _asr_lock=threading.Lock(),
@@ -32,6 +33,7 @@ def test_recording_start_stop_transitions():
     ShuVoiceApp._on_recording_start(app)
 
     assert app._recording.is_set()
+    assert not app._processing.is_set()
     assert app.audio.clear.call_count == 2
     app.asr.reset.assert_called_once()
     app.overlay.show.assert_called_once()
@@ -42,8 +44,28 @@ def test_recording_start_stop_transitions():
     ShuVoiceApp._on_recording_stop(app)
 
     assert not app._recording.is_set()
+    assert app._processing.is_set()
     app.overlay.set_state.assert_any_call("processing")
     assert tones == [True, False]
+
+
+def test_recording_status_reports_processing_between_stop_and_commit():
+    app = SimpleNamespace(
+        _asr_disabled=False,
+        _asr_thread_alive=True,
+        hotkey=None,
+        _hotkey_thread_alive=False,
+        _recording=threading.Event(),
+        _processing=threading.Event(),
+    )
+
+    assert ShuVoiceApp._recording_status(app) == "idle"
+
+    app._processing.set()
+    assert ShuVoiceApp._recording_status(app) == "processing"
+
+    app._recording.set()
+    assert ShuVoiceApp._recording_status(app) == "recording"
 
 
 def test_begin_utterance_resets_asr_before_threshold_setup():

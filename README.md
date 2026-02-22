@@ -195,11 +195,32 @@ python -m shuvoice --control toggle
 python -m shuvoice --control status
 ```
 
+Notes:
+- `start`/`stop` is recommended for push-to-talk flows (`bind` + `bindr`).
+- `status` may report `processing` briefly after `stop`/`toggle` while final text is being flushed/typed.
+- CLI waits up to 2s after `stop` (or a stop-side `toggle`) for processing to finish; adjust with `--control-wait-sec`.
+
 Hyprland example:
 
 ```ini
 bind = , F9, exec, shuvoice --control start
 bindr = , F9, exec, shuvoice --control stop
+```
+
+Hyprland blur/transparency for the overlay layer surface:
+
+```ini
+# ShuVoice uses layer-shell namespace: stt-overlay
+layerrule = blur, stt-overlay
+layerrule = ignorealpha 0.20, stt-overlay
+layerrule = xray 1, stt-overlay
+```
+
+Then tune overlay alpha in `~/.config/shuvoice/config.toml`:
+
+```toml
+[overlay]
+bg_opacity = 0.55
 ```
 
 ## Configuration
