@@ -2,6 +2,8 @@
 
 Streaming speech-to-text overlay for Hyprland with pluggable ASR backends.
 
+[![CI](https://github.com/shuv1337/shuvoice/actions/workflows/ci.yml/badge.svg)](https://github.com/shuv1337/shuvoice/actions/workflows/ci.yml)
+
 ## Status
 
 Core pipeline + production hardening are implemented:
@@ -195,6 +197,23 @@ use_cuda_graph_decoder = false
 ./scripts/smoke-test.sh
 ```
 
+## Development
+
+Install development tooling and run local quality checks:
+
+```bash
+pip install -e .[dev]
+ruff check shuvoice tests
+ruff format --check shuvoice tests
+pytest -m "not gui" -v
+```
+
+To remove local build/test artifacts generated during development:
+
+```bash
+rm -rf build dist *.egg-info .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage* coverage.xml
+```
+
 ## Long-phrase round-trip harness (TTS -> STT)
 
 Use this to reproduce truncation/cut-out behavior with deterministic inputs.
@@ -218,6 +237,16 @@ The script:
 - streams each file through ShuVoice ASR chunking logic
 - prints reference vs hypothesis similarity
 - writes `build/tts-roundtrip/roundtrip.csv`
+
+## Open source project docs
+
+- Contribution guidelines: `CONTRIBUTING.md`
+- Code of Conduct: `CODE_OF_CONDUCT.md`
+- Security policy: `SECURITY.md`
+
+## License
+
+ShuVoice is released under the MIT License. See `LICENSE`.
 
 ## Troubleshooting
 
