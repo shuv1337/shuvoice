@@ -39,7 +39,7 @@ class ShuVoiceApp(Gtk.Application):
     _ASR_MAX_FAILURES = 10
 
     def __init__(self, config: Config):
-        super().__init__(application_id="dev.shuv.shuvoice")
+        super().__init__(application_id="io.github.shuv1337.shuvoice")
         self.config = config
 
         self.asr = create_backend(config.asr_backend, config)

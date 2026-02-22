@@ -156,7 +156,7 @@ cp packaging/systemd/user/shuvoice.service ~/.config/systemd/user/shuvoice.servi
 systemctl --user edit shuvoice.service
 # [Service]
 # ExecStart=
-# ExecStart=%h/repos/shuvoice/.venv312/bin/shuvoice
+# ExecStart=%h/.venv/bin/shuvoice
 
 systemctl --user daemon-reload
 systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_RUNTIME_DIR HYPRLAND_INSTANCE_SIGNATURE DBUS_SESSION_BUS_ADDRESS XDG_CURRENT_DESKTOP XDG_SESSION_TYPE

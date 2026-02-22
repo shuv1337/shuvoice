@@ -17,15 +17,15 @@ auto_gain_settle_chunks = 2
 
 [asr]
 asr_backend = "sherpa"
-# Update this path for your host if needed.
-sherpa_model_dir = "/home/shuv/repos/shuvoice/build/asr-models/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
+# Set this to your local model directory. See README.md for Sherpa model setup.
+sherpa_model_dir = "/path/to/sherpa-model-dir"
 sherpa_provider = "cuda"
 sherpa_num_threads = 2
 sherpa_chunk_ms = 100
 
 [hotkey]
 hotkey_backend = "ipc"
-control_socket = "/run/user/1000/shuvoice/control.sock"
+# Defaults to "$XDG_RUNTIME_DIR/shuvoice/control.sock" when unset.
 
 [typing]
 output_mode = "final_only"

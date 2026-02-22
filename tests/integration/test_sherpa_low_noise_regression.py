@@ -81,10 +81,6 @@ def _roundtrip_python() -> str:
     if override:
         return override
 
-    venv312_python = ROOT / ".venv312" / "bin" / "python"
-    if venv312_python.exists():
-        return str(venv312_python)
-
     return sys.executable
 
 

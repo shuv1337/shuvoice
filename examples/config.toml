@@ -65,8 +65,8 @@ hold_threshold_ms = 300
 # hotkey_device = "/dev/input/event3"
 # Listen to all matching keyboards (usually keep false to avoid duplicate events)
 hotkey_listen_all_devices = false
-# Optional control socket override
-# control_socket = "/run/user/1000/shuvoice/control.sock"
+# Optional control socket override (defaults to "$XDG_RUNTIME_DIR/shuvoice/control.sock")
+# control_socket = "/path/to/control.sock"
 
 [typing]
 # final_only | streaming_partial
