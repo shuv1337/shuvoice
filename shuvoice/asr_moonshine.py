@@ -130,8 +130,7 @@ class MoonshineBackend(ASRBackend):
             missing = [str(p.name) for p in required if not p.is_file()]
             if missing:
                 raise ValueError(
-                    "moonshine_model_dir is missing required model artifacts: "
-                    + ", ".join(missing)
+                    "moonshine_model_dir is missing required model artifacts: " + ", ".join(missing)
                 )
 
         max_window = float(self.config.moonshine_max_window_sec)
@@ -195,7 +194,9 @@ class MoonshineBackend(ASRBackend):
         # --- buffer management ---
         self._audio_buffer = np.concatenate([self._audio_buffer, waveform])
 
-        max_samples = int(float(self.config.moonshine_max_window_sec) * int(self.config.sample_rate))
+        max_samples = int(
+            float(self.config.moonshine_max_window_sec) * int(self.config.sample_rate)
+        )
         if self._audio_buffer.size > max_samples:
             self._audio_buffer = self._audio_buffer[-max_samples:]
 
@@ -299,9 +300,7 @@ class MoonshineBackend(ASRBackend):
                 count = 0
                 pos = start
                 while pos + plen <= len(words):
-                    candidate = tuple(
-                        w.lower().strip(".,!?;:'\"") for w in words[pos : pos + plen]
-                    )
+                    candidate = tuple(w.lower().strip(".,!?;:'\"") for w in words[pos : pos + plen])
                     if candidate == pattern:
                         count += 1
                         pos += plen
