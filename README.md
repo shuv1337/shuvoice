@@ -20,13 +20,13 @@ Core pipeline + production hardening are implemented:
 | Backend (`asr_backend`) | Current model(s) | Provider setting | Supported providers |
 |---|---|---|---|
 | `nemo` | `nvidia/nemotron-speech-streaming-en-0.6b` | `device` | `cuda` (default), `cpu` |
-| `sherpa` | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` (local model dir) | `sherpa_provider` | `cpu` (default), `cuda` |
+| `sherpa` | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` (auto-downloaded by default) | `sherpa_provider` | `cpu` (default), `cuda` |
 | `moonshine` | `moonshine/base` (also `moonshine/tiny`) | N/A (CPU runtime) | `cpu` |
 
 Model locations in this repo/runtime:
 
 - NeMo model ID: `nvidia/nemotron-speech-streaming-en-0.6b` (downloaded to Hugging Face cache)
-- Sherpa model dir: `build/asr-models/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06/`
+- Sherpa model dir: auto-download default `~/.local/share/shuvoice/models/sherpa/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06/` (or custom `sherpa_model_dir`)
 - Moonshine models: Hugging Face `UsefulSensors/moonshine` (`base`/`tiny`)
 
 > Note: Sherpa CUDA requires a source-built `sherpa-onnx` GPU wheel plus CUDA 12 compatibility libs on this host stack.
@@ -138,7 +138,7 @@ python -m shuvoice --list-audio-devices
 python -m shuvoice --audio-device 2 --input-gain 1.5
 ```
 
-`--download-model` currently supports NeMo only. Sherpa and Moonshine print setup guidance.
+`--download-model` supports NeMo and Sherpa. Moonshine downloads lazily on first load via useful-moonshine-onnx.
 
 ## systemd user service
 
@@ -200,7 +200,7 @@ Example config:
 Backend selection is controlled by `asr_backend`:
 
 - `asr_backend = "nemo"` (default): uses `model_name`, `right_context`, `device`
-- `asr_backend = "sherpa"`: requires `sherpa_model_dir` and uses `sherpa_*` settings
+- `asr_backend = "sherpa"`: uses `sherpa_*` settings; if `sherpa_model_dir` is unset, ShuVoice auto-downloads the default streaming model
 - `asr_backend = "moonshine"`: uses `moonshine_*` settings (16k sample rate expected)
 
 `right_context` applies to NeMo only.
@@ -302,9 +302,10 @@ ShuVoice is released under the MIT License. See `LICENSE`.
   - Install Sherpa deps (`pip install -e .[asr-sherpa]`).
 - `No module named 'moonshine_onnx'`
   - Install Moonshine deps (`pip install -e .[asr-moonshine]`).
-- `sherpa_model_dir is required` or missing `encoder/decoder/joiner` artifacts
+- `sherpa_model_dir` exists but is missing `encoder/decoder/joiner` artifacts
   - Point `sherpa_model_dir` to a streaming transducer model directory containing
     `tokens.txt` and ONNX files for encoder/decoder/joiner.
+  - If `sherpa_model_dir` is unset, ShuVoice will auto-download the default model.
 - `moonshine_model_dir` missing `encoder_model.onnx` / `decoder_model_merged.onnx`
   - Point `moonshine_model_dir` to a valid local Moonshine ONNX export, or unset it
     and let useful-moonshine-onnx fetch weights from Hugging Face.

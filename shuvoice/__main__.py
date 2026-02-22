@@ -382,7 +382,12 @@ def main():
         backend_cls = get_backend_class(config.asr_backend)
 
         try:
-            kwargs = {"model_name": config.model_name} if config.asr_backend == "nemo" else {}
+            kwargs: dict[str, object] = {}
+            if config.asr_backend == "nemo":
+                kwargs["model_name"] = config.model_name
+            elif config.asr_backend == "sherpa":
+                kwargs["model_dir"] = config.sherpa_model_dir
+
             backend_cls.download_model(**kwargs)
         except (RuntimeError, ValueError, NotImplementedError) as e:
             print(f"ERROR: {e}", file=sys.stderr)

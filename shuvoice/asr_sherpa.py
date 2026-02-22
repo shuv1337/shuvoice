@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import tarfile
+import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +24,8 @@ class SherpaBackend(ASRBackend):
 
     _EXPECTED_SAMPLE_RATE = 16000
     _RELEASE_URL = "https://github.com/k2-fsa/sherpa-onnx/releases"
+    _RELEASE_DOWNLOAD_ROOT = f"{_RELEASE_URL}/download/asr-models"
+    _DEFAULT_MODEL_NAME = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
 
     def __init__(self, config: Config):
         self.config = config
@@ -44,11 +51,160 @@ class SherpaBackend(ASRBackend):
         return errors
 
     @classmethod
-    def download_model(cls, **kwargs) -> None:
-        raise NotImplementedError(
-            "Sherpa model auto-download is not implemented. "
-            f"Download a streaming transducer model manually from: {cls._RELEASE_URL}"
+    def _model_archive_url(cls, model_name: str) -> str:
+        return f"{cls._RELEASE_DOWNLOAD_ROOT}/{model_name}.tar.bz2"
+
+    @classmethod
+    def _default_model_dir(cls, model_name: str | None = None) -> Path:
+        name = (model_name or cls._DEFAULT_MODEL_NAME).strip()
+        return Config.data_dir() / "models" / "sherpa" / name
+
+    @staticmethod
+    def _is_model_dir_complete(model_dir: Path) -> bool:
+        if not model_dir.is_dir():
+            return False
+
+        if not (model_dir / "tokens.txt").is_file():
+            return False
+
+        for stem in ("encoder", "decoder", "joiner"):
+            if not any(p.is_file() for p in model_dir.glob(f"{stem}*.onnx")):
+                return False
+
+        return True
+
+    @staticmethod
+    def _safe_extract_tar(archive_path: Path, target_dir: Path) -> None:
+        root = target_dir.resolve()
+        with tarfile.open(archive_path, mode="r:bz2") as tf:
+            for member in tf.getmembers():
+                member_path = (target_dir / member.name).resolve()
+                if not member_path.is_relative_to(root):
+                    raise RuntimeError(
+                        f"Unsafe path {member.name!r} while extracting Sherpa model archive"
+                    )
+            tf.extractall(path=target_dir)
+
+    @classmethod
+    def _find_extracted_model_dir(cls, root: Path) -> Path | None:
+        if cls._is_model_dir_complete(root):
+            return root
+
+        for path in root.rglob("*"):
+            if path.is_dir() and cls._is_model_dir_complete(path):
+                return path
+
+        return None
+
+    @classmethod
+    def download_model(
+        cls,
+        model_name: str | None = None,
+        model_dir: str | None = None,
+        **_: Any,
+    ) -> None:
+        """Download a Sherpa streaming transducer model archive and extract it."""
+        resolved_model_name = (model_name or cls._DEFAULT_MODEL_NAME).strip()
+        target_dir = (
+            Path(model_dir).expanduser()
+            if model_dir
+            else cls._default_model_dir(model_name=resolved_model_name)
         )
+
+        if cls._is_model_dir_complete(target_dir):
+            log.info("Sherpa model already available: %s", target_dir)
+            return
+
+        if target_dir.exists() and not target_dir.is_dir():
+            raise RuntimeError(f"Sherpa model target exists and is not a directory: {target_dir}")
+
+        target_dir.parent.mkdir(parents=True, exist_ok=True)
+
+        archive_url = cls._model_archive_url(resolved_model_name)
+        log.info("Downloading Sherpa model %s", resolved_model_name)
+        log.info("Source: %s", archive_url)
+        log.info("Destination: %s", target_dir)
+
+        with tempfile.TemporaryDirectory(prefix="shuvoice-sherpa-") as tmp:
+            tmp_dir = Path(tmp)
+            archive_path = tmp_dir / f"{resolved_model_name}.tar.bz2"
+            extracted_dir = tmp_dir / "extracted"
+            extracted_dir.mkdir(parents=True, exist_ok=True)
+
+            try:
+                urllib.request.urlretrieve(archive_url, archive_path)
+            except (urllib.error.URLError, TimeoutError) as e:
+                raise RuntimeError(
+                    "Failed to download Sherpa model archive. "
+                    f"URL: {archive_url}. Error: {e}"
+                ) from e
+
+            cls._safe_extract_tar(archive_path, extracted_dir)
+            source_dir = cls._find_extracted_model_dir(extracted_dir)
+            if source_dir is None:
+                raise RuntimeError(
+                    "Downloaded Sherpa archive did not contain required artifacts "
+                    "(tokens.txt + encoder/decoder/joiner ONNX files)."
+                )
+
+            if target_dir.exists():
+                shutil.rmtree(target_dir)
+            shutil.copytree(source_dir, target_dir)
+
+        if not cls._is_model_dir_complete(target_dir):
+            raise RuntimeError(
+                "Sherpa model download completed but artifacts are incomplete: "
+                f"{target_dir}"
+            )
+
+        log.info("Sherpa model ready: %s", target_dir)
+
+    def _resolve_model_dir(self) -> Path:
+        configured = self.config.sherpa_model_dir
+        if configured:
+            model_dir = Path(configured).expanduser()
+            if self._is_model_dir_complete(model_dir):
+                return model_dir
+
+            if model_dir.exists():
+                raise ValueError(
+                    "Sherpa model directory exists but is missing required artifacts. "
+                    "Expected tokens.txt and encoder/decoder/joiner ONNX files: "
+                    f"{model_dir}"
+                )
+
+            log.info(
+                "Configured sherpa_model_dir does not exist. "
+                "Downloading default Sherpa model to %s",
+                model_dir,
+            )
+            self.download_model(model_dir=str(model_dir))
+            if not self._is_model_dir_complete(model_dir):
+                raise RuntimeError(
+                    "Sherpa auto-download failed to populate model directory: "
+                    f"{model_dir}"
+                )
+
+            self.config.sherpa_model_dir = str(model_dir)
+            return model_dir
+
+        default_dir = self._default_model_dir()
+        if not self._is_model_dir_complete(default_dir):
+            log.info(
+                "sherpa_model_dir is not set. Downloading default Sherpa model to %s",
+                default_dir,
+            )
+            self.download_model(model_dir=str(default_dir))
+
+        if not self._is_model_dir_complete(default_dir):
+            raise RuntimeError(
+                "Sherpa model auto-download failed and no valid local model directory is "
+                "available. "
+                f"Expected artifacts under: {default_dir}"
+            )
+
+        self.config.sherpa_model_dir = str(default_dir)
+        return default_dir
 
     def _validate_runtime_config(self) -> None:
         if int(self.config.sample_rate) != self._EXPECTED_SAMPLE_RATE:
@@ -57,16 +213,7 @@ class SherpaBackend(ASRBackend):
                 f"(got {self.config.sample_rate})."
             )
 
-        model_dir_raw = self.config.sherpa_model_dir
-        if not model_dir_raw:
-            raise ValueError(
-                "sherpa_model_dir is required when asr_backend='sherpa'. "
-                f"See Sherpa releases: {self._RELEASE_URL}"
-            )
-
-        model_dir = Path(model_dir_raw).expanduser()
-        if not model_dir.is_dir():
-            raise ValueError(f"sherpa_model_dir does not exist or is not a directory: {model_dir}")
+        model_dir = self._resolve_model_dir()
 
         tokens = model_dir / "tokens.txt"
         if not tokens.is_file():

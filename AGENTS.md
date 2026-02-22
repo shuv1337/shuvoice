@@ -226,7 +226,7 @@ sherpa_chunk_ms = 100
 
 | Key                 | Default | Notes |
 |---------------------|---------|-------|
-| `sherpa_model_dir`  | *none*  | **Required.** Path to streaming transducer model directory |
+| `sherpa_model_dir`  | *none*  | Optional. If unset, ShuVoice auto-downloads the default streaming model into `~/.local/share/shuvoice/models/sherpa/` |
 | `sherpa_provider`   | `cpu`   | `cpu` or `cuda` |
 | `sherpa_num_threads`| `2`     | CPU threads for inference |
 | `sherpa_chunk_ms`   | `100`   | Chunk duration in milliseconds |
