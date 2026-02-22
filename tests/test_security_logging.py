@@ -1,9 +1,12 @@
 import logging
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
+
 from shuvoice.app import ShuVoiceApp
 from shuvoice.config import Config
 from shuvoice.utterance_state import _UtteranceState
+
 
 @pytest.fixture
 def app():
@@ -30,6 +33,7 @@ def app():
 
         return app
 
+
 def test_no_sensitive_data_in_debug_logs(app, caplog):
     """Verify that transcribed text is not logged in DEBUG logs."""
     caplog.set_level(logging.DEBUG)
@@ -38,6 +42,7 @@ def test_no_sensitive_data_in_debug_logs(app, caplog):
     state.reset(rms_threshold=0.01)
     # Mock some audio data
     import numpy as np
+
     chunk = np.zeros(1000, dtype=np.float32)
     state.add_chunk(chunk)
 
@@ -56,15 +61,15 @@ def test_no_sensitive_data_in_debug_logs(app, caplog):
             pytest.fail(f"Sensitive data found in log: {record.message}")
 
     # Also check if length is logged instead
-    found_safe_log = False
     for record in caplog.records:
         if "raw_text_len=" in record.message or "text_len" in record.message:
-             found_safe_log = True
+            pass
         # Or checking if it mentions length
         if "raw_text=" in record.message:
             # If it says raw_text=..., it might be the old format.
             # We want to ensure it DOESN'T verify sensitive text, which we did above.
             pass
+
 
 def test_no_sensitive_data_in_transcript_update_logs(app, caplog):
     caplog.set_level(logging.DEBUG)
@@ -75,6 +80,7 @@ def test_no_sensitive_data_in_transcript_update_logs(app, caplog):
 
     # Simulate update
     import numpy as np
+
     chunk = np.zeros(1000, dtype=np.float32)
     state.add_chunk(chunk)
 
@@ -83,6 +89,7 @@ def test_no_sensitive_data_in_transcript_update_logs(app, caplog):
     for record in caplog.records:
         if "New Sensitive Text" in record.message:
             pytest.fail(f"Sensitive data found in log: {record.message}")
+
 
 def test_no_sensitive_data_in_final_logs(app, caplog):
     caplog.set_level(logging.INFO)
@@ -94,4 +101,4 @@ def test_no_sensitive_data_in_final_logs(app, caplog):
 
     for record in caplog.records:
         if "Final Sensitive Text" in record.message:
-             pytest.fail(f"Sensitive data found in log: {record.message}")
+            pytest.fail(f"Sensitive data found in log: {record.message}")
