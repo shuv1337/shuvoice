@@ -45,7 +45,7 @@ class SherpaBackend(ASRBackend):
             import sherpa_onnx  # noqa: F401
         except Exception as e:
             errors.append(
-                f"Missing sherpa-onnx dependency: {e}. Install with: pip install sherpa-onnx"
+                f"Missing sherpa-onnx dependency: {e}. Install with: uv sync --extra asr-sherpa"
             )
 
         return errors

@@ -6,6 +6,6 @@
 # - source builds can fail in modern CMake/pybind11 toolchains
 #
 # Use with:
-#   uv pip install -e .[asr] --overrides packaging/constraints/py314-overrides.txt
+#   uv sync --extra asr-nemo --override packaging/constraints/py314-overrides.txt
 
 kaldialign==0.9.3

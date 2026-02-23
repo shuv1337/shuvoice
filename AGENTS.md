@@ -48,7 +48,7 @@ text is typed into the focused window via clipboard injection.
 | Virtual env | `.venv/` |
 | GPU | Optional (recommended for NeMo / Sherpa CUDA) |
 | CUDA | CUDA 12.x-compatible runtime required by many prebuilt GPU wheels |
-| Package manager | `pacman` / distro equivalent |
+| Package manager | `uv` (Python), `pacman` (system) |
 
 ### Important version notes
 
@@ -184,8 +184,8 @@ use_cuda_graph_decoder = false
 #### Dependencies
 
 ```bash
-pip install -e ".[asr-nemo]"
-# or: pip install torch nemo-toolkit[asr]
+uv sync --extra asr-nemo
+# or: uv add torch nemo-toolkit[asr]
 ```
 
 #### Characteristics
@@ -245,8 +245,8 @@ joiner.onnx   (or joiner*.onnx)
 #### Dependencies
 
 ```bash
-pip install -e ".[asr-sherpa]"
-# or: pip install sherpa-onnx
+uv sync --extra asr-sherpa
+# or: uv add sherpa-onnx
 ```
 
 #### Sherpa GPU (CUDA) support
@@ -261,7 +261,7 @@ cd $REPO_ROOT/build/sherpa-onnx
 git checkout v<VERSION>
 export SHERPA_ONNX_CMAKE_ARGS="-DSHERPA_ONNX_ENABLE_GPU=ON -DCMAKE_CUDA_ARCHITECTURES=89"
 $REPO_ROOT/.venv/bin/python setup.py bdist_wheel
-pip install dist/sherpa_onnx-*.whl --force-reinstall --no-deps
+uv pip install dist/sherpa_onnx-*.whl --force-reinstall --no-deps
 
 SHERPA_LIB="$REPO_ROOT/.venv/lib/python3.12/site-packages/sherpa_onnx/lib"
 # Copy required CUDA compat libs into $SHERPA_LIB, then patch RUNPATH:
@@ -311,8 +311,8 @@ moonshine_max_tokens = 128
 #### Dependencies
 
 ```bash
-pip install -e ".[asr-moonshine]"
-# or: pip install useful-moonshine-onnx
+uv sync --extra asr-moonshine
+# or: uv add useful-moonshine-onnx
 ```
 
 ---
@@ -355,9 +355,7 @@ sudo pacman -S \
 ### Python virtual environment
 
 ```bash
-uv venv .venv --python 3.12
-source .venv/bin/activate
-pip install -e ".[asr-nemo,asr-sherpa,asr-moonshine,dev]"
+uv sync --dev --extra asr-nemo --extra asr-sherpa --extra asr-moonshine
 ```
 
 ### Common dev tools
@@ -366,9 +364,9 @@ pip install -e ".[asr-nemo,asr-sherpa,asr-moonshine,dev]"
 |---|---|---|
 | `patchelf` | Patch RUNPATH for CUDA provider libs | `pacman -S patchelf` |
 | `gh` | GitHub CLI | `pacman -S github-cli` |
-| `uv` | Python package manager | `pip install uv` |
-| `ruff` | Lint/format | `pip install ruff` |
-| `pytest` | Tests | `pip install pytest` |
+| `uv` | Python package manager | [astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/) |
+| `ruff` | Lint/format | managed by uv (`uv sync --dev`) |
+| `pytest` | Tests | managed by uv (`uv sync --dev`) |
 
 ---
 

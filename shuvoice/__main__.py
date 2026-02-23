@@ -468,7 +468,7 @@ def main():
         if e.name == "gi":
             print(
                 "ERROR: Missing PyGObject (module 'gi').\n"
-                "Install Python deps with: pip install -e .\n"
+                "Install Python deps with: uv sync\n"
                 "If that fails, install system packages: pacman -S python-gobject gtk4 gtk4-layer-shell",
                 file=sys.stderr,
             )

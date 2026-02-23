@@ -116,7 +116,7 @@ class MoonshineBackend(ASRBackend):
         except Exception as e:
             errors.append(
                 "Missing Moonshine ONNX dependency: "
-                f"{e}. Install with: pip install useful-moonshine-onnx"
+                f"{e}. Install with: uv sync --extra asr-moonshine"
             )
 
         return errors

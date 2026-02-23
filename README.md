@@ -77,39 +77,29 @@ sudo pacman -S \
 ### Python packages
 
 ```bash
-pip install -e .
-# ASR runtime (NeMo compatibility alias):
-pip install -e .[asr]
-# Explicit backend extras:
-pip install -e .[asr-nemo]
-pip install -e .[asr-sherpa]
-pip install -e .[asr-moonshine]
-# test tooling:
-pip install -e .[dev]
+# Install base + dev tooling (creates venv automatically):
+uv sync --dev
+
+# ASR backend extras:
+uv sync --extra asr-nemo
+uv sync --extra asr-sherpa
+uv sync --extra asr-moonshine
+
+# NeMo convenience alias:
+uv sync --extra asr
 ```
 
-Using uv is equivalent:
-
-```bash
-uv pip install -e .
-uv pip install -e .[asr-nemo]
-# or
-uv pip install -e .[asr-sherpa]
-# or
-uv pip install -e .[asr-moonshine]
-```
-
-For Python 3.14 + uv with NeMo, prefer the repo override file to avoid
+For Python 3.14 + NeMo, prefer the repo override file to avoid
 `kaldialign` source-build issues:
 
 ```bash
-uv pip install -e .[asr-nemo] --overrides packaging/constraints/py314-overrides.txt
+uv sync --extra asr-nemo --override packaging/constraints/py314-overrides.txt
 ```
 
 If NeMo wheels are unavailable for your environment:
 
 ```bash
-pip install "git+https://github.com/NVIDIA/NeMo.git@main#egg=nemo_toolkit[asr]"
+uv pip install "git+https://github.com/NVIDIA/NeMo.git@main#egg=nemo_toolkit[asr]"
 ```
 
 ## Permissions
@@ -352,10 +342,10 @@ use_cuda_graph_decoder = false
 Install development tooling and run local quality checks:
 
 ```bash
-pip install -e .[dev]
-ruff check shuvoice tests
-ruff format --check shuvoice tests
-pytest -m "not gui" -v
+uv sync --dev
+uv run ruff check shuvoice tests
+uv run ruff format --check shuvoice tests
+uv run pytest -m "not gui" -v
 ```
 
 IPC end-to-end smoke tests (CLI -> control socket):
@@ -427,11 +417,11 @@ ShuVoice is released under the MIT License. See `LICENSE`.
 ## Troubleshooting
 
 - `No module named 'torch'` or `No module named 'nemo'`
-  - Install NeMo ASR deps (`pip install -e .[asr-nemo]` or `.[asr]`) or Arch CUDA torch package.
+  - Install NeMo ASR deps (`uv sync --extra asr-nemo` or `--extra asr`) or Arch CUDA torch package.
 - `No module named 'sherpa_onnx'`
-  - Install Sherpa deps (`pip install -e .[asr-sherpa]`).
+  - Install Sherpa deps (`uv sync --extra asr-sherpa`).
 - `No module named 'moonshine_onnx'`
-  - Install Moonshine deps (`pip install -e .[asr-moonshine]`).
+  - Install Moonshine deps (`uv sync --extra asr-moonshine`).
 - `sherpa_model_dir` exists but is missing `encoder/decoder/joiner` artifacts
   - Point `sherpa_model_dir` to a streaming transducer model directory containing
     `tokens.txt` and ONNX files for encoder/decoder/joiner.
@@ -440,10 +430,10 @@ ShuVoice is released under the MIT License. See `LICENSE`.
   - Point `moonshine_model_dir` to a valid local Moonshine ONNX export, or unset it
     and let useful-moonshine-onnx fetch weights from Hugging Face.
 - `No module named 'gi'`
-  - Install GTK Python bindings (`pip/uv install -e .` now includes `PyGObject`).
+  - Install GTK Python bindings (`uv sync` now includes `PyGObject`).
   - If build fails, install system deps: `sudo pacman -S python-gobject gtk4 gtk4-layer-shell`.
 - `Failed to build kaldialign` when installing NeMo extras on Python 3.14
-  - Use: `uv pip install -e .[asr-nemo] --overrides packaging/constraints/py314-overrides.txt`.
+  - Use: `uv sync --extra asr-nemo --override packaging/constraints/py314-overrides.txt`.
   - Or use a Python 3.13 virtualenv for ASR installs.
 - `espeak-ng not found` when running `scripts/tts_roundtrip.py`
   - Install with: `sudo pacman -S espeak-ng`.
