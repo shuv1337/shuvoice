@@ -124,6 +124,7 @@ class SplashOverlay:
         self._status = Gtk.Label(label="Loading model\u2026")
         self._status.add_css_class("splash-status")
         self._status.set_halign(Gtk.Align.CENTER)
+        self._status.set_accessible_role(Gtk.AccessibleRole.STATUS)
         box.append(self._status)
 
         self._window.set_child(box)
@@ -169,6 +170,7 @@ class SplashOverlay:
     def _do_set_status(self, text: str):
         if self._status:
             self._status.set_text(text)
+            self._status.update_property([Gtk.AccessibleProperty.LABEL], [text])
         return GLib.SOURCE_REMOVE
 
     def _do_dismiss(self):
