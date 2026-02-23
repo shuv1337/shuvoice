@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from shuvoice.app import ShuVoiceApp
+from shuvoice.asr_moonshine import MoonshineBackend
 from shuvoice.config import Config
 from shuvoice.utterance_state import _UtteranceState
 
@@ -102,3 +103,20 @@ def test_no_sensitive_data_in_final_logs(app, caplog):
     for record in caplog.records:
         if "Final Sensitive Text" in record.message:
             pytest.fail(f"Sensitive data found in log: {record.message}")
+
+
+def test_moonshine_guard_repetition_does_not_log_words(caplog):
+    """Verify that _guard_repetition logs pattern length, not actual words."""
+    caplog.set_level(logging.DEBUG)
+
+    # Build text with a clear 2-word repetition (>= _REPETITION_THRESHOLD times)
+    secret_word = "SecretPassword"
+    # Repeat "SecretPassword foo" 5 times (threshold is 4)
+    text = (f"{secret_word} foo " * 5).strip()
+
+    MoonshineBackend._guard_repetition(text, audio_seconds=5.0)
+
+    for record in caplog.records:
+        assert secret_word not in record.message, (
+            f"Sensitive word found in log: {record.message}"
+        )
