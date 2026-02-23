@@ -12,6 +12,10 @@ Streaming speech-to-text overlay for Hyprland with pluggable ASR backends.
 
 [![CI](https://github.com/shuv1337/shuvoice/actions/workflows/ci.yml/badge.svg)](https://github.com/shuv1337/shuvoice/actions/workflows/ci.yml)
 
+<p align="center">
+  <img src="docs/assets/screenshots/splash-overlay.png" alt="ShuVoice splash overlay on Hyprland" width="760">
+</p>
+
 ## Status
 
 Core pipeline + production hardening are implemented:
@@ -193,6 +197,10 @@ bindr = , F9, exec, shuvoice --control stop
 ```
 
 ## Waybar module (tray-style status icon)
+
+<p align="center">
+  <img src="docs/assets/screenshots/waybar-tooltip.png" alt="Waybar tooltip showing backend, model, device, and keybind" width="420">
+</p>
 
 ShuVoice ships a Waybar helper command (`shuvoice-waybar`) that outputs JSON
 for a `custom/*` module and can handle click actions.
