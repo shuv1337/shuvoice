@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import pytest
+
 from shuvoice.config import Config
+
 
 def test_overlay_font_size_validation():
     # Should be positive integer
