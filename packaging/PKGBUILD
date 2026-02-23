@@ -16,7 +16,6 @@ depends=(
   'python'
   'python-numpy'
   'python-sounddevice'
-  'python-evdev'
   'python-tomli'
   'gtk4'
   'gtk4-layer-shell'
@@ -37,8 +36,7 @@ makedepends=(
   'git'
   'python-build'
   'python-installer'
-  'python-wheel'
-  'python-setuptools'
+  'python-hatchling'
 )
 source=('git+https://github.com/shuv1337/shuvoice.git')
 sha256sums=('SKIP')

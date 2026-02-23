@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 try:  # Python 3.11+
@@ -37,7 +37,7 @@ class Config:
     auto_gain_settle_chunks: int = 2  # speech-level chunks before gain updates
 
     # ASR
-    asr_backend: str = "nemo"  # nemo | sherpa | moonshine
+    asr_backend: str = "sherpa"  # sherpa | nemo | moonshine
     model_name: str = "nvidia/nemotron-speech-streaming-en-0.6b"
     # 13 gives the highest streaming accuracy (at the cost of latency).
     # Lower values are snappier but significantly reduce recognition quality.
@@ -56,8 +56,8 @@ class Config:
     moonshine_model_dir: str | None = None
     moonshine_model_precision: str = "float"
     moonshine_chunk_ms: int = 100
-    moonshine_max_window_sec: float = 10.0
-    moonshine_max_tokens: int = 192
+    moonshine_max_window_sec: float = 5.0
+    moonshine_max_tokens: int = 128
 
     # Overlay
     font_size: int = 22
@@ -65,12 +65,7 @@ class Config:
     border_radius: int = 16
     bottom_margin: int = 60
 
-    # Hotkey / control
-    hotkey_backend: str = "evdev"  # evdev | ipc
-    hotkey: str = "KEY_RIGHTCTRL"
-    hold_threshold_ms: int = 300
-    hotkey_device: str | None = None  # /dev/input/eventX; None => auto-detect
-    hotkey_listen_all_devices: bool = False  # default false to avoid duplicate key events
+    # Control socket (Hyprland bind/bindr integration)
     control_socket: str | None = None  # default: $XDG_RUNTIME_DIR/shuvoice/control.sock
 
     # Text injection
@@ -80,6 +75,7 @@ class Config:
     typing_retry_attempts: int = 2
     typing_retry_delay_ms: int = 40
     auto_capitalize: bool = True
+    text_replacements: dict[str, str] = field(default_factory=dict)
 
     # Streaming stability
     streaming_stall_guard: bool = True
@@ -140,6 +136,23 @@ class Config:
             raise ValueError("streaming_stall_flush_chunks must be >= 1")
         if float(self.streaming_stall_rms_ratio) <= 0:
             raise ValueError("streaming_stall_rms_ratio must be > 0")
+
+        # Normalize text_replacements: strip whitespace and validate string types.
+        # Empty values are allowed (they delete the matched word/phrase).
+        if not isinstance(self.text_replacements, dict):
+            raise ValueError("text_replacements must be a table/map of string keys to values")
+        normalized_replacements: dict[str, str] = {}
+        for key, value in self.text_replacements.items():
+            if not isinstance(key, str):
+                raise ValueError("text_replacements keys must be strings")
+            if not isinstance(value, str):
+                raise ValueError("text_replacements values must be strings")
+
+            key_text = key.strip()
+            if not key_text:
+                raise ValueError("text_replacements keys must not be empty or whitespace-only")
+            normalized_replacements[key_text] = value.strip()
+        self.text_replacements = normalized_replacements
 
     @property
     def chunk_samples(self) -> int:

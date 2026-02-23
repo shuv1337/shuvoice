@@ -10,6 +10,7 @@ import logging
 
 import gi
 
+gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gtk4LayerShell", "1.0")
 from gi.repository import Gdk, GLib, Gtk
@@ -143,10 +144,18 @@ class CaptionOverlay:
                 OVERLAY_STATE_PROCESSING: "Processing…",
                 OVERLAY_STATE_ERROR: "Error",
             }.get(state, state)
+
+            icon_name = {
+                OVERLAY_STATE_LISTENING: "microphone-sensitivity-high-symbolic",
+                OVERLAY_STATE_PROCESSING: "system-run-symbolic",
+                OVERLAY_STATE_ERROR: "dialog-error-symbolic",
+            }.get(state, "microphone-sensitivity-high-symbolic")
+
+            self._icon.set_from_icon_name(icon_name)
             self._icon.set_tooltip_text(status_text)
             self._icon.update_property([Gtk.AccessibleProperty.LABEL], [status_text])
 
-    # -- Thread-safe public API (called from ASR / hotkey threads) ----------
+    # -- Thread-safe public API (called from ASR / control threads) ----------
 
     def set_text(self, text: str):
         GLib.idle_add(self._do_set_text, text)

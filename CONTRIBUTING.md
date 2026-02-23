@@ -2,22 +2,24 @@
 
 Thanks for your interest in contributing to ShuVoice!
 
+Need logo assets for docs or release notes? See `docs/BRANDING.md`.
+
 ## Development setup
 
 1. Clone the repository.
-2. Create and activate a virtual environment.
-3. Install project dependencies:
+2. Install [uv](https://docs.astral.sh/uv/getting-started/installation/).
+3. Install project dependencies (creates a virtualenv automatically):
 
 ```bash
-pip install -e .[dev]
+uv sync --dev
 ```
 
 For ASR backend-specific work, install one of:
 
 ```bash
-pip install -e .[asr-nemo]
-pip install -e .[asr-sherpa]
-pip install -e .[asr-moonshine]
+uv sync --extra asr-nemo
+uv sync --extra asr-sherpa
+uv sync --extra asr-moonshine
 ```
 
 ## Recommended local checks
@@ -25,15 +27,15 @@ pip install -e .[asr-moonshine]
 Run these before opening a pull request:
 
 ```bash
-ruff check shuvoice tests
-ruff format --check shuvoice tests
-pytest -m "not gui" -v
+uv run ruff check shuvoice tests
+uv run ruff format --check shuvoice tests
+uv run pytest -m "not gui" -v
 ```
 
 If your change touches GTK/UI behavior and your environment supports it, also run:
 
 ```bash
-pytest -m gui -v
+uv run pytest -m gui -v
 ```
 
 ## Commit and PR expectations

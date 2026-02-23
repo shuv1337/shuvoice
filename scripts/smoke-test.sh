@@ -39,23 +39,18 @@ Manual E2E checklist:
 1) Start shuvoice:
    python -m shuvoice --output-mode final_only
 
-2) Verify evdev mode:
-   - Press/hold configured hotkey, speak, release
-   - Confirm overlay appears and final text is injected
-
-3) Verify IPC mode fallback:
-   - Start app with: python -m shuvoice --hotkey-backend ipc
+2) Verify IPC control mode:
    - In another terminal:
        python -m shuvoice --control start
        python -m shuvoice --control status
        python -m shuvoice --control stop
    - Confirm recording toggles and status transitions
 
-4) Hyprland bind/bindr integration test:
+3) Hyprland bind/bindr integration test:
    bind  = , F9,  exec, shuvoice --control start
    bindr = , F9,  exec, shuvoice --control stop
 
-5) Streaming partial mode:
+4) Streaming partial mode:
    python -m shuvoice --output-mode streaming_partial
    - Confirm partial text replacement works and final commit is clean
 
