@@ -4,6 +4,7 @@ import threading
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import numpy as np
 import pytest
 
 from shuvoice.utterance_state import _UtteranceState
@@ -335,3 +336,22 @@ def test_on_model_loaded_prefers_realized_splash_timestamp(monkeypatch):
     delay_ms, callback = timeout_add.call_args.args
     assert delay_ms == 2000
     assert callback is app._complete_model_loaded_startup
+
+
+def test_apply_utterance_gain_uses_float32_and_does_not_mutate_input():
+    audio = np.array([0.1, -0.2, 0.95], dtype=np.float32)
+    audio_before = audio.copy()
+
+    result = ShuVoiceApp._apply_utterance_gain(SimpleNamespace(), audio, 2.0)
+
+    np.testing.assert_array_equal(audio, audio_before)
+    assert result.dtype == np.float32
+    np.testing.assert_allclose(result, np.array([0.2, -0.4, 1.0], dtype=np.float32))
+
+
+def test_apply_utterance_gain_returns_input_when_gain_near_unity():
+    audio = np.array([0.1, -0.2], dtype=np.float32)
+
+    result = ShuVoiceApp._apply_utterance_gain(SimpleNamespace(), audio, 1.01)
+
+    assert result is audio

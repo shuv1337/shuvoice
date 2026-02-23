@@ -416,7 +416,12 @@ class ShuVoiceApp(Gtk.Application):
     def _apply_utterance_gain(self, audio: np.ndarray, gain: float) -> np.ndarray:
         if gain <= 1.05 or audio.size == 0:
             return audio
-        return np.clip(audio * gain, -1.0, 1.0).astype(np.float32)
+        # Use a single pre-allocated output buffer to avoid temporary arrays in
+        # this hot path.
+        result = np.empty_like(audio, dtype=np.float32)
+        np.multiply(audio, gain, out=result)
+        np.clip(result, -1.0, 1.0, out=result)
+        return result
 
     def _update_noise_floor(self, chunk_rms: float):
         if chunk_rms <= 0.0:
