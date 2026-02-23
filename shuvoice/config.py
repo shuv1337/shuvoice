@@ -52,12 +52,14 @@ class Config:
     sherpa_chunk_ms: int = 100
 
     # Moonshine ONNX (when asr_backend = "moonshine")
-    moonshine_model_name: str = "moonshine/base"
+    moonshine_model_name: str = "moonshine/tiny"
     moonshine_model_dir: str | None = None
     moonshine_model_precision: str = "float"
     moonshine_chunk_ms: int = 100
     moonshine_max_window_sec: float = 5.0
-    moonshine_max_tokens: int = 128
+    moonshine_max_tokens: int = 64
+    moonshine_provider: str = "cpu"  # cpu | cuda
+    moonshine_onnx_threads: int = 0  # 0 = auto (os.cpu_count())
 
     # Overlay
     font_size: int = 22
@@ -117,6 +119,13 @@ class Config:
         self.moonshine_model_name = str(self.moonshine_model_name).strip()
         if not self.moonshine_model_name:
             raise ValueError("moonshine_model_name must not be empty")
+
+        self.moonshine_provider = str(self.moonshine_provider).strip().lower()
+        if self.moonshine_provider not in {"cpu", "cuda"}:
+            raise ValueError("moonshine_provider must be one of: cpu, cuda")
+
+        if int(self.moonshine_onnx_threads) < 0:
+            raise ValueError("moonshine_onnx_threads must be >= 0 (0 = auto)")
 
         self.moonshine_model_precision = str(self.moonshine_model_precision).strip().lower()
         if not self.moonshine_model_precision:

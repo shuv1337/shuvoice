@@ -27,11 +27,13 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     assert cfg.sherpa_provider == "cpu"
     assert cfg.sherpa_num_threads == 2
     assert cfg.sherpa_chunk_ms == 100
-    assert cfg.moonshine_model_name == "moonshine/base"
+    assert cfg.moonshine_model_name == "moonshine/tiny"
     assert cfg.moonshine_model_precision == "float"
     assert cfg.moonshine_chunk_ms == 100
     assert cfg.moonshine_max_window_sec == 5.0
-    assert cfg.moonshine_max_tokens == 128
+    assert cfg.moonshine_max_tokens == 64
+    assert cfg.moonshine_provider == "cpu"
+    assert cfg.moonshine_onnx_threads == 0
 
 
 def test_load_flattens_sections_and_ignores_unknown(monkeypatch, tmp_path: Path):

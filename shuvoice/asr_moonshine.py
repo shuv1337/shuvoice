@@ -64,13 +64,18 @@ class MoonshineBackend(ASRBackend):
     _MAX_WORDS_PER_SEC = 6.0  # generous cap; typical speech ≈ 2-3 wps
     _MAX_CHARS_PER_SEC = 40.0  # generous cap; typical speech ≈ 15-20 chars/s
     _REPETITION_THRESHOLD = 4  # consecutive pattern repeats to trigger cut
-    _LONG_REPETITION_THRESHOLD = 3
+    _LONG_REPETITION_THRESHOLD = 2
     _MAX_PATTERN_WORDS = 12
     _MAX_PATTERN_STARTS = 20
     _TOKEN_SPAN_RE = re.compile(r"\S+")
     # Detect token-local repetition (including hyphen-delimited loops) before
     # word-level checks. Examples: "hake-hake-hake-hake", "127127127127".
-    _TOKEN_REPETITION_RE = re.compile(r"(.{1,10}?)(?:-?\1){3,}")
+    # The pattern unit must be ≥2 chars so that single-char runs in normal
+    # numbers (e.g. "100000") do not false-positive.
+    _TOKEN_REPETITION_RE = re.compile(r"(.{2,10}?)(?:-?\1){3,}")
+    # Single-char runs are only pathological at higher repeat counts (≥8).
+    # Example: "1270000000000..." — the "0" repeats ≥8 times.
+    _SINGLE_CHAR_RUN_RE = re.compile(r"(.)\1{7,}")
 
     def __init__(self, config: Config):
         self.config = config
@@ -193,13 +198,108 @@ class MoonshineBackend(ASRBackend):
                 "Check moonshine_model_name/model_precision/model_dir configuration."
             ) from e
 
-        log.warning(
-            "Moonshine runs on CPU only and is significantly slower than NeMo (CUDA) "
-            "or Sherpa. Best suited for short utterances (<5s) on systems without "
-            "GPU support."
-        )
+        # --- Track B: ONNX session options tuning ---
+        self._tune_onnx_sessions()
+
+        # --- Track D: startup warnings ---
+        self._emit_startup_warnings()
 
         self.reset()
+
+    def _tune_onnx_sessions(self) -> None:
+        """Replace upstream ONNX sessions with tuned versions.
+
+        Track B: thread/parallelism tuning.
+        Track C: GPU execution provider when ``moonshine_provider = "cuda"``.
+        """
+        try:
+            import onnxruntime as ort
+        except ImportError:
+            log.debug("onnxruntime not directly importable; skipping session tuning")
+            return
+
+        provider = str(self.config.moonshine_provider).strip().lower()
+        threads = int(self.config.moonshine_onnx_threads)
+
+        # Determine execution providers.
+        if provider == "cuda":
+            available = ort.get_available_providers()
+            if "CUDAExecutionProvider" in available:
+                providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+                log.info("Moonshine: using CUDAExecutionProvider")
+            else:
+                log.warning(
+                    "Moonshine: CUDA provider requested but not available "
+                    "(available: %s). Falling back to CPU.",
+                    available,
+                )
+                providers = ["CPUExecutionProvider"]
+        else:
+            providers = ["CPUExecutionProvider"]
+
+        # Build session options.
+        import os
+
+        sess_opts = ort.SessionOptions()
+        cpu_count = os.cpu_count() or 4
+        intra = threads if threads > 0 else max(2, cpu_count // 2)
+        sess_opts.intra_op_num_threads = intra
+        sess_opts.inter_op_num_threads = max(1, cpu_count // 4)
+        sess_opts.execution_mode = ort.ExecutionMode.ORT_PARALLEL
+
+        # Replace encoder and decoder sessions.
+        # The upstream MoonshineOnnxModel stores sessions as self.encoder
+        # and self.decoder (onnxruntime.InferenceSession objects).
+        replaced = 0
+        for attr in ("encoder", "decoder", "uncached_decoder"):
+            session = getattr(self._model, attr, None)
+            if session is None or not isinstance(session, ort.InferenceSession):
+                continue
+            try:
+                model_path = session._model_path  # noqa: SLF001
+                new_session = ort.InferenceSession(
+                    model_path,
+                    sess_options=sess_opts,
+                    providers=providers,
+                )
+                setattr(self._model, attr, new_session)
+                replaced += 1
+            except Exception:
+                log.debug("Could not replace %s session; keeping default", attr, exc_info=True)
+
+        if replaced:
+            log.info(
+                "Moonshine: replaced %d ONNX session(s) (threads=%d, provider=%s)",
+                replaced,
+                intra,
+                providers[0],
+            )
+
+    def _emit_startup_warnings(self) -> None:
+        """Emit actionable startup warnings for slow Moonshine configurations."""
+        model_name = str(self.config.moonshine_model_name).lower()
+        provider = str(self.config.moonshine_provider).lower()
+        max_window = float(self.config.moonshine_max_window_sec)
+
+        if "base" in model_name and provider == "cpu":
+            log.warning(
+                "Moonshine 'base' model on CPU is very slow for interactive use "
+                "(~8s per phrase). Consider switching to moonshine_model_name = "
+                "'moonshine/tiny' or setting moonshine_provider = 'cuda' for "
+                "better latency."
+            )
+        elif provider == "cpu":
+            log.warning(
+                "Moonshine runs on CPU and is slower than NeMo (CUDA) or Sherpa. "
+                "Best suited for short utterances (<5s) on systems without GPU support."
+            )
+
+        if max_window > 5.0 and provider == "cpu":
+            log.warning(
+                "moonshine_max_window_sec=%.1f with CPU provider may cause high "
+                "latency on long utterances. Consider reducing to 3.0–5.0.",
+                max_window,
+            )
 
     def reset(self) -> None:
         if self._model is None or self._tokenizer is None:
@@ -333,19 +433,32 @@ class MoonshineBackend(ASRBackend):
         # 0. Token-level repetition guard (before word split / short-text return).
         for token_match in cls._TOKEN_SPAN_RE.finditer(text):
             token = token_match.group(0)
-            repeated = cls._TOKEN_REPETITION_RE.search(token)
-            if repeated is None:
-                continue
 
-            kept_len = repeated.start() + len(repeated.group(1))
-            kept_token = token[:kept_len]
-            text = f"{text[: token_match.start()]}{kept_token}{text[token_match.end() :]}"
-            log.debug(
-                "Repetition guard: token %r has repeated pattern %r, truncating token",
-                token,
-                repeated.group(1),
-            )
-            break
+            # Try multi-char pattern first (≥2 char units repeated ≥4 times).
+            repeated = cls._TOKEN_REPETITION_RE.search(token)
+            if repeated is not None:
+                kept_len = repeated.start() + len(repeated.group(1))
+                kept_token = token[:kept_len]
+                text = f"{text[: token_match.start()]}{kept_token}{text[token_match.end() :]}"
+                log.debug(
+                    "Repetition guard: token has repeated multi-char pattern (len=%d), truncating",
+                    len(repeated.group(1)),
+                )
+                break
+
+            # Try single-char run (e.g. "0" × 8+).
+            char_run = cls._SINGLE_CHAR_RUN_RE.search(token)
+            if char_run is not None:
+                # Keep prefix + one instance of the repeated char.
+                kept_len = char_run.start() + 1
+                kept_token = token[:kept_len]
+                text = f"{text[: token_match.start()]}{kept_token}{text[token_match.end() :]}"
+                log.debug(
+                    "Repetition guard: token has single-char run (char=%r, count=%d), truncating",
+                    char_run.group(1),
+                    len(char_run.group(0)),
+                )
+                break
 
         # 1. Character-count cap catches long single-token runs.
         max_chars = max(100, int(audio_seconds * cls._MAX_CHARS_PER_SEC) + 20)
@@ -382,19 +495,32 @@ class MoonshineBackend(ASRBackend):
             words = words[:max_words]
 
         # 3. N-gram repetition: find repeated 1–12 word patterns.
+        # Pre-compute normalized words once (lowercase, strip punctuation).
+        _PUNCT_STRIP = str.maketrans("", "", ".,!?;:'\"")
+        norm_words = [w.lower().translate(_PUNCT_STRIP) for w in words]
+
         for plen in range(1, cls._MAX_PATTERN_WORDS + 1):
             threshold = cls._REPETITION_THRESHOLD if plen <= 4 else cls._LONG_REPETITION_THRESHOLD
             min_words = plen * threshold
             if len(words) < min_words:
                 continue
 
-            start_limit = min(len(words) - min_words + 1, cls._MAX_PATTERN_STARTS)
+            # Scan from all possible start positions (not capped) for long
+            # patterns ≥5 words to catch clause loops that start late.
+            if plen >= 5:
+                start_limit = len(words) - min_words + 1
+            else:
+                start_limit = min(len(words) - min_words + 1, cls._MAX_PATTERN_STARTS)
+
             for start in range(start_limit):
-                pattern = tuple(w.lower().strip(".,!?;:'\"") for w in words[start : start + plen])
+                pattern = tuple(norm_words[start : start + plen])
+                # Skip patterns that are all-empty after normalization.
+                if not any(pattern):
+                    continue
                 count = 0
                 pos = start
                 while pos + plen <= len(words):
-                    candidate = tuple(w.lower().strip(".,!?;:'\"") for w in words[pos : pos + plen])
+                    candidate = tuple(norm_words[pos : pos + plen])
                     if candidate == pattern:
                         count += 1
                         pos += plen

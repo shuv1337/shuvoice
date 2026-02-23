@@ -294,19 +294,36 @@ moonshine_model_name = "moonshine/tiny"
 moonshine_model_precision = "float"
 moonshine_chunk_ms = 100
 moonshine_max_window_sec = 5.0
-moonshine_max_tokens = 128
+moonshine_max_tokens = 64
+moonshine_provider = "cpu"
+moonshine_onnx_threads = 0
 ```
+
+#### Performance expectations
+
+| Config | Per-phrase avg | Best for |
+|---|---|---|
+| `moonshine/tiny` + CPU | ~3.4s | Short utterances (<5s) on CPU-only systems |
+| `moonshine/tiny` + CUDA | ~0.5s (est.) | Interactive use with GPU |
+| `moonshine/base` + CPU | ~7.9s | Not recommended for interactive use |
+
+> Moonshine re-encodes the full audio buffer on every inference call.
+> Keep `moonshine_max_window_sec` ≤ 5.0 to limit worst-case latency.
+> The `moonshine/tiny` model is ~2.3× faster than `base` with similar
+> accuracy for short phrases.
 
 #### Config keys
 
 | Key | Default | Notes |
 |---|---|---|
-| `moonshine_model_name` | `moonshine/base` | `moonshine/tiny` or `moonshine/base` |
+| `moonshine_model_name` | `moonshine/tiny` | `moonshine/tiny` (fast) or `moonshine/base` (slower, slightly more accurate) |
 | `moonshine_model_dir` | *none* | Optional local model path |
 | `moonshine_model_precision` | `float` | ONNX precision |
 | `moonshine_chunk_ms` | `100` | Chunk duration |
 | `moonshine_max_window_sec` | `5.0` | Max audio window before reset |
-| `moonshine_max_tokens` | `128` | Max generated tokens per window |
+| `moonshine_max_tokens` | `64` | Max generated tokens per window |
+| `moonshine_provider` | `cpu` | `cpu` or `cuda` (requires onnxruntime with CUDAExecutionProvider) |
+| `moonshine_onnx_threads` | `0` | ONNX intra-op threads; 0 = auto |
 
 #### Dependencies
 
@@ -375,8 +392,8 @@ uv sync --dev --extra asr-nemo --extra asr-sherpa --extra asr-moonshine
 | Issue | Description | Status |
 |---|---|---|
 | [#7](https://github.com/shuv1337/shuvoice/issues/7) | Sherpa may drop trailing words on early key release | Open |
-| [#12](https://github.com/shuv1337/shuvoice/issues/12) | Moonshine repetition guard misses some token/long-clause loops | Open |
-| [#13](https://github.com/shuv1337/shuvoice/issues/13) | Moonshine throughput slower than NeMo/Sherpa | Open |
+| [#12](https://github.com/shuv1337/shuvoice/issues/12) | Moonshine repetition guard misses some token/long-clause loops | Fixed |
+| [#13](https://github.com/shuv1337/shuvoice/issues/13) | Moonshine throughput slower than NeMo/Sherpa | Mitigated (safer defaults, ONNX tuning, GPU provider) |
 | — | Prebuilt Sherpa CUDA wheels may be incompatible with newer CUDA stacks | Ongoing |
 
 ---
