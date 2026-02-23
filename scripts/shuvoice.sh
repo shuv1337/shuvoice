@@ -27,13 +27,18 @@ if command -v shuvoice >/dev/null 2>&1; then
   fi
 fi
 
-if [ -x "$ROOT_DIR/.venv/bin/shuvoice" ]; then
-  exec "$ROOT_DIR/.venv/bin/shuvoice" "$@"
-fi
+# Prefer .venv312 (has all backends installed), fall back to .venv.
+for venv in "$ROOT_DIR/.venv312" "$ROOT_DIR/.venv"; do
+  if [ -x "$venv/bin/shuvoice" ]; then
+    exec "$venv/bin/shuvoice" "$@"
+  fi
+done
 
-if [ -x "$ROOT_DIR/.venv/bin/python" ]; then
-  exec "$ROOT_DIR/.venv/bin/python" -m shuvoice "$@"
-fi
+for venv in "$ROOT_DIR/.venv312" "$ROOT_DIR/.venv"; do
+  if [ -x "$venv/bin/python" ]; then
+    exec "$venv/bin/python" -m shuvoice "$@"
+  fi
+done
 
 if command -v python3 >/dev/null 2>&1; then
   exec python3 -m shuvoice "$@"
