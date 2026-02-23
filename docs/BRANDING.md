@@ -33,3 +33,40 @@ The README uses a `picture` block to select a light/dark logo depending on viewe
   </picture>
 </p>
 ```
+
+## Asset optimization guide
+
+To prevent size regressions when updating branding assets, follow this workflow.
+
+### Requirements
+
+```bash
+sudo pacman -S imagemagick oxipng   # Arch Linux
+```
+
+### Target dimensions
+
+| Asset | Max width | Rationale |
+|---|---:|---|
+| `shuvoice-variant-dark-lockup.png` | 960px | README displays at 760px; 960 provides retina headroom |
+| All others | 640px | Runtime splash/wizard display at 320px; 640 provides 2× |
+
+### Optimization workflow
+
+```bash
+# 1. Resize if source exceeds target dimensions
+magick input.png -filter Lanczos -resize 960x \
+  -strip -define png:compression-level=9 -define png:compression-filter=5 \
+  output.png
+
+# 2. Lossless PNG optimization
+oxipng -o 6 --strip all docs/assets/branding/*.png
+
+# 3. Verify sizes
+du -b docs/assets/branding/*.png
+```
+
+### Size budget
+
+Total `docs/assets/branding/` should stay under **1.4 MiB**.
+Current total: ~916 KB (as of Feb 2026).
