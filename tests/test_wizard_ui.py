@@ -20,9 +20,10 @@ def test_release_input_and_destroy_window_releases_keyboard_mode():
     win = MagicMock()
     wizard._win = win
 
-    with patch.object(LayerShell, "is_supported", return_value=True), patch.object(
-        LayerShell, "set_keyboard_mode"
-    ) as set_keyboard_mode:
+    with (
+        patch.object(LayerShell, "is_supported", return_value=True),
+        patch.object(LayerShell, "set_keyboard_mode") as set_keyboard_mode,
+    ):
         WelcomeWizard._release_input_and_destroy_window(wizard)
 
     set_keyboard_mode.assert_called_once_with(win, LayerShell.KeyboardMode.NONE)
@@ -40,7 +41,6 @@ def test_release_input_and_destroy_window_is_idempotent():
     WelcomeWizard._release_input_and_destroy_window(wizard)
 
 
-
 def test_on_finish_writes_config_releases_window_and_quits():
     from shuvoice.wizard import WelcomeWizard
 
@@ -50,9 +50,10 @@ def test_on_finish_writes_config_releases_window_and_quits():
     wizard._release_input_and_destroy_window = MagicMock()
     wizard.quit = MagicMock()
 
-    with patch("shuvoice.wizard.write_config") as write_config, patch(
-        "shuvoice.wizard.write_marker"
-    ) as write_marker:
+    with (
+        patch("shuvoice.wizard.write_config") as write_config,
+        patch("shuvoice.wizard.write_marker") as write_marker,
+    ):
         WelcomeWizard._on_finish(wizard, None)
 
     write_config.assert_called_once_with("moonshine")
