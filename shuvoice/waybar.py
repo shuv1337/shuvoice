@@ -30,6 +30,9 @@ from .control import send_control_command
 DEFAULT_SERVICE = "shuvoice.service"
 _STATUS_TIMEOUT_SEC = 0.35
 _MENU_LAUNCHERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # Omarchy/Walker first: common on Hyprland setups and supports dmenu mode.
+    ("omarchy-launch-walker", ("omarchy-launch-walker", "--dmenu", "-p", "{prompt}")),
+    ("walker", ("walker", "--dmenu", "-p", "{prompt}")),
     ("wofi", ("wofi", "--dmenu", "--prompt", "{prompt}")),
     ("rofi", ("rofi", "-dmenu", "-p", "{prompt}")),
     ("bemenu", ("bemenu", "-p", "{prompt}")),
@@ -293,7 +296,9 @@ def _prompt_menu_choice(prompt: str, options: list[str]) -> str | None:
         selection = result.stdout.strip()
         return selection or None
 
-    raise RuntimeError("No menu launcher found (install wofi, rofi, bemenu, or dmenu)")
+    raise RuntimeError(
+        "No menu launcher found (install/use omarchy-launch-walker, walker, wofi, rofi, bemenu, or dmenu)"
+    )
 
 
 def _action_menu(config: Config, service: str):

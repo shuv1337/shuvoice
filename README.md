@@ -227,7 +227,7 @@ Waybar config example:
 }
 ```
 
-Right-click menu uses one of: `wofi`, `rofi`, `bemenu`, or `dmenu`.
+Right-click menu uses one of: `omarchy-launch-walker`, `walker`, `wofi`, `rofi`, `bemenu`, or `dmenu`.
 
 If Waybar cannot find the command from your shell PATH, point to the full
 venv path (for example `$HOME/.venv/bin/shuvoice-waybar`) or use the wrapper
