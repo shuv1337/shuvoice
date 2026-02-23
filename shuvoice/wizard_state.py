@@ -40,8 +40,17 @@ HOTKEY_BACKENDS = [
 
 
 def needs_wizard() -> bool:
-    """Return True when the welcome wizard should run (first launch)."""
-    return not (Config.data_dir() / _MARKER_FILE).exists()
+    """Return True when the welcome wizard should run (first launch).
+
+    Returns False if the wizard-done marker exists **or** if a config.toml
+    already exists (upgrade path — existing installations should not be
+    forced through the wizard just because the marker is absent).
+    """
+    if (Config.data_dir() / _MARKER_FILE).exists():
+        return False
+    if (Config.config_dir() / "config.toml").exists():
+        return False
+    return True
 
 
 def write_marker():

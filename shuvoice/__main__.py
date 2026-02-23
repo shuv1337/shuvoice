@@ -482,7 +482,10 @@ def main():
         sys.exit(1)
 
     # Model loading happens asynchronously in do_activate() with a splash screen.
-    sys.exit(app.run(None))
+    ret = app.run(None)
+    if app._model_load_failed:
+        sys.exit(1)
+    sys.exit(ret)
 
 
 if __name__ == "__main__":

@@ -15,9 +15,10 @@ from shuvoice.wizard_state import (
 
 
 def test_needs_wizard_true_on_fresh_install(tmp_path):
-    """needs_wizard returns True when no marker file exists."""
+    """needs_wizard returns True when no marker file and no config.toml exist."""
     with patch("shuvoice.wizard_state.Config") as mock_config:
         mock_config.data_dir.return_value = tmp_path
+        mock_config.config_dir.return_value = tmp_path
         assert needs_wizard() is True
 
 
@@ -26,6 +27,20 @@ def test_needs_wizard_false_after_completion(tmp_path):
     (tmp_path / ".wizard-done").write_text("done\n")
     with patch("shuvoice.wizard_state.Config") as mock_config:
         mock_config.data_dir.return_value = tmp_path
+        mock_config.config_dir.return_value = tmp_path
+        assert needs_wizard() is False
+
+
+def test_needs_wizard_false_with_existing_config(tmp_path):
+    """needs_wizard returns False when config.toml already exists (upgrade path).
+
+    An existing installation that upgrades but lacks the .wizard-done marker
+    must not be forced through the wizard.
+    """
+    (tmp_path / "config.toml").write_text("# existing config\n")
+    with patch("shuvoice.wizard_state.Config") as mock_config:
+        mock_config.data_dir.return_value = tmp_path
+        mock_config.config_dir.return_value = tmp_path
         assert needs_wizard() is False
 
 
