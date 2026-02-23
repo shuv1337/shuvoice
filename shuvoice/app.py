@@ -489,17 +489,17 @@ class ShuVoiceApp(Gtk.Application):
             return False
 
         log.debug(
-            "ASR step=%s queue_size=%d raw_text=%r chunk_rms=%.4f gain=%.1f",
+            "ASR step=%s queue_size=%d raw_text_len=%d chunk_rms=%.4f gain=%.1f",
             self.asr.debug_step_num,
             self.audio.queue.qsize(),
-            text,
+            len(text),
             audio_rms(to_process),
             state.utterance_gain,
         )
 
         merged = prefer_transcript(state.last_text, text)
         if merged != state.last_text:
-            log.debug("Transcript updated: %r -> %r", state.last_text, merged)
+            log.debug("Transcript updated: len %d -> %d", len(state.last_text), len(merged))
             state.last_text = merged
             state.unchanged_steps = 0
             rendered_text = self._render_transcript_text(state.last_text)
@@ -530,7 +530,11 @@ class ShuVoiceApp(Gtk.Application):
 
             merged = prefer_transcript(state.last_text, text)
             if merged != state.last_text:
-                log.debug("Transcript updated after stall flush: %r -> %r", state.last_text, merged)
+                log.debug(
+                    "Transcript updated after stall flush: len %d -> %d",
+                    len(state.last_text),
+                    len(merged),
+                )
                 state.last_text = merged
                 rendered_text = self._render_transcript_text(state.last_text)
                 if self.overlay:
@@ -659,10 +663,10 @@ class ShuVoiceApp(Gtk.Application):
             merged = prefer_transcript(state.last_text, text)
             if merged != state.last_text:
                 log.debug(
-                    "Tail flush step %d: %r -> %r (escalation=%.2f)",
+                    "Tail flush step %d: len %d -> %d (escalation=%.2f)",
                     i,
-                    state.last_text,
-                    merged,
+                    len(state.last_text),
+                    len(merged),
                     escalation,
                 )
                 state.last_text = merged
@@ -689,7 +693,7 @@ class ShuVoiceApp(Gtk.Application):
         if not final_text:
             return
 
-        log.info("Final: %s", final_text)
+        log.info("Final: len=%d", len(final_text))
         if self.overlay:
             self.overlay.set_text(final_text)
 
@@ -754,8 +758,8 @@ class ShuVoiceApp(Gtk.Application):
         self._flush_tail_silence(state)
 
         log.info(
-            "Post-processing: last_text=%r total_remaining=%d step_num=%s",
-            state.last_text,
+            "Post-processing: last_text_len=%d total_remaining=%d step_num=%s",
+            len(state.last_text),
             state.total,
             self.asr.debug_step_num,
         )
@@ -811,4 +815,3 @@ class ShuVoiceApp(Gtk.Application):
                 self._asr_thread_alive = False
                 log.critical("ASR worker exited unexpectedly")
                 self._show_overlay_error("⚠ ASR thread crashed — restart ShuVoice")
-

@@ -404,12 +404,11 @@ class MoonshineBackend(ASRBackend):
                 if count >= threshold:
                     kept = words[: start + plen]
                     log.debug(
-                        "Repetition guard: pattern %r repeated %d× at word %d "
-                        "(plen=%d threshold=%d), truncating",
-                        pattern,
+                        "Repetition guard: %d-word pattern repeated %d× at word %d "
+                        "(threshold=%d), truncating",
+                        plen,
                         count,
                         start,
-                        plen,
                         threshold,
                     )
                     return " ".join(kept)
