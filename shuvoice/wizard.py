@@ -31,7 +31,7 @@ from .wizard_state import (
     ASR_BACKENDS,
     KEYBIND_PRESETS,
     auto_add_hyprland_keybind,
-    format_hyprland_bind,
+    format_hyprland_bind_for_keybind,
     format_summary,
     needs_wizard,
     write_config,
@@ -435,7 +435,7 @@ class WelcomeWizard(Gtk.Application):
             None,
         )
         if hypr_key:
-            bind_text = format_hyprland_bind(hypr_key)
+            bind_text = format_hyprland_bind_for_keybind(self._keybind, hypr_key)
             indented = "\n".join(f"  {line}" for line in bind_text.splitlines())
             if self._auto_add_enabled():
                 text = (

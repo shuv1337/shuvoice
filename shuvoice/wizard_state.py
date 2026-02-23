@@ -68,6 +68,42 @@ def format_hyprland_bind(hypr_key_spec: str, *, shuvoice_command: str = "shuvoic
     )
 
 
+def _bind_lines_for_preset(
+    keybind_id: str,
+    hypr_key_spec: str,
+    *,
+    shuvoice_command: str,
+) -> list[str]:
+    """Return bind lines for the selected preset.
+
+    Right Control gets an extra release mapping with ``CTRL`` modifier to make
+    key-up handling robust on setups where release events include modmask.
+    """
+    base = format_hyprland_bind(hypr_key_spec, shuvoice_command=shuvoice_command).splitlines()
+    if keybind_id == "right_ctrl":
+        base.append(
+            "bindr = CTRL, Control_R, exec, "
+            + _control_exec("stop", shuvoice_command=shuvoice_command)
+        )
+    return base
+
+
+def format_hyprland_bind_for_keybind(
+    keybind_id: str,
+    hypr_key_spec: str,
+    *,
+    shuvoice_command: str = "shuvoice",
+) -> str:
+    """Format Hyprland bind/bindr lines for a specific keybind preset."""
+    return "\n".join(
+        _bind_lines_for_preset(
+            keybind_id,
+            hypr_key_spec,
+            shuvoice_command=shuvoice_command,
+        )
+    )
+
+
 def hyprland_config_path() -> Path:
     """Return the default Hyprland config path (~/.config/hypr/hyprland.conf)."""
     return Config.config_dir().parent / "hypr" / "hyprland.conf"
@@ -201,12 +237,28 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
             return "error", f"Failed to read {config_file}: {exc}"
 
     shuvoice_command = _resolve_shuvoice_command()
-    bind_text = format_hyprland_bind(hypr_key_spec, shuvoice_command=shuvoice_command)
-    start_line, stop_line = bind_text.splitlines()
+    desired_lines = _bind_lines_for_preset(
+        keybind_id,
+        hypr_key_spec,
+        shuvoice_command=shuvoice_command,
+    )
+
+    desired_start_specs = {target_spec}
+    desired_stop_specs = {target_spec}
+    conflict_specs = {target_spec}
+
+    extra_stop_spec: str | None = None
+    if keybind_id == "right_ctrl":
+        extra_stop_spec = _normalize_bind_spec("CTRL", "Control_R")
+        if extra_stop_spec:
+            desired_stop_specs.add(extra_stop_spec)
+            conflict_specs.add(extra_stop_spec)
 
     has_target_start = False
     has_target_stop = False
+    has_extra_stop = False
     has_other_shuvoice_bind = False
+    shuvoice_binding_count = 0
 
     conflict_files: dict[Path, list[int]] = {}
     shuvoice_lines: dict[Path, list[int]] = {}
@@ -223,20 +275,26 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
             is_start = is_shuvoice and "--control start" in command_lc
             is_stop = is_shuvoice and "--control stop" in command_lc
 
-            if spec == target_spec and not is_shuvoice:
+            if spec in conflict_specs and not is_shuvoice:
                 conflict_files.setdefault(config_file, []).append(line_no)
 
             if not is_shuvoice:
                 continue
 
             if is_start or is_stop:
+                shuvoice_binding_count += 1
                 shuvoice_lines.setdefault(config_file, []).append(line_no)
 
-            if spec == target_spec and is_start:
+            if is_start and spec in desired_start_specs:
                 has_target_start = True
-            elif spec == target_spec and is_stop:
-                has_target_stop = True
-            elif is_start or is_stop:
+                continue
+            if is_stop and spec in desired_stop_specs:
+                if spec == target_spec:
+                    has_target_stop = True
+                if extra_stop_spec and spec == extra_stop_spec:
+                    has_extra_stop = True
+                continue
+            if is_start or is_stop:
                 has_other_shuvoice_bind = True
 
     if conflict_files:
@@ -251,7 +309,11 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
             "Key is already bound; not adding ShuVoice binds (" + "; ".join(parts) + ").",
         )
 
-    if has_target_start and has_target_stop and not has_other_shuvoice_bind:
+    is_fully_configured = has_target_start and has_target_stop
+    if extra_stop_spec is not None:
+        is_fully_configured = is_fully_configured and has_extra_stop
+
+    if is_fully_configured and not has_other_shuvoice_bind and shuvoice_binding_count == len(desired_lines):
         configured_in = next(
             (path for path, lines in shuvoice_lines.items() if lines),
             existing_files[0],
@@ -270,6 +332,8 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
             for raw_line in original_lines:
                 parsed = _parse_hypr_bind_line(raw_line)
                 if parsed is None:
+                    if raw_line.strip() == "# Added by ShuVoice setup wizard":
+                        continue
                     filtered_lines.append(raw_line)
                     continue
                 _spec, command = parsed
@@ -286,8 +350,7 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
                 if filtered_lines and filtered_lines[-1].strip():
                     filtered_lines.append("\n")
                 filtered_lines.append("# Added by ShuVoice setup wizard\n")
-                filtered_lines.append(f"{start_line}\n")
-                filtered_lines.append(f"{stop_line}\n")
+                filtered_lines.extend(f"{line}\n" for line in desired_lines)
 
             new_content = "".join(filtered_lines)
             if new_content != content:
@@ -450,7 +513,11 @@ def format_summary(
     ]
 
     if hypr_key:
-        bind_lines = format_hyprland_bind(hypr_key)
+        bind_lines = format_hyprland_bind_for_keybind(
+            keybind_id,
+            hypr_key,
+            shuvoice_command="shuvoice",
+        )
         indented = "\n".join(f"  {line}" for line in bind_lines.splitlines())
         if auto_add_keybind:
             lines.extend(

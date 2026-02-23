@@ -9,6 +9,7 @@ from shuvoice.wizard_state import (
     KEYBIND_PRESETS,
     auto_add_hyprland_keybind,
     format_hyprland_bind,
+    format_hyprland_bind_for_keybind,
     format_summary,
     needs_wizard,
     write_config,
@@ -193,6 +194,11 @@ def test_format_summary_manual_mode_shows_manual_copy_hint():
     assert "Add to ~/.config/hypr/hyprland.conf" in result
 
 
+def test_format_summary_right_ctrl_includes_extra_release_line():
+    result = format_summary("sherpa", "right_ctrl")
+    assert "bindr = CTRL, Control_R, exec, shuvoice --control stop" in result
+
+
 def test_format_summary_custom_keybind_shows_readme_hint():
     """Custom keybind selection points user to README for examples."""
     result = format_summary("sherpa", "custom")
@@ -224,6 +230,13 @@ def test_format_hyprland_bind_with_modifier():
         "bind = SUPER, V, exec, shuvoice --control start\n"
         "bindr = SUPER, V, exec, shuvoice --control stop"
     )
+
+
+def test_format_hyprland_bind_for_right_ctrl_includes_extra_release_line():
+    result = format_hyprland_bind_for_keybind("right_ctrl", ", Control_R")
+    assert "bind = , Control_R, exec, shuvoice --control start" in result
+    assert "bindr = , Control_R, exec, shuvoice --control stop" in result
+    assert "bindr = CTRL, Control_R, exec, shuvoice --control stop" in result
 
 
 # -- auto_add_hyprland_keybind ------------------------------------------------
@@ -328,6 +341,7 @@ def test_auto_add_hyprland_keybind_updates_existing_shuvoice_bindings_conf(tmp_p
     assert "Control_R" in bindings_text
     assert "/venv/bin/shuvoice --control start" in bindings_text
     assert "/venv/bin/shuvoice --control stop" in bindings_text
+    assert "bindr = CTRL, Control_R, exec, /venv/bin/shuvoice --control stop" in bindings_text
 
     hyprland_text = hyprland_conf.read_text()
     assert "--control start" not in hyprland_text
