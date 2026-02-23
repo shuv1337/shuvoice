@@ -310,8 +310,8 @@ class MoonshineBackend(ASRBackend):
                     # Keep everything before the run + one instance
                     kept = words[: start + plen]
                     log.debug(
-                        "Repetition guard: pattern %r repeated %d× at word %d, truncating",
-                        pattern,
+                        "Repetition guard: pattern len=%d repeated %d× at word %d, truncating",
+                        len(pattern),
                         count,
                         start,
                     )
