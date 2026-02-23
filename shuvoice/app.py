@@ -100,6 +100,7 @@ class ShuVoiceApp(Gtk.Application):
 
         self._consecutive_asr_failures = 0
         self._asr_disabled = False
+        self._model_load_failed = False
 
         self._speech_rms_threshold = max(0.0, float(self.config.silence_rms_threshold))
         self._speech_rms_multiplier = max(1.0, float(self.config.silence_rms_multiplier))
@@ -163,6 +164,7 @@ class ShuVoiceApp(Gtk.Application):
 
     def _on_model_load_failed(self, error_msg: str):
         log.critical("Model loading failed: %s", error_msg)
+        self._model_load_failed = True
         splash = getattr(self, "_splash", None)
         if splash:
             splash.set_status(f"Error: {error_msg}")
