@@ -146,6 +146,39 @@ class Config:
         if float(self.streaming_stall_rms_ratio) <= 0:
             raise ValueError("streaming_stall_rms_ratio must be > 0")
 
+        # Validate core audio settings
+        if int(self.sample_rate) <= 0:
+            raise ValueError("sample_rate must be > 0")
+        if int(self.chunk_ms) <= 0:
+            raise ValueError("chunk_ms must be > 0")
+        if int(self.fallback_sample_rate) <= 0:
+            raise ValueError("fallback_sample_rate must be > 0")
+        if float(self.input_gain) <= 0:
+            raise ValueError("input_gain must be > 0")
+
+        # Validate overlay styling (security: prevent CSS injection)
+        if int(self.font_size) <= 0:
+            raise ValueError("font_size must be > 0")
+        self.font_size = int(self.font_size)
+
+        if not (0.0 <= float(self.bg_opacity) <= 1.0):
+            raise ValueError("bg_opacity must be between 0.0 and 1.0")
+        self.bg_opacity = float(self.bg_opacity)
+
+        if int(self.border_radius) < 0:
+            raise ValueError("border_radius must be >= 0")
+        self.border_radius = int(self.border_radius)
+
+        if int(self.bottom_margin) < 0:
+            raise ValueError("bottom_margin must be >= 0")
+        self.bottom_margin = int(self.bottom_margin)
+
+        # Validate typing retry
+        if int(self.typing_retry_attempts) < 0:
+            raise ValueError("typing_retry_attempts must be >= 0")
+        if int(self.typing_retry_delay_ms) < 0:
+            raise ValueError("typing_retry_delay_ms must be >= 0")
+
         # Normalize text_replacements: strip whitespace and validate string types.
         # Empty values are allowed (they delete the matched word/phrase).
         if not isinstance(self.text_replacements, dict):
