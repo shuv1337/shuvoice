@@ -109,7 +109,7 @@ WantedBy=default.target
 **Config file**: `~/.config/shuvoice/config.toml`
 
 Config sections map to `shuvoice/config.py::Config`:
-`[audio]`, `[asr]`, `[overlay]`, `[hotkey]`, `[typing]`, `[streaming]`, `[feedback]`.
+`[audio]`, `[asr]`, `[overlay]`, `[control]`, `[typing]`, `[streaming]`, `[feedback]`.
 Nested table: `[typing.text_replacements]` for custom phrase corrections.
 
 **Example config**: `examples/config.toml`.

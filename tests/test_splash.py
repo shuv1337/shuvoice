@@ -71,3 +71,23 @@ def test_splash_overlay_dismiss_is_idempotent():
 
     splash._do_dismiss()
     splash._do_dismiss()  # Should not raise
+
+
+def test_splash_overlay_on_realize_sets_shown_timestamp(monkeypatch):
+    splash = object.__new__(SplashOverlay)
+    splash._shown_monotonic = None
+
+    monkeypatch.setattr("shuvoice.splash.time.monotonic", lambda: 42.5)
+    splash._on_realize(None)
+
+    assert splash.shown_monotonic == 42.5
+
+
+def test_splash_overlay_on_realize_keeps_first_timestamp(monkeypatch):
+    splash = object.__new__(SplashOverlay)
+    splash._shown_monotonic = 10.0
+
+    monkeypatch.setattr("shuvoice.splash.time.monotonic", lambda: 99.9)
+    splash._on_realize(None)
+
+    assert splash.shown_monotonic == 10.0

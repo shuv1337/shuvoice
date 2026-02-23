@@ -21,7 +21,6 @@ classifiers = [
 dependencies = [
     "sounddevice",
     "numpy",
-    "evdev",
     "PyGObject>=3.50",
     "tomli; python_version < '3.11'",
 ]

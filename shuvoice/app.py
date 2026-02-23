@@ -6,10 +6,10 @@ before do_activate() imports .overlay. See __main__.py.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import signal
 import threading
+import time
 from typing import TYPE_CHECKING
 
 import gi
@@ -23,7 +23,6 @@ from .audio import AudioCapture, audio_rms
 from .config import Config
 from .control import ControlServer
 from .feedback import play_tone
-from .hotkey import HotkeyListener
 from .postprocess import apply_text_replacements, capitalize_first
 from .streaming_health import should_trigger_stall_flush
 from .transcript import prefer_transcript
@@ -40,6 +39,7 @@ class ShuVoiceApp(Gtk.Application):
     """GTK4 application that orchestrates streaming speech-to-text."""
 
     _ASR_MAX_FAILURES = 10
+    _MIN_SPLASH_VISIBLE_SEC = 2.0
 
     def __init__(self, config: Config):
         super().__init__(application_id="io.github.shuv1337.shuvoice")
@@ -60,23 +60,10 @@ class ShuVoiceApp(Gtk.Application):
             retry_delay_ms=config.typing_retry_delay_ms,
         )
 
-        if config.hotkey_backend not in {"evdev", "ipc"}:
-            raise ValueError(
-                f"Invalid hotkey_backend '{config.hotkey_backend}'. Expected one of: evdev, ipc"
-            )
         if config.output_mode not in {"final_only", "streaming_partial"}:
             raise ValueError(
                 f"Invalid output_mode '{config.output_mode}'. "
                 "Expected one of: final_only, streaming_partial"
-            )
-
-        self.hotkey: HotkeyListener | None = None
-        if config.hotkey_backend == "evdev":
-            self.hotkey = HotkeyListener(
-                config.hotkey,
-                config.hold_threshold_ms,
-                config.hotkey_device,
-                listen_all_devices=config.hotkey_listen_all_devices,
             )
 
         self.control = ControlServer(
@@ -96,11 +83,11 @@ class ShuVoiceApp(Gtk.Application):
 
         self._asr_lock = threading.Lock()
         self._asr_thread_alive = True
-        self._hotkey_thread_alive = True if self.hotkey else False
 
         self._consecutive_asr_failures = 0
         self._asr_disabled = False
         self._model_load_failed = False
+        self._splash_started_monotonic: float | None = None
 
         self._speech_rms_threshold = max(0.0, float(self.config.silence_rms_threshold))
         self._speech_rms_multiplier = max(1.0, float(self.config.silence_rms_multiplier))
@@ -141,8 +128,35 @@ class ShuVoiceApp(Gtk.Application):
         # Show splash while model loads in the background.
         from .splash import SplashOverlay
 
+        self._splash_started_monotonic = time.monotonic()
         self._splash = SplashOverlay(self)
         threading.Thread(target=self._load_model_async, name="model-loader", daemon=True).start()
+
+    @staticmethod
+    def _remaining_splash_ms(
+        shown_at_monotonic: float | None,
+        min_visible_sec: float,
+        *,
+        now_monotonic: float | None = None,
+    ) -> int:
+        """Return remaining splash visibility time in milliseconds."""
+        if shown_at_monotonic is None or min_visible_sec <= 0:
+            return 0
+
+        now = time.monotonic() if now_monotonic is None else now_monotonic
+        elapsed = max(0.0, now - shown_at_monotonic)
+        remaining = max(0.0, min_visible_sec - elapsed)
+        return int(remaining * 1000)
+
+    def _complete_model_loaded_startup(self):
+        splash = getattr(self, "_splash", None)
+        if splash:
+            splash.dismiss()
+            self._splash = None
+
+        self._splash_started_monotonic = None
+        self._finish_activation()
+        return GLib.SOURCE_REMOVE
 
     def _load_model_async(self):
         """Background thread: load the ASR model, then signal the main thread."""
@@ -155,11 +169,29 @@ class ShuVoiceApp(Gtk.Application):
 
     def _on_model_loaded(self):
         self._model_loaded = True
+
         splash = getattr(self, "_splash", None)
-        if splash:
-            splash.dismiss()
-            self._splash = None
-        self._finish_activation()
+        shown_at_monotonic = None
+        if splash is not None:
+            shown_at_monotonic = getattr(splash, "shown_monotonic", None)
+
+        remaining_visible_ms = ShuVoiceApp._remaining_splash_ms(
+            shown_at_monotonic or getattr(self, "_splash_started_monotonic", None),
+            self._MIN_SPLASH_VISIBLE_SEC,
+        )
+        min_post_load_ms = int(self._MIN_SPLASH_VISIBLE_SEC * 1000)
+        delay_ms = max(remaining_visible_ms, min_post_load_ms)
+
+        if delay_ms > 0:
+            log.debug(
+                "Holding splash for %dms after model load (remaining visible=%dms)",
+                delay_ms,
+                remaining_visible_ms,
+            )
+            GLib.timeout_add(delay_ms, self._complete_model_loaded_startup)
+        else:
+            self._complete_model_loaded_startup()
+
         return GLib.SOURCE_REMOVE
 
     def _on_model_load_failed(self, error_msg: str):
@@ -180,23 +212,9 @@ class ShuVoiceApp(Gtk.Application):
         self.audio.start()
         self.control.start()
 
-        if self.hotkey:
-            self.hotkey.set_callbacks(
-                on_start=self._on_recording_start,
-                on_stop=self._on_recording_stop,
-            )
-
         threading.Thread(target=self._asr_worker, name="asr", daemon=True).start()
-        if self.hotkey:
-            threading.Thread(target=self._hotkey_worker, name="hotkey", daemon=True).start()
 
-        if self.hotkey:
-            log.info("Ready — press %s to talk", self.config.hotkey)
-        else:
-            log.info(
-                "Ready — hotkey backend=%s. Use control socket commands instead.",
-                self.config.hotkey_backend,
-            )
+        log.info("Ready — use Hyprland bind/bindr with shuvoice --control start/stop")
         log.info("Control socket: %s", self.control.socket_path)
 
     def do_shutdown(self):
@@ -283,7 +301,7 @@ class ShuVoiceApp(Gtk.Application):
             self._consecutive_asr_failures = 0
             return text
 
-    # -- Recording state (called from hotkey/control threads) ---------------
+    # -- Recording state (called from control socket threads) ---------------
 
     def _play_feedback_tone(self, is_start: bool):
         if not self.config.audio_feedback:
@@ -373,8 +391,6 @@ class ShuVoiceApp(Gtk.Application):
             return "error:asr_disabled"
         if not self._asr_thread_alive:
             return "error:asr_thread_dead"
-        if self.hotkey and not self._hotkey_thread_alive:
-            return "error:hotkey_thread_dead"
         if self._recording.is_set():
             return "recording"
         if self._processing.is_set():
@@ -796,31 +812,3 @@ class ShuVoiceApp(Gtk.Application):
                 log.critical("ASR worker exited unexpectedly")
                 self._show_overlay_error("⚠ ASR thread crashed — restart ShuVoice")
 
-    # -- Hotkey event loop thread -------------------------------------------
-
-    def _hotkey_worker(self):
-        if not self.hotkey:
-            return
-
-        try:
-            self._hotkey_loop()
-        except Exception:
-            self._hotkey_thread_alive = False
-            log.critical("Hotkey listener crashed", exc_info=True)
-            self._show_overlay_error("⚠ Hotkey listener crashed — use control socket")
-        else:
-            if self._running.is_set():
-                self._hotkey_thread_alive = False
-                log.critical("Hotkey listener exited unexpectedly")
-                self._show_overlay_error("⚠ Hotkey listener crashed — use control socket")
-
-    def _hotkey_loop(self):
-        if not self.hotkey:
-            return
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(self.hotkey.run())
-        finally:
-            loop.close()

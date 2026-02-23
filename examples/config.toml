@@ -23,8 +23,8 @@ auto_gain_max = 10.0
 auto_gain_settle_chunks = 2
 
 [asr]
-# nemo | sherpa | moonshine
-asr_backend = "nemo"
+# sherpa | nemo | moonshine
+asr_backend = "sherpa"
 
 # NeMo settings
 model_name = "nvidia/nemotron-speech-streaming-en-0.6b"
@@ -55,16 +55,7 @@ bg_opacity = 0.75
 border_radius = 16
 bottom_margin = 60
 
-[hotkey]
-# evdev | ipc
-hotkey_backend = "evdev"
-# evdev key code name
-hotkey = "KEY_RIGHTCTRL"
-hold_threshold_ms = 300
-# Optional explicit /dev/input/eventX device path
-# hotkey_device = "/dev/input/event3"
-# Listen to all matching keyboards (usually keep false to avoid duplicate events)
-hotkey_listen_all_devices = false
+[control]
 # Optional control socket override (defaults to "$XDG_RUNTIME_DIR/shuvoice/control.sock")
 # control_socket = "/path/to/control.sock"
 

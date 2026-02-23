@@ -16,9 +16,9 @@ right_context = 6
 device = "cpu"
 use_cuda_graph_decoder = false
 
-[hotkey]
-hotkey_backend = "ipc"
+[control]
 # Defaults to "$XDG_RUNTIME_DIR/shuvoice/control.sock" when unset.
+# control_socket = "/path/to/control.sock"
 
 [typing]
 output_mode = "final_only"

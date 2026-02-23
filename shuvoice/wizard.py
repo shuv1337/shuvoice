@@ -1,8 +1,8 @@
 """First-run welcome wizard for ShuVoice.
 
 Presents a guided setup dialog on the first launch, allowing the user
-to select an ASR backend and review the hotkey configuration.  Writes
-``config.toml`` and a ``.wizard-done`` marker so it only runs once.
+to select an ASR backend and review the default IPC push-to-talk flow.
+Writes ``config.toml`` and a ``.wizard-done`` marker so it only runs once.
 
 Uses the Hyprland layer-shell system for visual consistency with the
 rest of ShuVoice.
@@ -21,6 +21,7 @@ from pathlib import Path
 
 import gi
 
+gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gtk4LayerShell", "1.0")
 from gi.repository import Gdk, Gtk
@@ -28,7 +29,6 @@ from gi.repository import Gtk4LayerShell as LayerShell
 
 from .wizard_state import (
     ASR_BACKENDS,
-    HOTKEY_BACKENDS,
     format_summary,
     needs_wizard,
     write_config,
@@ -67,8 +67,9 @@ class WelcomeWizard(Gtk.Application):
     def __init__(self):
         super().__init__(application_id="io.github.shuv1337.shuvoice.wizard")
         self.completed = False
-        self._asr_backend = "nemo"
-        self._hotkey_backend = "evdev"
+        self._asr_backend = "sherpa"
+        self._win: Gtk.Window | None = None
+        self._stack: Gtk.Stack | None = None
 
     # -- GTK lifecycle ---------------------------------------------------------
 
@@ -79,7 +80,9 @@ class WelcomeWizard(Gtk.Application):
         if LayerShell.is_supported():
             LayerShell.init_for_window(win)
             LayerShell.set_layer(win, LayerShell.Layer.TOP)
-            LayerShell.set_keyboard_mode(win, LayerShell.KeyboardMode.EXCLUSIVE)
+            # Avoid global keyboard grabs during setup; keeps input recoverable
+            # even if window teardown is delayed by compositor timing.
+            LayerShell.set_keyboard_mode(win, LayerShell.KeyboardMode.ON_DEMAND)
             LayerShell.set_exclusive_zone(win, -1)
             LayerShell.set_namespace(win, "shuvoice-wizard")
 
@@ -91,7 +94,6 @@ class WelcomeWizard(Gtk.Application):
 
         self._stack.add_named(self._build_welcome_page(), "welcome")
         self._stack.add_named(self._build_asr_page(), "asr")
-        self._stack.add_named(self._build_hotkey_page(), "hotkey")
         self._stack.add_named(self._build_done_page(), "done")
 
         win.set_child(self._stack)
@@ -230,7 +232,7 @@ class WelcomeWizard(Gtk.Application):
             else:
                 radio.set_group(group)
 
-            if backend_id == "nemo":
+            if backend_id == "sherpa":
                 radio.set_active(True)
 
             radio.connect("toggled", self._on_asr_toggled, backend_id)
@@ -244,65 +246,9 @@ class WelcomeWizard(Gtk.Application):
 
         nav = self._make_nav_row(
             back_page="welcome",
-            next_page="hotkey",
+            next_page="done",
+            next_label="Finish",
         )
-        nav.set_margin_top(20)
-        page.append(nav)
-
-        return page
-
-    def _build_hotkey_page(self) -> Gtk.Widget:
-        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        page.add_css_class("wizard-page")
-        page.set_halign(Gtk.Align.CENTER)
-        page.set_valign(Gtk.Align.CENTER)
-        page.set_spacing(4)
-
-        self._add_text_title(page, "Hotkey Configuration")
-
-        sub = Gtk.Label(
-            label="ShuVoice uses a push-to-talk hotkey.\n"
-            "The default key is Right Ctrl (KEY_RIGHTCTRL)."
-        )
-        sub.add_css_class("wizard-subtitle")
-        sub.set_justify(Gtk.Justification.CENTER)
-        page.append(sub)
-
-        hk_label = Gtk.Label(label="Choose how the hotkey is captured:")
-        hk_label.add_css_class("wizard-desc")
-        hk_label.set_halign(Gtk.Align.START)
-        hk_label.set_margin_top(8)
-        hk_label.set_margin_bottom(8)
-        page.append(hk_label)
-
-        group: Gtk.CheckButton | None = None
-        for backend_id, label, description in HOTKEY_BACKENDS:
-            radio = Gtk.CheckButton(label=label)
-            radio.add_css_class("wizard-radio")
-            if group is None:
-                group = radio
-            else:
-                radio.set_group(group)
-
-            if backend_id == "evdev":
-                radio.set_active(True)
-
-            radio.connect("toggled", self._on_hotkey_toggled, backend_id)
-            page.append(radio)
-
-            desc_label = Gtk.Label(label=description)
-            desc_label.add_css_class("wizard-radio-desc")
-            desc_label.set_halign(Gtk.Align.START)
-            page.append(desc_label)
-
-        tip = Gtk.Label(label="You can change the hotkey later in\n~/.config/shuvoice/config.toml")
-        tip.add_css_class("wizard-desc")
-        tip.set_halign(Gtk.Align.CENTER)
-        tip.set_justify(Gtk.Justification.CENTER)
-        tip.set_margin_top(12)
-        page.append(tip)
-
-        nav = self._make_nav_row(back_page="asr", next_page="done", next_label="Finish")
         nav.set_margin_top(20)
         page.append(nav)
 
@@ -350,19 +296,39 @@ class WelcomeWizard(Gtk.Application):
         if button.get_active():
             self._asr_backend = backend_id
 
-    def _on_hotkey_toggled(self, button: Gtk.CheckButton, backend_id: str):
-        if button.get_active():
-            self._hotkey_backend = backend_id
+    def _release_input_and_destroy_window(self):
+        win = self._win
+        if win is None:
+            return
+
+        if LayerShell.is_supported():
+            try:
+                LayerShell.set_keyboard_mode(win, LayerShell.KeyboardMode.NONE)
+            except Exception:
+                log.debug("Failed to release wizard keyboard mode", exc_info=True)
+
+        try:
+            win.set_visible(False)
+        except Exception:
+            log.debug("Failed to hide wizard window", exc_info=True)
+
+        try:
+            win.destroy()
+        except Exception:
+            log.debug("Failed to destroy wizard window", exc_info=True)
+
+        self._win = None
+
+    def do_shutdown(self):
+        self._release_input_and_destroy_window()
+        Gtk.Application.do_shutdown(self)
 
     def _on_finish(self, _button):
-        write_config(self._asr_backend, self._hotkey_backend)
+        write_config(self._asr_backend)
         write_marker()
         self.completed = True
-        log.info(
-            "Wizard completed: asr_backend=%s hotkey_backend=%s",
-            self._asr_backend,
-            self._hotkey_backend,
-        )
+        log.info("Wizard completed: asr_backend=%s", self._asr_backend)
+        self._release_input_and_destroy_window()
         self.quit()
 
     # -- Helpers ---------------------------------------------------------------
@@ -371,7 +337,7 @@ class WelcomeWizard(Gtk.Application):
         """Refresh the summary label text based on current selections."""
         if not hasattr(self, "_summary_label") or self._summary_label is None:
             return
-        self._summary_label.set_text(format_summary(self._asr_backend, self._hotkey_backend))
+        self._summary_label.set_text(format_summary(self._asr_backend))
 
     @staticmethod
     def _add_text_title(box: Gtk.Box, text: str):

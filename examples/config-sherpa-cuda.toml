@@ -23,9 +23,9 @@ sherpa_provider = "cuda"
 sherpa_num_threads = 2
 sherpa_chunk_ms = 100
 
-[hotkey]
-hotkey_backend = "ipc"
+[control]
 # Defaults to "$XDG_RUNTIME_DIR/shuvoice/control.sock" when unset.
+# control_socket = "/path/to/control.sock"
 
 [typing]
 output_mode = "final_only"

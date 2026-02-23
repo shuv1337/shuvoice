@@ -19,8 +19,7 @@ Core pipeline + production hardening are implemented:
 - PipeWire capture (`sounddevice`)
 - Pluggable streaming ASR backend layer (`nemo`, `sherpa`, `moonshine`)
 - GTK4 layer-shell overlay
-- evdev hotkey (tap/hold)
-- Hyprland IPC fallback controls via local Unix socket
+- Hyprland IPC controls via local Unix socket
 - `wtype` / clipboard text injection with retry + fallback
 
 ## Current backend models & providers
@@ -104,18 +103,8 @@ uv pip install "git+https://github.com/NVIDIA/NeMo.git@main#egg=nemo_toolkit[asr
 
 ## Permissions
 
-### evdev backend
-
-evdev hotkey capture requires access to `/dev/input/event*`.
-
-```bash
-sudo usermod -aG input "$USER"
-# log out/in after group change
-```
-
-### IPC backend (no input group)
-
-Use `hotkey_backend = "ipc"` and trigger start/stop via Hyprland `bind` / `bindr`.
+ShuVoice uses IPC control commands (no `/dev/input` access required).
+Trigger start/stop via Hyprland `bind` / `bindr` commands.
 
 ## Preflight
 
@@ -133,7 +122,7 @@ Checks include:
 - ASR backend dependencies for selected `asr_backend`
 - required binaries (`wtype`, `wl-copy`, `wl-paste`)
 - `libgtk4-layer-shell.so`
-- configured hotkey backend / hotkey / output mode
+- output mode validity
 
 ## Run
 
@@ -149,9 +138,7 @@ python -m shuvoice --download-model
 python -m shuvoice --asr-backend nemo --right-context 13
 python -m shuvoice --asr-backend sherpa --sherpa-model-dir /path/to/model
 python -m shuvoice --asr-backend moonshine --moonshine-model-name moonshine/base
-python -m shuvoice --hotkey KEY_F9
 python -m shuvoice --output-mode streaming_partial
-python -m shuvoice --hotkey-backend ipc
 python -m shuvoice --list-audio-devices
 python -m shuvoice --audio-device 2 --input-gain 1.5
 ```
@@ -306,8 +293,8 @@ Example config:
 
 Backend selection is controlled by `asr_backend`:
 
-- `asr_backend = "nemo"` (default): uses `model_name`, `right_context`, `device`
-- `asr_backend = "sherpa"`: uses `sherpa_*` settings; if `sherpa_model_dir` is unset, ShuVoice auto-downloads the default streaming model
+- `asr_backend = "sherpa"` (default): uses `sherpa_*` settings; if `sherpa_model_dir` is unset, ShuVoice auto-downloads the default streaming model
+- `asr_backend = "nemo"`: uses `model_name`, `right_context`, `device`
 - `asr_backend = "moonshine"`: uses `moonshine_*` settings (16k sample rate expected)
 
 `right_context` applies to NeMo only.
@@ -437,8 +424,6 @@ ShuVoice is released under the MIT License. See `LICENSE`.
   - Or use a Python 3.13 virtualenv for ASR installs.
 - `espeak-ng not found` when running `scripts/tts_roundtrip.py`
   - Install with: `sudo pacman -S espeak-ng`.
-- `No keyboard device found ... input group`
-  - Add user to `input` group and re-login, or use `hotkey_backend = "ipc"`.
 - `Control socket not found ...`
   - Start ShuVoice first (`python -m shuvoice`) before sending `--control` commands.
 - `libgtk4-layer-shell.so not found`
@@ -446,7 +431,6 @@ ShuVoice is released under the MIT License. See `LICENSE`.
 - `wtype not found in PATH`
   - `sudo pacman -S wtype`
 - Recognition quality is poor / start-stop triggers repeatedly
-  - Set a single keyboard device in config (`hotkey_device=/dev/input/eventX`) or keep `hotkey_listen_all_devices=false`.
   - Increase ASR context for accuracy (eg. `right_context=13`, with higher latency).
   - Select the correct mic (`python -m shuvoice --list-audio-devices`, then set `audio_device`). Prefer device *name* over numeric index, because indices can change between runs.
   - Increase `input_gain` moderately (eg. `1.3` to `1.8`) if your mic is too quiet.

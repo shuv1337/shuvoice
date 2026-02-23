@@ -11,10 +11,12 @@ before this module is imported. See __main__.py.
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 import gi
 
+gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gtk4LayerShell", "1.0")
 from gi.repository import Gdk, GLib, Gtk
@@ -50,9 +52,11 @@ class SplashOverlay:
     def __init__(self, app: Gtk.Application):
         self._window = Gtk.Window(application=app)
         self._status: Gtk.Label | None = None
+        self._shown_monotonic: float | None = None
         self._setup_layer_shell()
         self._setup_css()
         self._setup_widgets()
+        self._window.connect("realize", self._on_realize)
         self._window.connect("realize", self._make_click_through)
         self._window.present()
 
@@ -123,6 +127,14 @@ class SplashOverlay:
         box.append(self._status)
 
         self._window.set_child(box)
+
+    @property
+    def shown_monotonic(self) -> float | None:
+        return self._shown_monotonic
+
+    def _on_realize(self, _window):
+        if self._shown_monotonic is None:
+            self._shown_monotonic = time.monotonic()
 
     @staticmethod
     def _add_text_branding(box: Gtk.Box):

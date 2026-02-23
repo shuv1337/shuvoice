@@ -4,14 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from shuvoice.wizard_state import (
-    ASR_BACKENDS,
-    HOTKEY_BACKENDS,
-    format_summary,
-    needs_wizard,
-    write_config,
-    write_marker,
-)
+from shuvoice.wizard_state import ASR_BACKENDS, format_summary, needs_wizard, write_config, write_marker
 
 
 def test_needs_wizard_true_on_fresh_install(tmp_path):
@@ -57,14 +50,14 @@ def test_write_config_creates_toml(tmp_path):
     """write_config writes a valid config.toml with selected settings."""
     with patch("shuvoice.wizard_state.Config") as mock_config:
         mock_config.config_dir.return_value = tmp_path
-        write_config("sherpa", "ipc")
+        write_config("sherpa")
 
         config_file = tmp_path / "config.toml"
         assert config_file.exists()
 
         content = config_file.read_text()
         assert 'asr_backend = "sherpa"' in content
-        assert 'hotkey_backend = "ipc"' in content
+        assert "hotkey_backend" not in content
 
 
 def test_write_config_does_not_overwrite_existing(tmp_path):
@@ -74,24 +67,22 @@ def test_write_config_does_not_overwrite_existing(tmp_path):
 
     with patch("shuvoice.wizard_state.Config") as mock_config:
         mock_config.config_dir.return_value = tmp_path
-        write_config("nemo", "evdev")
+        write_config("nemo")
 
         assert config_file.read_text() == "# existing config\n"
 
 
-def test_format_summary_contains_backend_names():
-    """format_summary includes human-readable backend names."""
-    result = format_summary("sherpa", "ipc")
+def test_format_summary_contains_backend_name_and_ipc_hint():
+    """format_summary includes backend name and IPC control guidance."""
+    result = format_summary("sherpa")
     assert "Sherpa-ONNX" in result
-    assert "IPC socket" in result
-    assert "KEY_RIGHTCTRL" in result
+    assert "Hyprland bind/bindr" in result
 
 
-def test_format_summary_with_nemo():
-    """format_summary handles the default nemo/evdev selection."""
-    result = format_summary("nemo", "evdev")
-    assert "NeMo (NVIDIA)" in result
-    assert "evdev" in result
+def test_format_summary_with_moonshine():
+    """format_summary handles non-default backend selection."""
+    result = format_summary("moonshine")
+    assert "Moonshine-ONNX" in result
 
 
 def test_asr_backends_has_three_entries():
@@ -101,11 +92,3 @@ def test_asr_backends_has_three_entries():
     assert "nemo" in ids
     assert "sherpa" in ids
     assert "moonshine" in ids
-
-
-def test_hotkey_backends_has_two_entries():
-    """HOTKEY_BACKENDS should list exactly two backend options."""
-    assert len(HOTKEY_BACKENDS) == 2
-    ids = [bid for bid, _, _ in HOTKEY_BACKENDS]
-    assert "evdev" in ids
-    assert "ipc" in ids

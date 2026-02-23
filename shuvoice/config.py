@@ -37,7 +37,7 @@ class Config:
     auto_gain_settle_chunks: int = 2  # speech-level chunks before gain updates
 
     # ASR
-    asr_backend: str = "nemo"  # nemo | sherpa | moonshine
+    asr_backend: str = "sherpa"  # sherpa | nemo | moonshine
     model_name: str = "nvidia/nemotron-speech-streaming-en-0.6b"
     # 13 gives the highest streaming accuracy (at the cost of latency).
     # Lower values are snappier but significantly reduce recognition quality.
@@ -65,12 +65,7 @@ class Config:
     border_radius: int = 16
     bottom_margin: int = 60
 
-    # Hotkey / control
-    hotkey_backend: str = "evdev"  # evdev | ipc
-    hotkey: str = "KEY_RIGHTCTRL"
-    hold_threshold_ms: int = 300
-    hotkey_device: str | None = None  # /dev/input/eventX; None => auto-detect
-    hotkey_listen_all_devices: bool = False  # default false to avoid duplicate key events
+    # Control socket (Hyprland bind/bindr integration)
     control_socket: str | None = None  # default: $XDG_RUNTIME_DIR/shuvoice/control.sock
 
     # Text injection

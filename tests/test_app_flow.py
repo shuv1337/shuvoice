@@ -53,8 +53,6 @@ def test_recording_status_reports_processing_between_stop_and_commit():
     app = SimpleNamespace(
         _asr_disabled=False,
         _asr_thread_alive=True,
-        hotkey=None,
-        _hotkey_thread_alive=False,
         _recording=threading.Event(),
         _processing=threading.Event(),
     )
@@ -264,3 +262,76 @@ def test_commit_utterance_skips_when_rendered_text_is_empty():
     overlay.set_text.assert_not_called()
     typer.commit_final.assert_not_called()
     typer.update_partial.assert_not_called()
+
+
+def test_remaining_splash_ms_is_zero_without_splash_timestamp():
+    assert ShuVoiceApp._remaining_splash_ms(None, 2.0, now_monotonic=10.0) == 0
+
+
+def test_remaining_splash_ms_counts_down_to_zero():
+    remaining = ShuVoiceApp._remaining_splash_ms(10.0, 2.0, now_monotonic=10.3)
+    assert 1690 <= remaining <= 1700
+
+    assert ShuVoiceApp._remaining_splash_ms(10.0, 2.0, now_monotonic=12.5) == 0
+
+
+def test_on_model_loaded_defers_activation_when_splash_is_too_fast(monkeypatch):
+    timeout_add = Mock()
+    monkeypatch.setattr("shuvoice.app.GLib.timeout_add", timeout_add)
+    monkeypatch.setattr("shuvoice.app.time.monotonic", lambda: 10.2)
+
+    app = SimpleNamespace(
+        _model_loaded=False,
+        _splash_started_monotonic=10.0,
+        _MIN_SPLASH_VISIBLE_SEC=2.0,
+        _complete_model_loaded_startup=Mock(),
+    )
+
+    result = ShuVoiceApp._on_model_loaded(app)
+
+    assert app._model_loaded is True
+    assert result == 0
+    timeout_add.assert_called_once()
+    delay_ms, callback = timeout_add.call_args.args
+    assert delay_ms == 2000
+    assert callback is app._complete_model_loaded_startup
+    app._complete_model_loaded_startup.assert_not_called()
+
+
+def test_complete_model_loaded_startup_dismisses_splash_and_finishes():
+    splash = SimpleNamespace(dismiss=Mock())
+    app = SimpleNamespace(
+        _splash=splash,
+        _splash_started_monotonic=10.0,
+        _finish_activation=Mock(),
+    )
+
+    result = ShuVoiceApp._complete_model_loaded_startup(app)
+
+    splash.dismiss.assert_called_once()
+    assert app._splash is None
+    assert app._splash_started_monotonic is None
+    app._finish_activation.assert_called_once()
+    assert result == 0
+
+
+def test_on_model_loaded_prefers_realized_splash_timestamp(monkeypatch):
+    timeout_add = Mock()
+    monkeypatch.setattr("shuvoice.app.GLib.timeout_add", timeout_add)
+    monkeypatch.setattr("shuvoice.app.time.monotonic", lambda: 11.0)
+
+    splash = SimpleNamespace(shown_monotonic=10.8)
+    app = SimpleNamespace(
+        _model_loaded=False,
+        _splash=splash,
+        _splash_started_monotonic=10.0,
+        _MIN_SPLASH_VISIBLE_SEC=2.0,
+        _complete_model_loaded_startup=Mock(),
+    )
+
+    ShuVoiceApp._on_model_loaded(app)
+
+    timeout_add.assert_called_once()
+    delay_ms, callback = timeout_add.call_args.args
+    assert delay_ms == 2000
+    assert callback is app._complete_model_loaded_startup

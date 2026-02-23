@@ -13,8 +13,6 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     cfg = Config.load()
 
     assert cfg.sample_rate == 16000
-    assert cfg.hotkey == "KEY_RIGHTCTRL"
-    assert cfg.hotkey_backend == "evdev"
     assert cfg.output_mode == "final_only"
     assert cfg.audio_queue_max_size == 200
     assert cfg.auto_gain_target_peak == 0.15
@@ -25,7 +23,7 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     assert cfg.text_replacements == {}
     assert cfg.streaming_stall_guard is True
     assert cfg.streaming_stall_chunks == 4
-    assert cfg.asr_backend == "nemo"
+    assert cfg.asr_backend == "sherpa"
     assert cfg.sherpa_provider == "cpu"
     assert cfg.sherpa_num_threads == 2
     assert cfg.sherpa_chunk_ms == 100
@@ -73,12 +71,6 @@ moonshine_model_precision = "float"
 moonshine_chunk_ms = 110
 moonshine_max_window_sec = 20.0
 moonshine_max_tokens = 160
-
-[hotkey]
-hotkey_backend = "ipc"
-hotkey = "KEY_F9"
-hold_threshold_ms = 250
-hotkey_device = "/dev/input/event9"
 
 [typing]
 output_mode = "streaming_partial"
@@ -132,10 +124,6 @@ foo = "bar"
     assert cfg.moonshine_chunk_ms == 110
     assert cfg.moonshine_max_window_sec == 20.0
     assert cfg.moonshine_max_tokens == 160
-    assert cfg.hotkey_backend == "ipc"
-    assert cfg.hotkey == "KEY_F9"
-    assert cfg.hold_threshold_ms == 250
-    assert cfg.hotkey_device == "/dev/input/event9"
     assert cfg.output_mode == "streaming_partial"
     assert cfg.use_clipboard_for_final is True
     assert cfg.preserve_clipboard is True

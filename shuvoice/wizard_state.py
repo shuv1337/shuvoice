@@ -17,25 +17,20 @@ _MARKER_FILE = ".wizard-done"
 # ASR backend descriptions shown in the wizard.
 ASR_BACKENDS = [
     (
-        "nemo",
-        "NeMo (NVIDIA)",
-        "Highest accuracy streaming ASR.  Requires an NVIDIA GPU with CUDA.",
-    ),
-    (
         "sherpa",
         "Sherpa-ONNX",
         "Fast ONNX-based streaming ASR.  Works on CPU \u2014 no GPU needed.",
+    ),
+    (
+        "nemo",
+        "NeMo (NVIDIA)",
+        "Highest accuracy streaming ASR.  Requires an NVIDIA GPU with CUDA.",
     ),
     (
         "moonshine",
         "Moonshine-ONNX",
         "Lightweight ONNX ASR with low resource usage.  CPU-friendly.",
     ),
-]
-
-HOTKEY_BACKENDS = [
-    ("evdev", "evdev", "Listen for key events via /dev/input (default, requires permissions)."),
-    ("ipc", "IPC socket", "Control recording via Hyprland keybind \u2192 shuvoice --control."),
 ]
 
 
@@ -59,7 +54,7 @@ def write_marker():
     marker.write_text("done\n")
 
 
-def write_config(asr_backend: str, hotkey_backend: str):
+def write_config(asr_backend: str):
     """Write a minimal config.toml with the wizard selections.
 
     Does nothing if config.toml already exists to avoid clobbering
@@ -75,26 +70,18 @@ def write_config(asr_backend: str, hotkey_backend: str):
         "\n",
         "[asr]\n",
         f'asr_backend = "{asr_backend}"\n',
-        "\n",
-        "[hotkey]\n",
-        f'hotkey_backend = "{hotkey_backend}"\n',
     ]
     config_file.write_text("".join(lines))
     log.info("Wrote %s", config_file)
 
 
-def format_summary(asr_backend: str, hotkey_backend: str) -> str:
+def format_summary(asr_backend: str) -> str:
     """Build a human-readable summary of wizard selections."""
     asr_name = next(
         (label for bid, label, _ in ASR_BACKENDS if bid == asr_backend),
         asr_backend,
     )
-    hk_name = next(
-        (label for bid, label, _ in HOTKEY_BACKENDS if bid == hotkey_backend),
-        hotkey_backend,
-    )
     return (
         f"ASR backend:    {asr_name}\n"
-        f"Hotkey backend: {hk_name}\n"
-        f"Hotkey:         Right Ctrl (KEY_RIGHTCTRL)"
+        "Push-to-talk:   Hyprland bind/bindr via shuvoice --control"
     )

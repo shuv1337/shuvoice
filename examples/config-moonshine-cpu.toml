@@ -18,9 +18,9 @@ moonshine_chunk_ms = 100
 moonshine_max_window_sec = 5.0
 moonshine_max_tokens = 128
 
-[hotkey]
-hotkey_backend = "ipc"
+[control]
 # Defaults to "$XDG_RUNTIME_DIR/shuvoice/control.sock" when unset.
+# control_socket = "/path/to/control.sock"
 
 [typing]
 output_mode = "final_only"

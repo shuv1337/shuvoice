@@ -47,14 +47,6 @@ def _apply_cli_overrides(args, config):
         )
     if args.input_gain is not None:
         config.input_gain = float(args.input_gain)
-    if args.hotkey_backend:
-        config.hotkey_backend = args.hotkey_backend
-    if args.hotkey:
-        config.hotkey = args.hotkey
-    if args.hotkey_device:
-        config.hotkey_device = args.hotkey_device
-    if args.hotkey_listen_all_devices:
-        config.hotkey_listen_all_devices = True
     if args.output_mode:
         config.output_mode = args.output_mode
     if args.control_socket:
@@ -98,21 +90,6 @@ def _run_preflight(config) -> bool:
         CDLL("libgtk4-layer-shell.so")
         return "libgtk4-layer-shell.so loaded"
 
-    def check_hotkey_backend() -> str:
-        allowed = {"evdev", "ipc"}
-        if config.hotkey_backend not in allowed:
-            raise RuntimeError(
-                f"Invalid hotkey_backend '{config.hotkey_backend}'. Allowed: {sorted(allowed)}"
-            )
-        return config.hotkey_backend
-
-    def check_hotkey() -> str:
-        from evdev import ecodes
-
-        if not hasattr(ecodes, config.hotkey):
-            raise RuntimeError(f"Unknown hotkey: {config.hotkey}")
-        return config.hotkey
-
     def check_output_mode() -> str:
         allowed = {"final_only", "streaming_partial"}
         if config.output_mode not in allowed:
@@ -143,7 +120,6 @@ def _run_preflight(config) -> bool:
     add_check("Python version", check_python)
     add_check("Import numpy", check_import("numpy"))
     add_check("Import sounddevice", check_import("sounddevice"))
-    add_check("Import evdev", check_import("evdev"))
     add_check("Import gi", check_import("gi"))
     add_check("Audio input device", check_audio_device)
     add_check("ASR dependencies", check_asr_stack)
@@ -154,13 +130,6 @@ def _run_preflight(config) -> bool:
     else:
         checks.append(("wl-paste binary", True, "skipped (preserve_clipboard=false)"))
     add_check("gtk4-layer-shell library", check_layer_shell)
-    add_check("Hotkey backend", check_hotkey_backend)
-
-    if config.hotkey_backend == "evdev":
-        add_check("Configured hotkey", check_hotkey)
-    else:
-        checks.append(("Configured hotkey", True, "skipped (backend=ipc)"))
-
     add_check("Output mode", check_output_mode)
 
     print("ShuVoice preflight checks")
@@ -297,27 +266,6 @@ def main():
         type=float,
         default=None,
         help="Multiply microphone PCM by this factor before ASR (default: from config)",
-    )
-    parser.add_argument(
-        "--hotkey-backend",
-        choices=["evdev", "ipc"],
-        default=None,
-        help="Hotkey backend: evdev or ipc (default: from config)",
-    )
-    parser.add_argument(
-        "--hotkey",
-        default=None,
-        help="Hotkey name, e.g. KEY_RIGHTCTRL (default: from config)",
-    )
-    parser.add_argument(
-        "--hotkey-device",
-        default=None,
-        help="Explicit /dev/input/eventX path for hotkey capture",
-    )
-    parser.add_argument(
-        "--hotkey-listen-all-devices",
-        action="store_true",
-        help="Listen to all matching keyboard devices (can cause duplicate hotkey events)",
     )
     parser.add_argument(
         "--output-mode",
