@@ -8,6 +8,7 @@ from shuvoice.config import Config
 
 
 def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
+    # Ensure defaults are loaded correctly
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
 
     cfg = Config.load()

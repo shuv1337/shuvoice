@@ -7,6 +7,7 @@ from shuvoice.config import Config
 
 
 def test_guard_truncates_hyphenated_token_repetition():
+    # Detect hyphenated repetition
     text = "The six-six-hake-hake-hake-hake-hake"
 
     assert MoonshineBackend._guard_repetition(text, audio_seconds=2.0) == "The six-six-hake"
