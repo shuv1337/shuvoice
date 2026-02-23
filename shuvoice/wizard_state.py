@@ -84,15 +84,15 @@ def write_marker():
     marker.write_text("done\n")
 
 
-def _upsert_asr_backend(config_file: Path, asr_backend: str):
-    """Update or insert ``asr_backend`` under ``[asr]`` in config.toml.
+def _upsert_asr_key(config_file: Path, key: str, value: str):
+    """Update or insert a key under ``[asr]`` in config.toml.
 
     Preserves unrelated lines/comments and only patches the relevant field.
     """
     lines = config_file.read_text().splitlines(keepends=True)
 
     section_re = re.compile(r"^\s*\[([^\]]+)\]\s*$")
-    key_re = re.compile(r"^\s*asr_backend\s*=")
+    key_re = re.compile(rf"^\s*{re.escape(key)}\s*=")
 
     asr_start: int | None = None
     asr_end = len(lines)
@@ -109,7 +109,7 @@ def _upsert_asr_backend(config_file: Path, asr_backend: str):
         asr_end = idx
         break
 
-    new_line = f'asr_backend = "{asr_backend}"\n'
+    new_line = f'{key} = "{value}"\n'
 
     if asr_start is None:
         if lines and not lines[-1].endswith("\n"):
@@ -137,19 +137,49 @@ def _upsert_asr_backend(config_file: Path, asr_backend: str):
     config_file.write_text("".join(lines))
 
 
+def _detect_cuda() -> bool:
+    """Return True if CUDA is likely usable for inference."""
+    try:
+        import torch  # noqa: PLC0415
+
+        return torch.cuda.is_available()
+    except Exception:  # noqa: BLE001
+        pass
+    # Fallback: check for nvidia-smi
+    import shutil  # noqa: PLC0415
+
+    return shutil.which("nvidia-smi") is not None
+
+
+# Maps backend id -> config key for the provider/device setting.
+_BACKEND_PROVIDER_KEY: dict[str, str] = {
+    "sherpa": "sherpa_provider",
+    "nemo": "device",
+    "moonshine": "moonshine_provider",
+}
+
+
 def write_config(asr_backend: str, *, overwrite_existing: bool = False):
     """Write wizard selections to config.toml.
 
     By default, preserves existing config files. When ``overwrite_existing`` is
-    true, only ``[asr].asr_backend`` is updated in-place.
+    true, ``[asr].asr_backend`` and the provider/device key are updated
+    in-place.
+
+    Automatically sets CUDA as the provider when a GPU is detected.
     """
+    provider = "cuda" if _detect_cuda() else "cpu"
+    provider_key = _BACKEND_PROVIDER_KEY.get(asr_backend)
+
     config_file = Config.config_dir() / "config.toml"
     if config_file.exists():
         if not overwrite_existing:
             log.info("config.toml already exists; wizard will not overwrite it")
             return
-        _upsert_asr_backend(config_file, asr_backend)
-        log.info("Updated asr_backend in %s", config_file)
+        _upsert_asr_key(config_file, "asr_backend", asr_backend)
+        if provider_key:
+            _upsert_asr_key(config_file, provider_key, provider)
+        log.info("Updated asr config in %s (provider=%s)", config_file, provider)
         return
 
     lines = [
@@ -158,8 +188,10 @@ def write_config(asr_backend: str, *, overwrite_existing: bool = False):
         "[asr]\n",
         f'asr_backend = "{asr_backend}"\n',
     ]
+    if provider_key:
+        lines.append(f'{provider_key} = "{provider}"\n')
     config_file.write_text("".join(lines))
-    log.info("Wrote %s", config_file)
+    log.info("Wrote %s (provider=%s)", config_file, provider)
 
 
 def format_summary(asr_backend: str, keybind_id: str = "f9") -> str:

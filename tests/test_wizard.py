@@ -54,9 +54,12 @@ def test_write_marker_creates_file(tmp_path):
         assert (tmp_path / ".wizard-done").read_text() == "done\n"
 
 
-def test_write_config_creates_toml(tmp_path):
-    """write_config writes a valid config.toml with selected settings."""
-    with patch("shuvoice.wizard_state.Config") as mock_config:
+def test_write_config_creates_toml_with_cuda(tmp_path):
+    """write_config writes config.toml with CUDA provider when GPU detected."""
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=True),
+    ):
         mock_config.config_dir.return_value = tmp_path
         write_config("sherpa")
 
@@ -65,7 +68,36 @@ def test_write_config_creates_toml(tmp_path):
 
         content = config_file.read_text()
         assert 'asr_backend = "sherpa"' in content
-        assert "hotkey_backend" not in content
+        assert 'sherpa_provider = "cuda"' in content
+
+
+def test_write_config_creates_toml_without_cuda(tmp_path):
+    """write_config writes config.toml with CPU provider when no GPU."""
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        write_config("sherpa")
+
+        config_file = tmp_path / "config.toml"
+        content = config_file.read_text()
+        assert 'asr_backend = "sherpa"' in content
+        assert 'sherpa_provider = "cpu"' in content
+
+
+def test_write_config_nemo_sets_device(tmp_path):
+    """write_config sets device key for NeMo backend."""
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=True),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        write_config("nemo")
+
+        content = (tmp_path / "config.toml").read_text()
+        assert 'asr_backend = "nemo"' in content
+        assert 'device = "cuda"' in content
 
 
 def test_write_config_does_not_overwrite_existing(tmp_path):
@@ -73,7 +105,10 @@ def test_write_config_does_not_overwrite_existing(tmp_path):
     config_file = tmp_path / "config.toml"
     config_file.write_text("# existing config\n")
 
-    with patch("shuvoice.wizard_state.Config") as mock_config:
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
         mock_config.config_dir.return_value = tmp_path
         write_config("nemo")
 
@@ -87,6 +122,7 @@ def test_write_config_overwrite_updates_existing_asr_backend(tmp_path):
         """# existing config
 [asr]
 asr_backend = \"sherpa\"
+sherpa_provider = \"cpu\"
 model_name = \"nvidia/nemotron-speech-streaming-en-0.6b\"
 
 [typing]
@@ -94,12 +130,16 @@ output_mode = \"final_only\"
 """
     )
 
-    with patch("shuvoice.wizard_state.Config") as mock_config:
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=True),
+    ):
         mock_config.config_dir.return_value = tmp_path
         write_config("moonshine", overwrite_existing=True)
 
     content = config_file.read_text()
     assert 'asr_backend = "moonshine"' in content
+    assert 'moonshine_provider = "cuda"' in content
     assert 'model_name = "nvidia/nemotron-speech-streaming-en-0.6b"' in content
     assert '[typing]\noutput_mode = "final_only"' in content
 
@@ -114,13 +154,17 @@ output_mode = \"final_only\"
 """
     )
 
-    with patch("shuvoice.wizard_state.Config") as mock_config:
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
         mock_config.config_dir.return_value = tmp_path
         write_config("nemo", overwrite_existing=True)
 
     content = config_file.read_text()
     assert '[typing]\noutput_mode = "final_only"' in content
-    assert '[asr]\nasr_backend = "nemo"' in content
+    assert 'asr_backend = "nemo"' in content
+    assert 'device = "cpu"' in content
 
 
 # -- format_summary -----------------------------------------------------------
