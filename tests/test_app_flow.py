@@ -8,8 +8,12 @@ import pytest
 
 from shuvoice.utterance_state import _UtteranceState
 
-pytest.importorskip("gi")
-from shuvoice.app import ShuVoiceApp
+gi = pytest.importorskip("gi")
+try:
+    gi.require_version("Gtk", "4.0")
+except ValueError:
+    pytest.skip("GTK4 not available", allow_module_level=True)
+from shuvoice.app import ShuVoiceApp  # noqa: E402
 
 
 def test_recording_start_stop_transitions():
@@ -17,6 +21,7 @@ def test_recording_start_stop_transitions():
 
     app = SimpleNamespace(
         _recording=threading.Event(),
+        _processing=threading.Event(),
         _asr_thread_alive=True,
         _show_overlay_error=Mock(),
         _asr_lock=threading.Lock(),
@@ -32,6 +37,7 @@ def test_recording_start_stop_transitions():
     ShuVoiceApp._on_recording_start(app)
 
     assert app._recording.is_set()
+    assert not app._processing.is_set()
     assert app.audio.clear.call_count == 2
     app.asr.reset.assert_called_once()
     app.overlay.show.assert_called_once()
@@ -42,8 +48,26 @@ def test_recording_start_stop_transitions():
     ShuVoiceApp._on_recording_stop(app)
 
     assert not app._recording.is_set()
+    assert app._processing.is_set()
     app.overlay.set_state.assert_any_call("processing")
     assert tones == [True, False]
+
+
+def test_recording_status_reports_processing_between_stop_and_commit():
+    app = SimpleNamespace(
+        _asr_disabled=False,
+        _asr_thread_alive=True,
+        _recording=threading.Event(),
+        _processing=threading.Event(),
+    )
+
+    assert ShuVoiceApp._recording_status(app) == "idle"
+
+    app._processing.set()
+    assert ShuVoiceApp._recording_status(app) == "processing"
+
+    app._recording.set()
+    assert ShuVoiceApp._recording_status(app) == "recording"
 
 
 def test_begin_utterance_resets_asr_before_threshold_setup():
@@ -89,11 +113,13 @@ def test_flush_tail_silence_aborts_when_new_recording_already_started():
         _asr_disabled=False,
         _recording=recording,
         asr=SimpleNamespace(native_chunk_samples=1600, wants_raw_audio=True),
-        _make_flush_noise=lambda _n: None,
+        _make_flush_noise=lambda _n, escalation=1.0: None,
         _process_chunk_safe=process_chunk,
         _recover_asr_after_failure=Mock(),
         overlay=None,
         config=SimpleNamespace(output_mode="final_only"),
+        _FLUSH_NOISE_ESCALATION=ShuVoiceApp._FLUSH_NOISE_ESCALATION,
+        _FLUSH_NOISE_MAX_RMS=ShuVoiceApp._FLUSH_NOISE_MAX_RMS,
     )
 
     ShuVoiceApp._flush_tail_silence(app, state)
@@ -116,11 +142,13 @@ def test_flush_tail_silence_aborts_if_recording_restarts_mid_flush():
         _asr_disabled=False,
         _recording=recording,
         asr=SimpleNamespace(native_chunk_samples=1600, wants_raw_audio=True),
-        _make_flush_noise=lambda n: [0.0] * n,
+        _make_flush_noise=lambda n, escalation=1.0: [0.0] * n,
         _process_chunk_safe=process_chunk,
         _recover_asr_after_failure=Mock(),
         overlay=None,
         config=SimpleNamespace(output_mode="final_only"),
+        _FLUSH_NOISE_ESCALATION=ShuVoiceApp._FLUSH_NOISE_ESCALATION,
+        _FLUSH_NOISE_MAX_RMS=ShuVoiceApp._FLUSH_NOISE_MAX_RMS,
     )
 
     ShuVoiceApp._flush_tail_silence(app, state)
@@ -189,3 +217,125 @@ def test_handle_recording_stop_commits_when_speech_threshold_met():
     assert commit_calls == 1
     app.overlay.hide.assert_called_once()
     app.typer.reset.assert_called_once()
+
+
+def test_render_transcript_text_applies_replacements_and_capitalize():
+    app = SimpleNamespace(
+        config=SimpleNamespace(
+            text_replacements={"shove voice": "ShuVoice", "um": ""},
+            auto_capitalize=True,
+        )
+    )
+
+    rendered = ShuVoiceApp._render_transcript_text(app, "shove voice um")
+
+    assert rendered == "ShuVoice"
+
+
+def test_commit_utterance_uses_rendered_text_for_overlay_and_typing():
+    overlay = SimpleNamespace(set_text=Mock())
+    typer = SimpleNamespace(commit_final=Mock(), update_partial=Mock(), reset=Mock())
+    app = SimpleNamespace(
+        _render_transcript_text=lambda _text: "Rendered final",
+        overlay=overlay,
+        typer=typer,
+        config=SimpleNamespace(use_clipboard_for_final=True),
+    )
+    state = _UtteranceState(last_text="raw transcript")
+
+    ShuVoiceApp._commit_utterance(app, state)
+
+    overlay.set_text.assert_called_once_with("Rendered final")
+    typer.commit_final.assert_called_once_with("Rendered final")
+    typer.update_partial.assert_not_called()
+
+
+def test_commit_utterance_skips_when_rendered_text_is_empty():
+    overlay = SimpleNamespace(set_text=Mock())
+    typer = SimpleNamespace(commit_final=Mock(), update_partial=Mock(), reset=Mock())
+    app = SimpleNamespace(
+        _render_transcript_text=lambda _text: "",
+        overlay=overlay,
+        typer=typer,
+        config=SimpleNamespace(use_clipboard_for_final=True),
+    )
+    state = _UtteranceState(last_text="um")
+
+    ShuVoiceApp._commit_utterance(app, state)
+
+    overlay.set_text.assert_not_called()
+    typer.commit_final.assert_not_called()
+    typer.update_partial.assert_not_called()
+
+
+def test_remaining_splash_ms_is_zero_without_splash_timestamp():
+    assert ShuVoiceApp._remaining_splash_ms(None, 2.0, now_monotonic=10.0) == 0
+
+
+def test_remaining_splash_ms_counts_down_to_zero():
+    remaining = ShuVoiceApp._remaining_splash_ms(10.0, 2.0, now_monotonic=10.3)
+    assert 1690 <= remaining <= 1700
+
+    assert ShuVoiceApp._remaining_splash_ms(10.0, 2.0, now_monotonic=12.5) == 0
+
+
+def test_on_model_loaded_defers_activation_when_splash_is_too_fast(monkeypatch):
+    timeout_add = Mock()
+    monkeypatch.setattr("shuvoice.app.GLib.timeout_add", timeout_add)
+    monkeypatch.setattr("shuvoice.app.time.monotonic", lambda: 10.2)
+
+    app = SimpleNamespace(
+        _model_loaded=False,
+        _splash_started_monotonic=10.0,
+        _MIN_SPLASH_VISIBLE_SEC=2.0,
+        _complete_model_loaded_startup=Mock(),
+    )
+
+    result = ShuVoiceApp._on_model_loaded(app)
+
+    assert app._model_loaded is True
+    assert result == 0
+    timeout_add.assert_called_once()
+    delay_ms, callback = timeout_add.call_args.args
+    assert delay_ms == 2000
+    assert callback is app._complete_model_loaded_startup
+    app._complete_model_loaded_startup.assert_not_called()
+
+
+def test_complete_model_loaded_startup_dismisses_splash_and_finishes():
+    splash = SimpleNamespace(dismiss=Mock())
+    app = SimpleNamespace(
+        _splash=splash,
+        _splash_started_monotonic=10.0,
+        _finish_activation=Mock(),
+    )
+
+    result = ShuVoiceApp._complete_model_loaded_startup(app)
+
+    splash.dismiss.assert_called_once()
+    assert app._splash is None
+    assert app._splash_started_monotonic is None
+    app._finish_activation.assert_called_once()
+    assert result == 0
+
+
+def test_on_model_loaded_prefers_realized_splash_timestamp(monkeypatch):
+    timeout_add = Mock()
+    monkeypatch.setattr("shuvoice.app.GLib.timeout_add", timeout_add)
+    monkeypatch.setattr("shuvoice.app.time.monotonic", lambda: 11.0)
+
+    splash = SimpleNamespace(shown_monotonic=10.8)
+    app = SimpleNamespace(
+        _model_loaded=False,
+        _splash=splash,
+        _splash_started_monotonic=10.0,
+        _MIN_SPLASH_VISIBLE_SEC=2.0,
+        _complete_model_loaded_startup=Mock(),
+    )
+
+    ShuVoiceApp._on_model_loaded(app)
+
+    timeout_add.assert_called_once()
+    delay_ms, callback = timeout_add.call_args.args
+    assert delay_ms == 2000
+    assert callback is app._complete_model_loaded_startup

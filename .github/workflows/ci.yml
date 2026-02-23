@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master, main]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -21,6 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -33,15 +37,13 @@ jobs:
             gobject-introspection libgirepository1.0-dev libgirepository-2.0-dev libcairo2-dev pkg-config
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .[dev]
+        run: uv sync --dev
 
       - name: Ruff check
-        run: ruff check shuvoice/ tests/
+        run: uv run ruff check shuvoice/ tests/
 
       - name: Ruff format check
-        run: ruff format --check shuvoice/ tests/
+        run: uv run ruff format --check shuvoice/ tests/
 
   unit:
     runs-on: ubuntu-latest
@@ -52,6 +54,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
 
       - uses: actions/setup-python@v5
         with:
@@ -66,18 +72,20 @@ jobs:
             gobject-introspection libgirepository1.0-dev libgirepository-2.0-dev libcairo2-dev pkg-config
 
       - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .[dev]
+        run: uv sync --dev
 
       - name: Run headless-safe unit tests
-        run: pytest -m "not gui and not e2e and not integration and not gpu" -v
+        run: uv run pytest -m "not gui and not e2e and not integration and not gpu" -v
 
   e2e:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
 
       - uses: actions/setup-python@v5
         with:
@@ -92,12 +100,10 @@ jobs:
             gobject-introspection libgirepository1.0-dev libgirepository-2.0-dev libcairo2-dev pkg-config
 
       - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .[dev]
+        run: uv sync --dev
 
       - name: Run IPC end-to-end tests
-        run: pytest -m e2e -v
+        run: uv run pytest -m e2e -v
 
   gui-smoke:
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_gui == 'true' }}
@@ -105,6 +111,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
 
       - uses: actions/setup-python@v5
         with:
@@ -119,9 +129,7 @@ jobs:
             gobject-introspection libgirepository1.0-dev libgirepository-2.0-dev libcairo2-dev pkg-config
 
       - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .[dev]
+        run: uv sync --dev
 
       - name: Run GUI smoke tests
-        run: pytest -m gui -v
+        run: uv run pytest -m gui -v
