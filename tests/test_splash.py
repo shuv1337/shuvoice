@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -46,13 +46,14 @@ def test_splash_overlay_dismiss_clears_window():
 
 
 def test_splash_overlay_set_status_updates_label():
-    """_do_set_status updates the label text."""
+    """_do_set_status updates visual and accessibility label text."""
     splash = object.__new__(SplashOverlay)
     splash._status = MagicMock()
 
     splash._do_set_status("Downloading model\u2026")
 
     splash._status.set_text.assert_called_once_with("Downloading model\u2026")
+    splash._status.update_property.assert_called_once_with(ANY, ["Downloading model\u2026"])
 
 
 def test_splash_overlay_set_status_no_crash_when_dismissed():
