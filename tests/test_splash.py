@@ -8,8 +8,13 @@ import pytest
 
 pytestmark = pytest.mark.gui
 
-# splash.py requires gi (GTK4) at import time.
+# splash.py requires gi (GTK4) + Gtk4LayerShell at import time.
 gi = pytest.importorskip("gi")
+try:
+    gi.require_version("Gtk4LayerShell", "1.0")
+except ValueError:
+    pytest.skip("Gtk4LayerShell not available", allow_module_level=True)
+
 from shuvoice.splash import SplashOverlay, _find_logo
 
 
