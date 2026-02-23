@@ -64,8 +64,8 @@ Repository = "https://github.com/shuv1337/shuvoice"
 [tool.hatch.build.targets.wheel]
 packages = ["shuvoice"]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=8.0",
     "ruff>=0.9",
 ]

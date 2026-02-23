@@ -84,11 +84,12 @@ def test_perform_action_menu_calls_menu_handler():
 
 def test_action_menu_dispatches_selected_command():
     config = Config()
-    with patch("shuvoice.waybar._query_runtime_state", return_value=("idle", None, None)), patch(
-        "shuvoice.waybar._service_active_state", return_value="active"
-    ), patch("shuvoice.waybar._prompt_menu_choice", return_value="Relaunch setup wizard"), patch(
-        "shuvoice.waybar._perform_action"
-    ) as perform_action:
+    with (
+        patch("shuvoice.waybar._query_runtime_state", return_value=("idle", None, None)),
+        patch("shuvoice.waybar._service_active_state", return_value="active"),
+        patch("shuvoice.waybar._prompt_menu_choice", return_value="Relaunch setup wizard"),
+        patch("shuvoice.waybar._perform_action") as perform_action,
+    ):
         _action_menu(config, "shuvoice.service")
 
     perform_action.assert_called_once_with("launch-wizard", config, "shuvoice.service")
@@ -98,7 +99,9 @@ def test_action_menu_dispatches_selected_command():
 
 
 def test_config_info_lines_nemo():
-    cfg = Config(asr_backend="nemo", model_name="nvidia/nemotron-speech-streaming-en-0.6b", device="cuda")
+    cfg = Config(
+        asr_backend="nemo", model_name="nvidia/nemotron-speech-streaming-en-0.6b", device="cuda"
+    )
     lines = config_info_lines(cfg)
 
     assert any("NeMo" in line for line in lines)
@@ -130,7 +133,9 @@ def test_config_info_lines_sherpa_custom_model():
 
 
 def test_config_info_lines_moonshine():
-    cfg = Config(asr_backend="moonshine", moonshine_model_name="moonshine/tiny", moonshine_provider="cpu")
+    cfg = Config(
+        asr_backend="moonshine", moonshine_model_name="moonshine/tiny", moonshine_provider="cpu"
+    )
     lines = config_info_lines(cfg)
 
     assert any("Moonshine-ONNX" in line for line in lines)

@@ -32,7 +32,7 @@ Core pipeline + production hardening are implemented:
 |---|---|---|---|
 | `nemo` | `nvidia/nemotron-speech-streaming-en-0.6b` | `device` | `cuda` (default), `cpu` |
 | `sherpa` | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` (auto-downloaded by default) | `sherpa_provider` | `cpu` (default), `cuda` |
-| `moonshine` | `moonshine/base` (also `moonshine/tiny`) | N/A (CPU runtime) | `cpu` |
+| `moonshine` | `moonshine/tiny` (default, also `moonshine/base`) | `moonshine_provider` | `cpu` (default), `cuda` |
 
 Model locations in this repo/runtime:
 
@@ -141,7 +141,8 @@ python -m shuvoice --help
 python -m shuvoice --download-model
 python -m shuvoice --asr-backend nemo --right-context 13
 python -m shuvoice --asr-backend sherpa --sherpa-model-dir /path/to/model
-python -m shuvoice --asr-backend moonshine --moonshine-model-name moonshine/base
+python -m shuvoice --asr-backend moonshine --moonshine-model-name moonshine/tiny
+python -m shuvoice --asr-backend moonshine --moonshine-provider cuda
 python -m shuvoice --output-mode streaming_partial
 python -m shuvoice --list-audio-devices
 python -m shuvoice --audio-device 2 --input-gain 1.5
@@ -412,7 +413,7 @@ Use this to reproduce truncation/cut-out behavior with deterministic inputs.
 python scripts/tts_roundtrip.py --asr-backend nemo --device cuda
 
 # Moonshine backend
-python scripts/tts_roundtrip.py --asr-backend moonshine --moonshine-model-name moonshine/base
+python scripts/tts_roundtrip.py --asr-backend moonshine --moonshine-model-name moonshine/tiny
 
 # Use fixed phrase fixtures
 python scripts/tts_roundtrip.py \

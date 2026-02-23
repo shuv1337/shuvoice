@@ -12,11 +12,13 @@ min_speech_ms = 80
 
 [asr]
 asr_backend = "moonshine"
-moonshine_model_name = "moonshine/base"
+moonshine_model_name = "moonshine/tiny"
 moonshine_model_precision = "float"
 moonshine_chunk_ms = 100
 moonshine_max_window_sec = 5.0
-moonshine_max_tokens = 128
+moonshine_max_tokens = 64
+moonshine_provider = "cpu"
+moonshine_onnx_threads = 0
 
 [control]
 # Defaults to "$XDG_RUNTIME_DIR/shuvoice/control.sock" when unset.

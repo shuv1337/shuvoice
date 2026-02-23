@@ -41,6 +41,10 @@ def _apply_cli_overrides(args, config):
         config.moonshine_max_window_sec = float(args.moonshine_max_window_sec)
     if args.moonshine_max_tokens is not None:
         config.moonshine_max_tokens = int(args.moonshine_max_tokens)
+    if args.moonshine_provider:
+        config.moonshine_provider = args.moonshine_provider
+    if args.moonshine_onnx_threads is not None:
+        config.moonshine_onnx_threads = int(args.moonshine_onnx_threads)
     if args.audio_device is not None:
         config.audio_device = (
             int(args.audio_device) if str(args.audio_device).isdigit() else args.audio_device
@@ -149,8 +153,7 @@ def _run_welcome_wizard(*, force_reconfigure: bool = False) -> bool:
         CDLL("libgtk4-layer-shell.so")
     except OSError:
         print(
-            "ERROR: libgtk4-layer-shell.so not found.\n"
-            "Install it with: pacman -S gtk4-layer-shell",
+            "ERROR: libgtk4-layer-shell.so not found.\nInstall it with: pacman -S gtk4-layer-shell",
             file=sys.stderr,
         )
         return False
@@ -250,7 +253,7 @@ def main():
     parser.add_argument(
         "--moonshine-model-name",
         default=None,
-        help="Moonshine model name (for example: moonshine/base, moonshine/tiny)",
+        help="Moonshine model name (for example: moonshine/tiny, moonshine/base)",
     )
     parser.add_argument(
         "--moonshine-model-dir",
@@ -279,6 +282,18 @@ def main():
         type=int,
         default=None,
         help="Moonshine max generated tokens per decode (default: from config)",
+    )
+    parser.add_argument(
+        "--moonshine-provider",
+        choices=["cpu", "cuda"],
+        default=None,
+        help="Moonshine execution provider (default: from config)",
+    )
+    parser.add_argument(
+        "--moonshine-onnx-threads",
+        type=int,
+        default=None,
+        help="Moonshine ONNX intra-op threads (0 = auto, default: from config)",
     )
     parser.add_argument(
         "--audio-device",

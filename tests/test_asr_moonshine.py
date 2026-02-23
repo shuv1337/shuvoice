@@ -98,7 +98,9 @@ def test_guard_clause_loop_with_punctuation_variation():
 
 def test_guard_clause_loop_late_start():
     """Clause loop starting after 20+ normal words."""
-    prefix = "This is a completely normal preamble with many ordinary words that should be preserved. "
+    prefix = (
+        "This is a completely normal preamble with many ordinary words that should be preserved. "
+    )
     clause = "we need deterministic regression tests to catch regressions before they ship"
     text = prefix + " ".join([clause] * 4)
     result = MoonshineBackend._guard_repetition(text, audio_seconds=10.0)

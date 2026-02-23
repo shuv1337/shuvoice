@@ -219,8 +219,7 @@ def test_format_summary_with_moonshine():
 def test_format_hyprland_bind_no_modifier():
     result = format_hyprland_bind(", F9")
     assert result == (
-        "bind = , F9, exec, shuvoice --control start\n"
-        "bindr = , F9, exec, shuvoice --control stop"
+        "bind = , F9, exec, shuvoice --control start\nbindr = , F9, exec, shuvoice --control stop"
     )
 
 
@@ -267,8 +266,12 @@ def test_auto_add_hyprland_keybind_uses_resolved_binary(tmp_path):
     hypr_conf = hypr_dir / "hyprland.conf"
     hypr_conf.write_text("# user config\n")
 
-    with patch("shuvoice.wizard_state.Config") as mock_config, patch(
-        "shuvoice.wizard_state._resolve_shuvoice_command", return_value="/opt/shuvoice/bin/shuvoice"
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch(
+            "shuvoice.wizard_state._resolve_shuvoice_command",
+            return_value="/opt/shuvoice/bin/shuvoice",
+        ),
     ):
         mock_config.config_dir.return_value = tmp_path / "shuvoice"
         status, _message = auto_add_hyprland_keybind("insert")
@@ -328,8 +331,9 @@ def test_auto_add_hyprland_keybind_updates_existing_shuvoice_bindings_conf(tmp_p
     )
     hyprland_conf.write_text("source = ~/.config/hypr/bindings.conf\n")
 
-    with patch("shuvoice.wizard_state.Config") as mock_config, patch(
-        "shuvoice.wizard_state._resolve_shuvoice_command", return_value="/venv/bin/shuvoice"
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._resolve_shuvoice_command", return_value="/venv/bin/shuvoice"),
     ):
         mock_config.config_dir.return_value = tmp_path / "shuvoice"
         status, _message = auto_add_hyprland_keybind("right_ctrl")

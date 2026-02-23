@@ -313,7 +313,11 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
     if extra_stop_spec is not None:
         is_fully_configured = is_fully_configured and has_extra_stop
 
-    if is_fully_configured and not has_other_shuvoice_bind and shuvoice_binding_count == len(desired_lines):
+    if (
+        is_fully_configured
+        and not has_other_shuvoice_bind
+        and shuvoice_binding_count == len(desired_lines)
+    ):
         configured_in = next(
             (path for path, lines in shuvoice_lines.items() if lines),
             existing_files[0],
