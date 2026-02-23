@@ -144,6 +144,14 @@ class CaptionOverlay:
                 OVERLAY_STATE_PROCESSING: "Processing…",
                 OVERLAY_STATE_ERROR: "Error",
             }.get(state, state)
+
+            icon_name = {
+                OVERLAY_STATE_LISTENING: "microphone-sensitivity-high-symbolic",
+                OVERLAY_STATE_PROCESSING: "system-run-symbolic",
+                OVERLAY_STATE_ERROR: "dialog-error-symbolic",
+            }.get(state, "microphone-sensitivity-high-symbolic")
+
+            self._icon.set_from_icon_name(icon_name)
             self._icon.set_tooltip_text(status_text)
             self._icon.update_property([Gtk.AccessibleProperty.LABEL], [status_text])
 
