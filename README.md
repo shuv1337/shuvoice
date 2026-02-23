@@ -2,9 +2,9 @@
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/branding/shuvoice-variant-dark-lockup.png">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/branding/shuvoice-variant-light-lockup.png">
-    <img src="docs/assets/branding/shuvoice-variant-dark-lockup.png" alt="ShuVoice logo" width="760">
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/branding/shuvoice-variant-dark-lockup.png">
+    <source media="(prefers-color-scheme: light)" srcset="./docs/assets/branding/shuvoice-variant-light-lockup.png">
+    <img src="./docs/assets/branding/shuvoice-variant-dark-lockup.png" alt="ShuVoice logo" width="760">
   </picture>
 </p>
 
@@ -13,7 +13,7 @@ Streaming speech-to-text overlay for Hyprland with pluggable ASR backends.
 [![CI](https://github.com/shuv1337/shuvoice/actions/workflows/ci.yml/badge.svg)](https://github.com/shuv1337/shuvoice/actions/workflows/ci.yml)
 
 <p align="center">
-  <img src="docs/assets/screenshots/splash-overlay.png" alt="ShuVoice splash overlay on Hyprland" width="760">
+  <img src="./docs/assets/screenshots/splash-overlay.png" alt="ShuVoice splash overlay on Hyprland" width="760">
 </p>
 
 ## Status
@@ -76,6 +76,27 @@ sudo pacman -S \
   portaudio pipewire pipewire-audio pipewire-alsa \
   wtype wl-clipboard espeak-ng
 ```
+
+### Installation (AUR)
+
+ShuVoice is available on the AUR as [`shuvoice-git`](https://aur.archlinux.org/packages/shuvoice-git):
+
+```bash
+# Using yay
+yay -S shuvoice-git
+
+# Using paru
+paru -S shuvoice-git
+```
+
+After installation, enable the user service:
+
+```bash
+systemctl --user enable --now shuvoice.service
+```
+
+ASR backends are optional dependencies. Install your preferred backend package(s)
+or wheel(s) after install.
 
 ### Python packages
 
@@ -200,7 +221,7 @@ bindr = , Insert, exec, shuvoice --control stop
 ## Waybar module (tray-style status icon)
 
 <p align="center">
-  <img src="docs/assets/screenshots/waybar-tooltip.png" alt="Waybar tooltip showing backend, model, device, and keybind" width="420">
+  <img src="./docs/assets/screenshots/waybar-tooltip.png" alt="Waybar tooltip showing backend, model, device, and keybind" width="420">
 </p>
 
 ShuVoice ships a Waybar helper command (`shuvoice-waybar`) that outputs JSON
@@ -300,15 +321,15 @@ selected key is not already used (default presets include **Insert** and
 Wizard screens:
 
 <p align="center">
-  <img src="docs/assets/screenshots/wizard-welcome.png" alt="ShuVoice setup wizard welcome screen" width="760">
+  <img src="./docs/assets/screenshots/wizard-welcome.png" alt="ShuVoice setup wizard welcome screen" width="760">
 </p>
 
 <p align="center">
-  <img src="docs/assets/screenshots/wizard-asr-selection.png" alt="ShuVoice setup wizard ASR backend selection screen" width="760">
+  <img src="./docs/assets/screenshots/wizard-asr-selection.png" alt="ShuVoice setup wizard ASR backend selection screen" width="760">
 </p>
 
 <p align="center">
-  <img src="docs/assets/screenshots/wizard-keybind-selection.png" alt="ShuVoice setup wizard keybind selection screen" width="760">
+  <img src="./docs/assets/screenshots/wizard-keybind-selection.png" alt="ShuVoice setup wizard keybind selection screen" width="760">
 </p>
 
 (From Waybar, map an action to `shuvoice-waybar launch-wizard`.)
