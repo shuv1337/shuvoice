@@ -296,6 +296,20 @@ The wizard can optionally auto-add Hyprland push-to-talk binds when the
 selected key is not already used (default presets include **Insert** and
 **Right Control**).
 
+Wizard screens:
+
+<p align="center">
+  <img src="docs/assets/screenshots/wizard-welcome.png" alt="ShuVoice setup wizard welcome screen" width="760">
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/wizard-asr-selection.png" alt="ShuVoice setup wizard ASR backend selection screen" width="760">
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/wizard-keybind-selection.png" alt="ShuVoice setup wizard keybind selection screen" width="760">
+</p>
+
 (From Waybar, map an action to `shuvoice-waybar launch-wizard`.)
 
 Config file path:
