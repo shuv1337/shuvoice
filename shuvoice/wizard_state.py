@@ -73,6 +73,32 @@ def hyprland_config_path() -> Path:
     return Config.config_dir().parent / "hypr" / "hyprland.conf"
 
 
+def _bindings_config_path() -> Path:
+    return Config.config_dir().parent / "hypr" / "bindings.conf"
+
+
+def _hypr_config_candidates() -> list[Path]:
+    """Return user-writable Hypr config files in priority order.
+
+    Prefer ``bindings.conf`` when present (common in Omarchy-style setups),
+    then fall back to ``hyprland.conf``.
+    """
+    bindings = _bindings_config_path()
+    hyprland = hyprland_config_path()
+
+    candidates: list[Path] = []
+    if bindings.exists():
+        candidates.append(bindings)
+    if hyprland.exists() and hyprland != bindings:
+        candidates.append(hyprland)
+
+    if candidates:
+        return candidates
+
+    # If neither exists, default to the canonical main config path.
+    return [hyprland]
+
+
 def _hypr_key_spec_for_preset(keybind_id: str) -> str | None:
     return next((hk for kid, _label, hk, _desc in KEYBIND_PRESETS if kid == keybind_id), None)
 
@@ -144,13 +170,13 @@ def _parse_hypr_bind_line(line: str) -> tuple[str, str] | None:
 
 
 def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
-    """Try to add ShuVoice bind/bindr lines to Hyprland config.
+    """Try to add/update ShuVoice bind/bindr lines in Hyprland config.
 
     Returns ``(status, message)`` where ``status`` is one of:
-    - ``added``: one or more missing ShuVoice bind lines were appended.
-    - ``already_configured``: both start/stop lines already exist.
+    - ``added``: ShuVoice keybind lines were added/updated.
+    - ``already_configured``: desired start/stop lines already exist.
     - ``conflict``: selected key is already used by another command.
-    - ``missing_config``: Hyprland config file was not found.
+    - ``missing_config``: no Hyprland config file was found.
     - ``skipped_custom``: keybind preset has no concrete key spec.
     - ``error``: unexpected error while reading/writing config.
     """
@@ -162,76 +188,114 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
     if target_spec is None:
         return "error", f"Invalid Hyprland key spec for preset '{keybind_id}': {hypr_key_spec!r}"
 
-    config_file = hyprland_config_path()
-    if not config_file.exists():
-        return "missing_config", f"Hyprland config not found: {config_file}"
+    candidates = _hypr_config_candidates()
+    existing_files = [path for path in candidates if path.exists()]
+    if not existing_files:
+        return "missing_config", f"Hyprland config not found: {hyprland_config_path()}"
 
-    try:
-        content = config_file.read_text()
-    except Exception as exc:  # noqa: BLE001
-        return "error", f"Failed to read {config_file}: {exc}"
+    content_by_file: dict[Path, str] = {}
+    for config_file in existing_files:
+        try:
+            content_by_file[config_file] = config_file.read_text()
+        except Exception as exc:  # noqa: BLE001
+            return "error", f"Failed to read {config_file}: {exc}"
 
     shuvoice_command = _resolve_shuvoice_command()
     bind_text = format_hyprland_bind(hypr_key_spec, shuvoice_command=shuvoice_command)
     start_line, stop_line = bind_text.splitlines()
 
-    has_start = False
-    has_stop = False
-    conflict_lines: list[int] = []
+    has_target_start = False
+    has_target_stop = False
+    has_other_shuvoice_bind = False
 
-    for line_no, raw_line in enumerate(content.splitlines(), start=1):
-        parsed = _parse_hypr_bind_line(raw_line)
-        if parsed is None:
-            continue
+    conflict_files: dict[Path, list[int]] = {}
+    shuvoice_lines: dict[Path, list[int]] = {}
 
-        spec, command = parsed
-        if spec != target_spec:
-            continue
+    for config_file, content in content_by_file.items():
+        for line_no, raw_line in enumerate(content.splitlines(), start=1):
+            parsed = _parse_hypr_bind_line(raw_line)
+            if parsed is None:
+                continue
 
-        command_lc = command.lower()
-        is_shuvoice = "shuvoice" in command_lc and "--control" in command_lc
-        is_start = is_shuvoice and "--control start" in command_lc
-        is_stop = is_shuvoice and "--control stop" in command_lc
+            spec, command = parsed
+            command_lc = command.lower()
+            is_shuvoice = "shuvoice" in command_lc and "--control" in command_lc
+            is_start = is_shuvoice and "--control start" in command_lc
+            is_stop = is_shuvoice and "--control stop" in command_lc
 
-        if is_start:
-            has_start = True
-        elif is_stop:
-            has_stop = True
-        elif not is_shuvoice:
-            conflict_lines.append(line_no)
+            if spec == target_spec and not is_shuvoice:
+                conflict_files.setdefault(config_file, []).append(line_no)
 
-    if conflict_lines:
-        line_refs = ", ".join(str(n) for n in conflict_lines[:3])
-        if len(conflict_lines) > 3:
-            line_refs += ", ..."
+            if not is_shuvoice:
+                continue
+
+            if is_start or is_stop:
+                shuvoice_lines.setdefault(config_file, []).append(line_no)
+
+            if spec == target_spec and is_start:
+                has_target_start = True
+            elif spec == target_spec and is_stop:
+                has_target_stop = True
+            elif is_start or is_stop:
+                has_other_shuvoice_bind = True
+
+    if conflict_files:
+        parts: list[str] = []
+        for path, lines in conflict_files.items():
+            line_refs = ", ".join(str(n) for n in lines[:3])
+            if len(lines) > 3:
+                line_refs += ", ..."
+            parts.append(f"{path} line(s): {line_refs}")
         return (
             "conflict",
-            f"Key is already bound in {config_file} (line(s): {line_refs}); not adding ShuVoice binds.",
+            "Key is already bound; not adding ShuVoice binds (" + "; ".join(parts) + ").",
         )
 
-    missing_lines: list[str] = []
-    if not has_start:
-        missing_lines.append(start_line)
-    if not has_stop:
-        missing_lines.append(stop_line)
+    if has_target_start and has_target_stop and not has_other_shuvoice_bind:
+        configured_in = next(
+            (path for path, lines in shuvoice_lines.items() if lines),
+            existing_files[0],
+        )
+        return "already_configured", f"ShuVoice keybind already configured in {configured_in}."
 
-    if not missing_lines:
-        return "already_configured", f"ShuVoice keybind already configured in {config_file}."
-
-    append_parts: list[str] = []
-    if content and not content.endswith("\n"):
-        append_parts.append("\n")
-    if content.strip():
-        append_parts.append("\n")
-    append_parts.append("# Added by ShuVoice setup wizard\n")
-    append_parts.extend(f"{line}\n" for line in missing_lines)
+    destination = next(
+        (path for path, lines in shuvoice_lines.items() if lines),
+        existing_files[0],
+    )
 
     try:
-        config_file.write_text(content + "".join(append_parts))
-    except Exception as exc:  # noqa: BLE001
-        return "error", f"Failed to update {config_file}: {exc}"
+        for config_file, content in content_by_file.items():
+            original_lines = content.splitlines(keepends=True)
+            filtered_lines: list[str] = []
+            for raw_line in original_lines:
+                parsed = _parse_hypr_bind_line(raw_line)
+                if parsed is None:
+                    filtered_lines.append(raw_line)
+                    continue
+                _spec, command = parsed
+                command_lc = command.lower()
+                is_shuvoice_control = "shuvoice" in command_lc and "--control" in command_lc
+                is_start_or_stop = "--control start" in command_lc or "--control stop" in command_lc
+                if is_shuvoice_control and is_start_or_stop:
+                    continue
+                filtered_lines.append(raw_line)
 
-    return "added", f"Added ShuVoice keybind to {config_file}."
+            if config_file == destination:
+                if filtered_lines and not filtered_lines[-1].endswith("\n"):
+                    filtered_lines[-1] += "\n"
+                if filtered_lines and filtered_lines[-1].strip():
+                    filtered_lines.append("\n")
+                filtered_lines.append("# Added by ShuVoice setup wizard\n")
+                filtered_lines.append(f"{start_line}\n")
+                filtered_lines.append(f"{stop_line}\n")
+
+            new_content = "".join(filtered_lines)
+            if new_content != content:
+                config_file.write_text(new_content)
+    except Exception as exc:  # noqa: BLE001
+        return "error", f"Failed to update Hyprland config: {exc}"
+
+    return "added", f"Added ShuVoice keybind to {destination}."
 
 
 def needs_wizard() -> bool:

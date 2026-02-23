@@ -303,6 +303,37 @@ def test_auto_add_hyprland_keybind_skips_custom():
     assert status == "skipped_custom"
 
 
+def test_auto_add_hyprland_keybind_updates_existing_shuvoice_bindings_conf(tmp_path):
+    hypr_dir = tmp_path / "hypr"
+    hypr_dir.mkdir(parents=True)
+    bindings_conf = hypr_dir / "bindings.conf"
+    hyprland_conf = hypr_dir / "hyprland.conf"
+
+    bindings_conf.write_text(
+        "bind = , Insert, exec, /venv/bin/shuvoice --control start\n"
+        "bindr = , Insert, exec, /venv/bin/shuvoice --control stop\n"
+    )
+    hyprland_conf.write_text("source = ~/.config/hypr/bindings.conf\n")
+
+    with patch("shuvoice.wizard_state.Config") as mock_config, patch(
+        "shuvoice.wizard_state._resolve_shuvoice_command", return_value="/venv/bin/shuvoice"
+    ):
+        mock_config.config_dir.return_value = tmp_path / "shuvoice"
+        status, _message = auto_add_hyprland_keybind("right_ctrl")
+
+    assert status == "added"
+
+    bindings_text = bindings_conf.read_text()
+    assert "Insert" not in bindings_text
+    assert "Control_R" in bindings_text
+    assert "/venv/bin/shuvoice --control start" in bindings_text
+    assert "/venv/bin/shuvoice --control stop" in bindings_text
+
+    hyprland_text = hyprland_conf.read_text()
+    assert "--control start" not in hyprland_text
+    assert "--control stop" not in hyprland_text
+
+
 # -- KEYBIND_PRESETS ----------------------------------------------------------
 
 
