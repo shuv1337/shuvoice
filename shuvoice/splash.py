@@ -24,8 +24,16 @@ log = logging.getLogger(__name__)
 
 # Try to locate branding logo relative to the project root.
 _LOGO_CANDIDATES = [
-    Path(__file__).resolve().parent.parent / "docs" / "assets" / "branding" / "shuvoice-variant-dark-lockup.png",
-    Path(__file__).resolve().parent.parent / "docs" / "assets" / "branding" / "shuvoice-variant-dark-badge.png",
+    Path(__file__).resolve().parent.parent
+    / "docs"
+    / "assets"
+    / "branding"
+    / "shuvoice-variant-dark-lockup.png",
+    Path(__file__).resolve().parent.parent
+    / "docs"
+    / "assets"
+    / "branding"
+    / "shuvoice-variant-dark-badge.png",
 ]
 
 

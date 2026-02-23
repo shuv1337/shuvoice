@@ -38,8 +38,16 @@ from .wizard_state import (
 log = logging.getLogger(__name__)
 
 _LOGO_CANDIDATES = [
-    Path(__file__).resolve().parent.parent / "docs" / "assets" / "branding" / "shuvoice-variant-dark-lockup.png",
-    Path(__file__).resolve().parent.parent / "docs" / "assets" / "branding" / "shuvoice-variant-dark-badge.png",
+    Path(__file__).resolve().parent.parent
+    / "docs"
+    / "assets"
+    / "branding"
+    / "shuvoice-variant-dark-lockup.png",
+    Path(__file__).resolve().parent.parent
+    / "docs"
+    / "assets"
+    / "branding"
+    / "shuvoice-variant-dark-badge.png",
 ]
 
 # Re-export for __main__.py
@@ -183,8 +191,7 @@ class WelcomeWizard(Gtk.Application):
         page.append(sub)
 
         desc = Gtk.Label(
-            label="Let\u2019s set up a few things before you start.\n"
-            "This will only take a moment."
+            label="Let\u2019s set up a few things before you start.\nThis will only take a moment."
         )
         desc.add_css_class("wizard-desc")
         desc.set_halign(Gtk.Align.CENTER)
@@ -288,10 +295,7 @@ class WelcomeWizard(Gtk.Application):
             desc_label.set_halign(Gtk.Align.START)
             page.append(desc_label)
 
-        tip = Gtk.Label(
-            label="You can change the hotkey later in\n"
-            "~/.config/shuvoice/config.toml"
-        )
+        tip = Gtk.Label(label="You can change the hotkey later in\n~/.config/shuvoice/config.toml")
         tip.add_css_class("wizard-desc")
         tip.set_halign(Gtk.Align.CENTER)
         tip.set_justify(Gtk.Justification.CENTER)
@@ -367,9 +371,7 @@ class WelcomeWizard(Gtk.Application):
         """Refresh the summary label text based on current selections."""
         if not hasattr(self, "_summary_label") or self._summary_label is None:
             return
-        self._summary_label.set_text(
-            format_summary(self._asr_backend, self._hotkey_backend)
-        )
+        self._summary_label.set_text(format_summary(self._asr_backend, self._hotkey_backend))
 
     @staticmethod
     def _add_text_title(box: Gtk.Box, text: str):
