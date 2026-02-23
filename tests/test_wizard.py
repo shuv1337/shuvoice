@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from shuvoice.wizard_state import ASR_BACKENDS, format_summary, needs_wizard, write_config, write_marker
+from shuvoice.wizard_state import (
+    ASR_BACKENDS,
+    format_summary,
+    needs_wizard,
+    write_config,
+    write_marker,
+)
 
 
 def test_needs_wizard_true_on_fresh_install(tmp_path):

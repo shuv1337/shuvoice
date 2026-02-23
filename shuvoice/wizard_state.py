@@ -81,7 +81,4 @@ def format_summary(asr_backend: str) -> str:
         (label for bid, label, _ in ASR_BACKENDS if bid == asr_backend),
         asr_backend,
     )
-    return (
-        f"ASR backend:    {asr_name}\n"
-        "Push-to-talk:   Hyprland bind/bindr via shuvoice --control"
-    )
+    return f"ASR backend:    {asr_name}\nPush-to-talk:   Hyprland bind/bindr via shuvoice --control"
