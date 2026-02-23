@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from shuvoice.config import Config
-from shuvoice.waybar import build_waybar_payload, config_info_lines
+from shuvoice.waybar import _perform_action, build_waybar_payload, config_info_lines
 
 
 def test_build_waybar_payload_recording_state():
@@ -63,6 +65,14 @@ def test_build_waybar_payload_includes_config_lines_in_tooltip():
 def test_build_waybar_payload_without_config_lines_still_works():
     payload = build_waybar_payload("idle")
     assert "Left click:" in payload["tooltip"]
+    assert "Scroll down: relaunch setup wizard" in payload["tooltip"]
+
+
+def test_perform_action_launch_wizard_calls_detached_launcher():
+    with patch("shuvoice.waybar._launch_wizard_detached") as launch_wizard:
+        _perform_action("launch-wizard", Config(), "shuvoice.service")
+
+    launch_wizard.assert_called_once_with()
 
 
 # -- config_info_lines ---------------------------------------------------------
@@ -72,38 +82,38 @@ def test_config_info_lines_nemo():
     cfg = Config(asr_backend="nemo", model_name="nvidia/nemotron-speech-streaming-en-0.6b", device="cuda")
     lines = config_info_lines(cfg)
 
-    assert any("NeMo" in l for l in lines)
-    assert any("nemotron-speech-streaming-en-0.6b" in l for l in lines)
-    assert any("GPU (CUDA)" in l for l in lines)
+    assert any("NeMo" in line for line in lines)
+    assert any("nemotron-speech-streaming-en-0.6b" in line for line in lines)
+    assert any("GPU (CUDA)" in line for line in lines)
 
 
 def test_config_info_lines_nemo_cpu():
     cfg = Config(asr_backend="nemo", device="cpu")
     lines = config_info_lines(cfg)
 
-    assert any("CPU" in l for l in lines)
+    assert any("CPU" in line for line in lines)
 
 
 def test_config_info_lines_sherpa_default_model():
     cfg = Config(asr_backend="sherpa", sherpa_provider="cpu")
     lines = config_info_lines(cfg)
 
-    assert any("Sherpa-ONNX" in l for l in lines)
-    assert any("auto-download" in l for l in lines)
-    assert any("CPU" in l for l in lines)
+    assert any("Sherpa-ONNX" in line for line in lines)
+    assert any("auto-download" in line for line in lines)
+    assert any("CPU" in line for line in lines)
 
 
 def test_config_info_lines_sherpa_custom_model():
     cfg = Config(asr_backend="sherpa", sherpa_model_dir="/opt/models/my-zipformer")
     lines = config_info_lines(cfg)
 
-    assert any("my-zipformer" in l for l in lines)
+    assert any("my-zipformer" in line for line in lines)
 
 
 def test_config_info_lines_moonshine():
     cfg = Config(asr_backend="moonshine", moonshine_model_name="moonshine/tiny", moonshine_provider="cpu")
     lines = config_info_lines(cfg)
 
-    assert any("Moonshine-ONNX" in l for l in lines)
-    assert any("moonshine/tiny" in l for l in lines)
-    assert any("CPU" in l for l in lines)
+    assert any("Moonshine-ONNX" in line for line in lines)
+    assert any("moonshine/tiny" in line for line in lines)
+    assert any("CPU" in line for line in lines)

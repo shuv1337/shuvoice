@@ -8,6 +8,7 @@
     "on-click": "$HOME/repos/shuvoice/scripts/shuvoice-waybar.sh toggle-record",
     "on-click-middle": "$HOME/repos/shuvoice/scripts/shuvoice-waybar.sh service-toggle",
     "on-click-right": "$HOME/repos/shuvoice/scripts/shuvoice-waybar.sh service-restart",
+    "on-scroll-down": "$HOME/repos/shuvoice/scripts/shuvoice-waybar.sh launch-wizard",
     "tooltip": true
   }
 }

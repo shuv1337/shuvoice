@@ -7,6 +7,8 @@ do not depend on GTK / gi.
 from __future__ import annotations
 
 import logging
+import re
+from pathlib import Path
 
 from .config import Config
 
@@ -19,7 +21,7 @@ ASR_BACKENDS = [
     (
         "sherpa",
         "Sherpa-ONNX",
-        "Fast ONNX-based streaming ASR.  Works on CPU \u2014 no GPU needed.",
+        "Fast ONNX-based streaming ASR.  Works on CPU — no GPU needed.",
     ),
     (
         "nemo",
@@ -42,7 +44,7 @@ KEYBIND_PRESETS = [
         "super_v",
         "Super + V",
         "SUPER, V",
-        "Modifier combo \u2014 mnemonic for Voice.",
+        "Modifier combo — mnemonic for Voice.",
     ),
     (
         "scroll_lock",
@@ -82,15 +84,72 @@ def write_marker():
     marker.write_text("done\n")
 
 
-def write_config(asr_backend: str):
-    """Write a minimal config.toml with the wizard selections.
+def _upsert_asr_backend(config_file: Path, asr_backend: str):
+    """Update or insert ``asr_backend`` under ``[asr]`` in config.toml.
 
-    Does nothing if config.toml already exists to avoid clobbering
-    user edits.
+    Preserves unrelated lines/comments and only patches the relevant field.
+    """
+    lines = config_file.read_text().splitlines(keepends=True)
+
+    section_re = re.compile(r"^\s*\[([^\]]+)\]\s*$")
+    key_re = re.compile(r"^\s*asr_backend\s*=")
+
+    asr_start: int | None = None
+    asr_end = len(lines)
+
+    for idx, line in enumerate(lines):
+        match = section_re.match(line.strip())
+        if not match:
+            continue
+        section_name = match.group(1).strip().lower()
+        if asr_start is None:
+            if section_name == "asr":
+                asr_start = idx
+            continue
+        asr_end = idx
+        break
+
+    new_line = f'asr_backend = "{asr_backend}"\n'
+
+    if asr_start is None:
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] += "\n"
+        if lines and lines[-1].strip():
+            lines.append("\n")
+        lines.extend(["[asr]\n", new_line])
+        config_file.write_text("".join(lines))
+        return
+
+    for idx in range(asr_start + 1, asr_end):
+        stripped = lines[idx].lstrip()
+        if stripped.startswith("#"):
+            continue
+        if key_re.match(stripped):
+            indent = lines[idx][: len(lines[idx]) - len(lines[idx].lstrip())]
+            lines[idx] = f"{indent}{new_line}"
+            config_file.write_text("".join(lines))
+            return
+
+    insert_at = asr_start + 1
+    while insert_at < asr_end and lines[insert_at].strip().startswith("#"):
+        insert_at += 1
+    lines.insert(insert_at, new_line)
+    config_file.write_text("".join(lines))
+
+
+def write_config(asr_backend: str, *, overwrite_existing: bool = False):
+    """Write wizard selections to config.toml.
+
+    By default, preserves existing config files. When ``overwrite_existing`` is
+    true, only ``[asr].asr_backend`` is updated in-place.
     """
     config_file = Config.config_dir() / "config.toml"
     if config_file.exists():
-        log.info("config.toml already exists; wizard will not overwrite it")
+        if not overwrite_existing:
+            log.info("config.toml already exists; wizard will not overwrite it")
+            return
+        _upsert_asr_backend(config_file, asr_backend)
+        log.info("Updated asr_backend in %s", config_file)
         return
 
     lines = [
@@ -110,11 +169,7 @@ def format_summary(asr_backend: str, keybind_id: str = "f9") -> str:
         asr_backend,
     )
     keybind_label, hypr_key = next(
-        (
-            (label, hk)
-            for kid, label, hk, _ in KEYBIND_PRESETS
-            if kid == keybind_id
-        ),
+        ((label, hk) for kid, label, hk, _ in KEYBIND_PRESETS if kid == keybind_id),
         ("Custom", None),
     )
 
@@ -125,18 +180,22 @@ def format_summary(asr_backend: str, keybind_id: str = "f9") -> str:
 
     if hypr_key:
         bind_lines = format_hyprland_bind(hypr_key)
-        indented = "\n".join(f"  {l}" for l in bind_lines.splitlines())
-        lines.extend([
-            "",
-            "Add to ~/.config/hypr/hyprland.conf:",
-            "",
-            indented,
-        ])
+        indented = "\n".join(f"  {line}" for line in bind_lines.splitlines())
+        lines.extend(
+            [
+                "",
+                "Add to ~/.config/hypr/hyprland.conf:",
+                "",
+                indented,
+            ]
+        )
     else:
-        lines.extend([
-            "",
-            "Configure your keybind in ~/.config/hypr/hyprland.conf",
-            "See README.md for bind/bindr examples.",
-        ])
+        lines.extend(
+            [
+                "",
+                "Configure your keybind in ~/.config/hypr/hyprland.conf",
+                "See README.md for bind/bindr examples.",
+            ]
+        )
 
     return "\n".join(lines)

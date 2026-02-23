@@ -3,6 +3,7 @@
 Usage:
     shuvoice-waybar status
     shuvoice-waybar toggle-record
+    shuvoice-waybar launch-wizard
     shuvoice-waybar service-toggle
 
 The command prints Waybar JSON on stdout for all commands so Waybar can
@@ -233,6 +234,7 @@ def build_waybar_payload(
             "Left click: toggle recording",
             "Middle click: toggle service",
             "Right click: restart service",
+            "Scroll down: relaunch setup wizard",
         ]
     )
 
@@ -279,6 +281,19 @@ def _action_toggle_record(config: Config, service: str):
         send_control_command("start", config.control_socket, timeout=1.0)
 
 
+def _launch_wizard_detached():
+    try:
+        subprocess.Popen(
+            [sys.executable, "-m", "shuvoice", "--wizard"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as e:  # noqa: BLE001 - surfaced in Waybar tooltip
+        raise RuntimeError(f"failed to launch wizard: {e}") from e
+
+
 def _perform_action(command: str, config: Config, service: str):
     if command == "status":
         return
@@ -301,6 +316,10 @@ def _perform_action(command: str, config: Config, service: str):
             # Service may already be stopped; treat as no-op.
             if _service_active_state(service) == "active":
                 raise
+        return
+
+    if command == "launch-wizard":
+        _launch_wizard_detached()
         return
 
     if command == "service-start":
@@ -337,6 +356,7 @@ def main(argv: list[str] | None = None) -> int:
             "toggle-record",
             "start-record",
             "stop-record",
+            "launch-wizard",
             "service-start",
             "service-stop",
             "service-restart",

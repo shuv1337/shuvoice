@@ -143,6 +143,25 @@ def _run_preflight(config) -> bool:
     return ok
 
 
+def _run_welcome_wizard(*, force_reconfigure: bool = False) -> bool:
+    """Launch the setup wizard. Returns True when the wizard completed."""
+    try:
+        CDLL("libgtk4-layer-shell.so")
+    except OSError:
+        print(
+            "ERROR: libgtk4-layer-shell.so not found.\n"
+            "Install it with: pacman -S gtk4-layer-shell",
+            file=sys.stderr,
+        )
+        return False
+
+    from .wizard import WelcomeWizard
+
+    wizard = WelcomeWizard(force_reconfigure=force_reconfigure)
+    wizard.run(None)
+    return wizard.completed
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Streaming speech-to-text overlay for Hyprland",
@@ -161,6 +180,11 @@ def main():
         "--list-audio-devices",
         action="store_true",
         help="List audio input devices and exit",
+    )
+    parser.add_argument(
+        "--wizard",
+        action="store_true",
+        help="Launch the welcome/config wizard and exit",
     )
     parser.add_argument(
         "--control",
@@ -292,6 +316,10 @@ def main():
         format=log_format,
     )
 
+    if args.wizard:
+        _run_welcome_wizard(force_reconfigure=True)
+        return
+
     from .config import Config
 
     config = Config.load()
@@ -395,11 +423,7 @@ def main():
     from .wizard_state import needs_wizard
 
     if needs_wizard():
-        from .wizard import WelcomeWizard
-
-        wizard = WelcomeWizard()
-        wizard.run(None)
-        if not wizard.completed:
+        if not _run_welcome_wizard(force_reconfigure=False):
             return  # User closed wizard without finishing
         # Reload config so wizard selections take effect.
         config = Config.load()

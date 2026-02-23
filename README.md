@@ -210,6 +210,7 @@ Quick checks:
 ```bash
 shuvoice-waybar status
 shuvoice-waybar toggle-record
+shuvoice-waybar launch-wizard
 ```
 
 Waybar config example:
@@ -222,6 +223,7 @@ Waybar config example:
   "on-click": "shuvoice-waybar toggle-record",
   "on-click-middle": "shuvoice-waybar service-toggle",
   "on-click-right": "shuvoice-waybar service-restart",
+  "on-scroll-down": "shuvoice-waybar launch-wizard",
   "tooltip": true
 }
 ```
@@ -282,6 +284,14 @@ bg_opacity = 0.55
 ```
 
 ## Configuration
+
+Relaunch setup wizard at any time:
+
+```bash
+shuvoice --wizard
+```
+
+(From Waybar, map an action to `shuvoice-waybar launch-wizard`.)
 
 Config file path:
 

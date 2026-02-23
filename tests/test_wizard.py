@@ -80,6 +80,49 @@ def test_write_config_does_not_overwrite_existing(tmp_path):
         assert config_file.read_text() == "# existing config\n"
 
 
+def test_write_config_overwrite_updates_existing_asr_backend(tmp_path):
+    """Forced wizard reruns should update [asr].asr_backend in-place."""
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        """# existing config
+[asr]
+asr_backend = \"sherpa\"
+model_name = \"nvidia/nemotron-speech-streaming-en-0.6b\"
+
+[typing]
+output_mode = \"final_only\"
+"""
+    )
+
+    with patch("shuvoice.wizard_state.Config") as mock_config:
+        mock_config.config_dir.return_value = tmp_path
+        write_config("moonshine", overwrite_existing=True)
+
+    content = config_file.read_text()
+    assert 'asr_backend = "moonshine"' in content
+    assert 'model_name = "nvidia/nemotron-speech-streaming-en-0.6b"' in content
+    assert '[typing]\noutput_mode = "final_only"' in content
+
+
+def test_write_config_overwrite_adds_asr_section_if_missing(tmp_path):
+    """Forced wizard reruns should add [asr] if an old config lacks it."""
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        """# existing config
+[typing]
+output_mode = \"final_only\"
+"""
+    )
+
+    with patch("shuvoice.wizard_state.Config") as mock_config:
+        mock_config.config_dir.return_value = tmp_path
+        write_config("nemo", overwrite_existing=True)
+
+    content = config_file.read_text()
+    assert '[typing]\noutput_mode = "final_only"' in content
+    assert '[asr]\nasr_backend = "nemo"' in content
+
+
 # -- format_summary -----------------------------------------------------------
 
 

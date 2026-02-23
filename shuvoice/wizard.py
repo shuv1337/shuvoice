@@ -66,9 +66,10 @@ def _find_logo() -> Path | None:
 class WelcomeWizard(Gtk.Application):
     """First-run guided setup wizard."""
 
-    def __init__(self):
+    def __init__(self, *, force_reconfigure: bool = False):
         super().__init__(application_id="io.github.shuv1337.shuvoice.wizard")
         self.completed = False
+        self._force_reconfigure = force_reconfigure
         self._asr_backend = "sherpa"
         self._keybind = "f9"
         self._win: Gtk.Window | None = None
@@ -372,7 +373,7 @@ class WelcomeWizard(Gtk.Application):
         )
         if hypr_key:
             bind_text = format_hyprland_bind(hypr_key)
-            indented = "\n".join(f"  {l}" for l in bind_text.splitlines())
+            indented = "\n".join(f"  {line}" for line in bind_text.splitlines())
             text = f"Add to ~/.config/hypr/hyprland.conf:\n\n{indented}"
         else:
             text = (
@@ -409,7 +410,10 @@ class WelcomeWizard(Gtk.Application):
         Gtk.Application.do_shutdown(self)
 
     def _on_finish(self, _button):
-        write_config(self._asr_backend)
+        write_config(
+            self._asr_backend,
+            overwrite_existing=getattr(self, "_force_reconfigure", False),
+        )
         write_marker()
         self.completed = True
         log.info("Wizard completed: asr_backend=%s keybind=%s", self._asr_backend, self._keybind)

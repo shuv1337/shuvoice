@@ -56,7 +56,7 @@ def test_on_finish_writes_config_releases_window_and_quits():
     ) as write_marker:
         WelcomeWizard._on_finish(wizard, None)
 
-    write_config.assert_called_once_with("moonshine")
+    write_config.assert_called_once_with("moonshine", overwrite_existing=False)
     write_marker.assert_called_once()
     wizard._release_input_and_destroy_window.assert_called_once()
     wizard.quit.assert_called_once()
