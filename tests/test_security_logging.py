@@ -1,125 +1,78 @@
-import logging
-from unittest.mock import MagicMock
+from __future__ import annotations
 
+import logging
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import numpy as np
 import pytest
 
-from shuvoice.app import ShuVoiceApp
 from shuvoice.asr_moonshine import MoonshineBackend
-from shuvoice.config import Config
 from shuvoice.utterance_state import _UtteranceState
+
+pytest.importorskip("gi")
+from shuvoice.app import ShuVoiceApp
+
+
+def _state_with_chunk(*, last_text: str = "") -> _UtteranceState:
+    state = _UtteranceState(last_text=last_text)
+    state.reset(rms_threshold=0.01)
+    state.last_text = last_text
+    state.add_chunk(np.zeros(1000, dtype=np.float32))
+    return state
 
 
 @pytest.fixture
-def app():
-    config = Config()
-    # Mock dependencies to avoid side effects
-    with pytest.MonkeyPatch.context() as m:
-        m.setattr("shuvoice.app.create_backend", MagicMock())
-        m.setattr("shuvoice.app.AudioCapture", MagicMock())
-        m.setattr("shuvoice.app.StreamingTyper", MagicMock())
-        m.setattr("shuvoice.app.ControlServer", MagicMock())
-        m.setattr("shuvoice.app.HotkeyListener", MagicMock())
-
-        # Instantiate app
-        app = ShuVoiceApp(config)
-        # Mock ASR backend
-        app.asr = MagicMock()
-        app.asr.native_chunk_samples = 1000
-        app.asr.wants_raw_audio = False
-        app.asr.process_chunk.return_value = "Sensitive Password"
-
-        # Mock audio queue
-        app.audio = MagicMock()
-        app.audio.queue.qsize.return_value = 0
-
-        return app
+def app_stub() -> SimpleNamespace:
+    return SimpleNamespace(
+        asr=SimpleNamespace(native_chunk_samples=1000, wants_raw_audio=True, debug_step_num=1),
+        audio=SimpleNamespace(queue=SimpleNamespace(qsize=lambda: 0)),
+        _process_chunk_safe=Mock(return_value="Sensitive Password"),
+        _recover_asr_after_failure=Mock(),
+        _render_transcript_text=lambda text: text,
+        overlay=None,
+        config=SimpleNamespace(output_mode="final_only", use_clipboard_for_final=True),
+        typer=SimpleNamespace(update_partial=Mock(), commit_final=Mock(), reset=Mock()),
+    )
 
 
-def test_no_sensitive_data_in_debug_logs(app, caplog):
-    """Verify that transcribed text is not logged in DEBUG logs."""
-    caplog.set_level(logging.DEBUG)
+def test_transcribe_logs_length_not_raw_text(app_stub: SimpleNamespace, caplog):
+    caplog.set_level(logging.DEBUG, logger="shuvoice.app")
+    state = _state_with_chunk()
 
-    state = _UtteranceState()
-    state.reset(rms_threshold=0.01)
-    # Mock some audio data
-    import numpy as np
+    ShuVoiceApp._transcribe_native_chunk(app_stub, state, "test context")
 
-    chunk = np.zeros(1000, dtype=np.float32)
-    state.add_chunk(chunk)
-
-    # Run _transcribe_native_chunk
-    # We need to simulate enough data for a chunk
-
-    # We mock _process_chunk_safe to return sensitive text
-    app._process_chunk_safe = MagicMock(return_value="Sensitive Password")
-
-    # We call _transcribe_native_chunk
-    app._transcribe_native_chunk(state, "test context")
-
-    # Check logs
-    for record in caplog.records:
-        if "Sensitive Password" in record.message:
-            pytest.fail(f"Sensitive data found in log: {record.message}")
-
-    # Also check if length is logged instead
-    for record in caplog.records:
-        if "raw_text_len=" in record.message or "text_len" in record.message:
-            pass
-        # Or checking if it mentions length
-        if "raw_text=" in record.message:
-            # If it says raw_text=..., it might be the old format.
-            # We want to ensure it DOESN'T verify sensitive text, which we did above.
-            pass
+    messages = [record.getMessage() for record in caplog.records]
+    assert all("Sensitive Password" not in message for message in messages)
+    assert any("raw_text_len=" in message for message in messages)
 
 
-def test_no_sensitive_data_in_transcript_update_logs(app, caplog):
-    caplog.set_level(logging.DEBUG)
-    state = _UtteranceState()
-    state.last_text = "Old Text"
+def test_commit_logs_length_not_final_text(caplog):
+    caplog.set_level(logging.INFO, logger="shuvoice.app")
 
-    app._process_chunk_safe = MagicMock(return_value="New Sensitive Text")
+    app = SimpleNamespace(
+        _render_transcript_text=lambda text: text,
+        overlay=None,
+        typer=SimpleNamespace(commit_final=Mock(), update_partial=Mock(), reset=Mock()),
+        config=SimpleNamespace(use_clipboard_for_final=True),
+    )
+    state = _UtteranceState(last_text="Final Sensitive Text")
 
-    # Simulate update
-    import numpy as np
+    ShuVoiceApp._commit_utterance(app, state)
 
-    chunk = np.zeros(1000, dtype=np.float32)
-    state.add_chunk(chunk)
-
-    app._transcribe_native_chunk(state, "test context")
-
-    for record in caplog.records:
-        if "New Sensitive Text" in record.message:
-            pytest.fail(f"Sensitive data found in log: {record.message}")
+    messages = [record.getMessage() for record in caplog.records]
+    assert all("Final Sensitive Text" not in message for message in messages)
+    assert any("Final: len=" in message for message in messages)
 
 
-def test_no_sensitive_data_in_final_logs(app, caplog):
-    caplog.set_level(logging.INFO)
-    state = _UtteranceState()
-    state.last_text = "Final Sensitive Text"
+def test_moonshine_repetition_logs_pattern_size_not_words(caplog):
+    caplog.set_level(logging.DEBUG, logger="shuvoice.asr_moonshine")
 
-    # Run _commit_utterance
-    app._commit_utterance(state)
+    secret = "SecretPassword"
+    text = (f"{secret} foo " * 5).strip()
 
-    for record in caplog.records:
-        if "Final Sensitive Text" in record.message:
-            pytest.fail(f"Sensitive data found in log: {record.message}")
+    MoonshineBackend._guard_repetition(text, audio_seconds=5.0)
 
-
-def test_no_sensitive_data_in_moonshine_repetition_guard(caplog):
-    """Verify that Moonshine backend doesn't log sensitive patterns."""
-    caplog.set_level(logging.DEBUG)
-
-    # Create a dummy sentence with repetition
-    # "secret secret secret secret" (4 times)
-    sensitive_word = "secret"
-    text = f"{sensitive_word} " * 5
-
-    # Call _guard_repetition directly
-    MoonshineBackend._guard_repetition(text, audio_seconds=1.0)
-
-    for record in caplog.records:
-        if sensitive_word in record.message:
-             pytest.fail(f"Sensitive data found in Moonshine logs: {record.message}")
-        if "Repetition guard: pattern" in record.message:
-            if "len=" not in record.message:
-                pytest.fail(f"Moonshine log missing redaction: {record.message}")
+    messages = [record.getMessage() for record in caplog.records]
+    assert all(secret not in message for message in messages)
+    assert any("word pattern repeated" in message for message in messages)

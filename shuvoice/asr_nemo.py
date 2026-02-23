@@ -105,9 +105,7 @@ class NemoBackend(ASRBackend):
                 import nemo.collections.asr as nemo_asr
             except Exception as e:
                 raise RuntimeError(
-                    "NeMo ASR is required for ASR. "
-                    "Install nemo-toolkit[asr] or "
-                    "pip install git+https://github.com/NVIDIA/NeMo.git@main#egg=nemo_toolkit[asr]"
+                    "NeMo ASR is required for ASR. Install with: uv sync --extra asr-nemo"
                 ) from e
             self._nemo_asr = nemo_asr
 

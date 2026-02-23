@@ -1,0 +1,27 @@
+# ShuVoice example: Moonshine ONNX (CPU)
+
+[audio]
+sample_rate = 16000
+chunk_ms = 100
+fallback_sample_rate = 48000
+# Moonshine consumes raw audio; small boost can help quieter mics.
+input_gain = 1.3
+silence_rms_threshold = 0.008
+silence_rms_multiplier = 1.8
+min_speech_ms = 80
+
+[asr]
+asr_backend = "moonshine"
+moonshine_model_name = "moonshine/base"
+moonshine_model_precision = "float"
+moonshine_chunk_ms = 100
+moonshine_max_window_sec = 5.0
+moonshine_max_tokens = 128
+
+[control]
+# Defaults to "$XDG_RUNTIME_DIR/shuvoice/control.sock" when unset.
+# control_socket = "/path/to/control.sock"
+
+[typing]
+output_mode = "final_only"
+use_clipboard_for_final = true

@@ -6,7 +6,7 @@ instance can be controlled by short-lived CLI invocations, e.g.:
   shuvoice --control start
   shuvoice --control stop
 
-Intended for Hyprland fallback hotkeys when evdev access is unavailable.
+Intended for Hyprland push-to-talk control via bind/bindr commands.
 """
 
 from __future__ import annotations

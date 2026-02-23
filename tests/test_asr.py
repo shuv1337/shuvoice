@@ -163,12 +163,36 @@ def test_moonshine_dependency_errors_when_missing(monkeypatch):
     assert any("Moonshine ONNX" in err for err in errors)
 
 
-def test_sherpa_load_requires_model_dir():
+def test_sherpa_auto_downloads_default_model_when_model_dir_missing(
+    monkeypatch,
+    tmp_path: Path,
+):
     cfg = Config(asr_backend="sherpa", sherpa_model_dir=None)
     backend = create_backend("sherpa", cfg)
 
-    with pytest.raises(ValueError, match="sherpa_model_dir"):
-        backend.load()
+    sherpa_cls = get_backend_class("sherpa")
+    auto_dir = tmp_path / "auto-sherpa-model"
+
+    monkeypatch.setattr(
+        sherpa_cls,
+        "_default_model_dir",
+        classmethod(lambda cls, model_name=None: auto_dir),
+    )
+
+    def fake_download_model(cls, model_name=None, model_dir=None, **_):
+        target = Path(model_dir).expanduser() if model_dir else auto_dir
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "tokens.txt").write_text("<blk>\na\n")
+        for name in ("encoder.onnx", "decoder.onnx", "joiner.onnx"):
+            (target / name).write_bytes(b"onnx")
+
+    monkeypatch.setattr(sherpa_cls, "download_model", classmethod(fake_download_model))
+
+    backend._validate_runtime_config()
+
+    assert cfg.sherpa_model_dir == str(auto_dir)
+    assert backend._model_files is not None
+    assert backend._model_files["tokens"] == auto_dir / "tokens.txt"
 
 
 def test_sherpa_load_requires_transducer_artifacts(tmp_path: Path):
@@ -177,7 +201,7 @@ def test_sherpa_load_requires_transducer_artifacts(tmp_path: Path):
     cfg = Config(asr_backend="sherpa", sherpa_model_dir=str(tmp_path))
     backend = create_backend("sherpa", cfg)
 
-    with pytest.raises(ValueError, match="encoder"):
+    with pytest.raises(ValueError, match="missing required artifacts"):
         backend.load()
 
 

@@ -35,6 +35,14 @@ def _require_roundtrip_enabled():
         pytest.skip("Set SHUVOICE_RUN_ROUNDTRIP=1 to run backend roundtrip regression tests")
 
 
+def _roundtrip_python() -> str:
+    override = _env("SHUVOICE_ROUNDTRIP_PYTHON", "")
+    if override:
+        return override
+
+    return sys.executable
+
+
 @pytest.mark.gpu
 def test_manual_phrase_roundtrip_regression(tmp_path: Path):
     _require_roundtrip_enabled()
@@ -65,7 +73,7 @@ def test_manual_phrase_roundtrip_regression(tmp_path: Path):
 
     output_dir = tmp_path / "roundtrip-output"
     cmd = [
-        sys.executable,
+        _roundtrip_python(),
         "scripts/tts_roundtrip.py",
         "--phrases-file",
         str(phrases_file),

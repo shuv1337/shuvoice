@@ -8,8 +8,49 @@ import logging
 import os
 import shutil
 import sys
+import time
 from ctypes import CDLL
 from typing import Callable
+
+
+def _apply_cli_overrides(args, config):
+    """Apply CLI argument overrides onto a Config instance."""
+    if args.asr_backend:
+        config.asr_backend = args.asr_backend
+    if args.device:
+        config.device = args.device
+    if args.right_context is not None:
+        config.right_context = int(args.right_context)
+    if args.sherpa_model_dir is not None:
+        config.sherpa_model_dir = args.sherpa_model_dir
+    if args.sherpa_provider:
+        config.sherpa_provider = args.sherpa_provider
+    if args.sherpa_num_threads is not None:
+        config.sherpa_num_threads = int(args.sherpa_num_threads)
+    if args.sherpa_chunk_ms is not None:
+        config.sherpa_chunk_ms = int(args.sherpa_chunk_ms)
+    if args.moonshine_model_name is not None:
+        config.moonshine_model_name = args.moonshine_model_name
+    if args.moonshine_model_dir is not None:
+        config.moonshine_model_dir = args.moonshine_model_dir
+    if args.moonshine_model_precision is not None:
+        config.moonshine_model_precision = args.moonshine_model_precision
+    if args.moonshine_chunk_ms is not None:
+        config.moonshine_chunk_ms = int(args.moonshine_chunk_ms)
+    if args.moonshine_max_window_sec is not None:
+        config.moonshine_max_window_sec = float(args.moonshine_max_window_sec)
+    if args.moonshine_max_tokens is not None:
+        config.moonshine_max_tokens = int(args.moonshine_max_tokens)
+    if args.audio_device is not None:
+        config.audio_device = (
+            int(args.audio_device) if str(args.audio_device).isdigit() else args.audio_device
+        )
+    if args.input_gain is not None:
+        config.input_gain = float(args.input_gain)
+    if args.output_mode:
+        config.output_mode = args.output_mode
+    if args.control_socket:
+        config.control_socket = args.control_socket
 
 
 def _run_preflight(config) -> bool:
@@ -49,21 +90,6 @@ def _run_preflight(config) -> bool:
         CDLL("libgtk4-layer-shell.so")
         return "libgtk4-layer-shell.so loaded"
 
-    def check_hotkey_backend() -> str:
-        allowed = {"evdev", "ipc"}
-        if config.hotkey_backend not in allowed:
-            raise RuntimeError(
-                f"Invalid hotkey_backend '{config.hotkey_backend}'. Allowed: {sorted(allowed)}"
-            )
-        return config.hotkey_backend
-
-    def check_hotkey() -> str:
-        from evdev import ecodes
-
-        if not hasattr(ecodes, config.hotkey):
-            raise RuntimeError(f"Unknown hotkey: {config.hotkey}")
-        return config.hotkey
-
     def check_output_mode() -> str:
         allowed = {"final_only", "streaming_partial"}
         if config.output_mode not in allowed:
@@ -94,7 +120,6 @@ def _run_preflight(config) -> bool:
     add_check("Python version", check_python)
     add_check("Import numpy", check_import("numpy"))
     add_check("Import sounddevice", check_import("sounddevice"))
-    add_check("Import evdev", check_import("evdev"))
     add_check("Import gi", check_import("gi"))
     add_check("Audio input device", check_audio_device)
     add_check("ASR dependencies", check_asr_stack)
@@ -105,13 +130,6 @@ def _run_preflight(config) -> bool:
     else:
         checks.append(("wl-paste binary", True, "skipped (preserve_clipboard=false)"))
     add_check("gtk4-layer-shell library", check_layer_shell)
-    add_check("Hotkey backend", check_hotkey_backend)
-
-    if config.hotkey_backend == "evdev":
-        add_check("Configured hotkey", check_hotkey)
-    else:
-        checks.append(("Configured hotkey", True, "skipped (backend=ipc)"))
-
     add_check("Output mode", check_output_mode)
 
     print("ShuVoice preflight checks")
@@ -154,6 +172,15 @@ def main():
         "--control-socket",
         default=None,
         help="Override control socket path (default: $XDG_RUNTIME_DIR/shuvoice/control.sock)",
+    )
+    parser.add_argument(
+        "--control-wait-sec",
+        type=float,
+        default=2.0,
+        help=(
+            "When sending stop/toggle, wait up to this many seconds for post-stop "
+            "processing to finish (0 disables wait)."
+        ),
     )
     parser.add_argument(
         "--asr-backend",
@@ -241,27 +268,6 @@ def main():
         help="Multiply microphone PCM by this factor before ASR (default: from config)",
     )
     parser.add_argument(
-        "--hotkey-backend",
-        choices=["evdev", "ipc"],
-        default=None,
-        help="Hotkey backend: evdev or ipc (default: from config)",
-    )
-    parser.add_argument(
-        "--hotkey",
-        default=None,
-        help="Hotkey name, e.g. KEY_RIGHTCTRL (default: from config)",
-    )
-    parser.add_argument(
-        "--hotkey-device",
-        default=None,
-        help="Explicit /dev/input/eventX path for hotkey capture",
-    )
-    parser.add_argument(
-        "--hotkey-listen-all-devices",
-        action="store_true",
-        help="Listen to all matching keyboard devices (can cause duplicate hotkey events)",
-    )
-    parser.add_argument(
         "--output-mode",
         choices=["final_only", "streaming_partial"],
         default=None,
@@ -289,52 +295,7 @@ def main():
     from .config import Config
 
     config = Config.load()
-
-    if args.asr_backend:
-        config.asr_backend = args.asr_backend
-    if args.device:
-        config.device = args.device
-    if args.right_context is not None:
-        config.right_context = int(args.right_context)
-    if args.sherpa_model_dir is not None:
-        config.sherpa_model_dir = args.sherpa_model_dir
-    if args.sherpa_provider:
-        config.sherpa_provider = args.sherpa_provider
-    if args.sherpa_num_threads is not None:
-        config.sherpa_num_threads = int(args.sherpa_num_threads)
-    if args.sherpa_chunk_ms is not None:
-        config.sherpa_chunk_ms = int(args.sherpa_chunk_ms)
-    if args.moonshine_model_name is not None:
-        config.moonshine_model_name = args.moonshine_model_name
-    if args.moonshine_model_dir is not None:
-        config.moonshine_model_dir = args.moonshine_model_dir
-    if args.moonshine_model_precision is not None:
-        config.moonshine_model_precision = args.moonshine_model_precision
-    if args.moonshine_chunk_ms is not None:
-        config.moonshine_chunk_ms = int(args.moonshine_chunk_ms)
-    if args.moonshine_max_window_sec is not None:
-        config.moonshine_max_window_sec = float(args.moonshine_max_window_sec)
-    if args.moonshine_max_tokens is not None:
-        config.moonshine_max_tokens = int(args.moonshine_max_tokens)
-    if args.audio_device is not None:
-        # Accept numeric indexes or raw device names
-        config.audio_device = (
-            int(args.audio_device) if str(args.audio_device).isdigit() else args.audio_device
-        )
-    if args.input_gain is not None:
-        config.input_gain = float(args.input_gain)
-    if args.hotkey_backend:
-        config.hotkey_backend = args.hotkey_backend
-    if args.hotkey:
-        config.hotkey = args.hotkey
-    if args.hotkey_device:
-        config.hotkey_device = args.hotkey_device
-    if args.hotkey_listen_all_devices:
-        config.hotkey_listen_all_devices = True
-    if args.output_mode:
-        config.output_mode = args.output_mode
-    if args.control_socket:
-        config.control_socket = args.control_socket
+    _apply_cli_overrides(args, config)
 
     try:
         config.__post_init__()
@@ -364,8 +325,31 @@ def main():
     if args.control:
         from .control import send_control_command
 
+        status_before = ""
+        if args.control == "toggle" and args.control_wait_sec > 0:
+            try:
+                status_before = send_control_command("status", config.control_socket)
+            except Exception:
+                status_before = ""
+
         try:
             response = send_control_command(args.control, config.control_socket)
+
+            should_wait = False
+            if args.control_wait_sec > 0:
+                if args.control == "stop":
+                    should_wait = True
+                elif args.control == "toggle":
+                    should_wait = status_before.strip().endswith("recording")
+
+            if should_wait:
+                deadline = time.monotonic() + float(args.control_wait_sec)
+                while time.monotonic() < deadline:
+                    status = send_control_command("status", config.control_socket)
+                    state = status[3:].strip() if status.startswith("OK ") else status.strip()
+                    if state != "processing":
+                        break
+                    time.sleep(0.05)
         except Exception as e:
             print(f"ERROR: {e}", file=sys.stderr)
             sys.exit(1)
@@ -382,7 +366,12 @@ def main():
         backend_cls = get_backend_class(config.asr_backend)
 
         try:
-            kwargs = {"model_name": config.model_name} if config.asr_backend == "nemo" else {}
+            kwargs: dict[str, object] = {}
+            if config.asr_backend == "nemo":
+                kwargs["model_name"] = config.model_name
+            elif config.asr_backend == "sherpa":
+                kwargs["model_dir"] = config.sherpa_model_dir
+
             backend_cls.download_model(**kwargs)
         except (RuntimeError, ValueError, NotImplementedError) as e:
             print(f"ERROR: {e}", file=sys.stderr)
@@ -401,13 +390,33 @@ def main():
         )
         sys.exit(1)
 
+    # Welcome wizard on first run — guides the user through basic setup
+    # and writes config.toml before the main app starts.
+    from .wizard_state import needs_wizard
+
+    if needs_wizard():
+        from .wizard import WelcomeWizard
+
+        wizard = WelcomeWizard()
+        wizard.run(None)
+        if not wizard.completed:
+            return  # User closed wizard without finishing
+        # Reload config so wizard selections take effect.
+        config = Config.load()
+        _apply_cli_overrides(args, config)
+        try:
+            config.__post_init__()
+        except ValueError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(1)
+
     try:
         from .app import ShuVoiceApp
     except ModuleNotFoundError as e:
         if e.name == "gi":
             print(
                 "ERROR: Missing PyGObject (module 'gi').\n"
-                "Install Python deps with: pip install -e .\n"
+                "Install Python deps with: uv sync\n"
                 "If that fails, install system packages: pacman -S python-gobject gtk4 gtk4-layer-shell",
                 file=sys.stderr,
             )
@@ -416,12 +425,15 @@ def main():
 
     try:
         app = ShuVoiceApp(config)
-        app.load_model()
     except (RuntimeError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
-    sys.exit(app.run(None))
+    # Model loading happens asynchronously in do_activate() with a splash screen.
+    ret = app.run(None)
+    if app._model_load_failed:
+        sys.exit(1)
+    sys.exit(ret)
 
 
 if __name__ == "__main__":

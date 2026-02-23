@@ -1,0 +1,13 @@
+{
+  // Add "custom/shuvoice" to your modules-left/center/right array.
+  // Wrapper-script variant: examples/waybar-custom-shuvoice-wrapper.jsonc
+  "custom/shuvoice": {
+    "return-type": "json",
+    "exec": "shuvoice-waybar status",
+    "interval": 1,
+    "on-click": "shuvoice-waybar toggle-record",
+    "on-click-middle": "shuvoice-waybar service-toggle",
+    "on-click-right": "shuvoice-waybar service-restart",
+    "tooltip": true
+  }
+}

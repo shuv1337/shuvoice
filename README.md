@@ -1,5 +1,13 @@
 # ShuVoice
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/branding/shuvoice-variant-dark-lockup.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/branding/shuvoice-variant-light-lockup.png">
+    <img src="docs/assets/branding/shuvoice-variant-dark-lockup.png" alt="ShuVoice logo" width="760">
+  </picture>
+</p>
+
 Streaming speech-to-text overlay for Hyprland with pluggable ASR backends.
 
 [![CI](https://github.com/shuv1337/shuvoice/actions/workflows/ci.yml/badge.svg)](https://github.com/shuv1337/shuvoice/actions/workflows/ci.yml)
@@ -11,9 +19,44 @@ Core pipeline + production hardening are implemented:
 - PipeWire capture (`sounddevice`)
 - Pluggable streaming ASR backend layer (`nemo`, `sherpa`, `moonshine`)
 - GTK4 layer-shell overlay
-- evdev hotkey (tap/hold)
-- Hyprland IPC fallback controls via local Unix socket
+- Hyprland IPC controls via local Unix socket
 - `wtype` / clipboard text injection with retry + fallback
+
+## Current backend models & providers
+
+| Backend (`asr_backend`) | Current model(s) | Provider setting | Supported providers |
+|---|---|---|---|
+| `nemo` | `nvidia/nemotron-speech-streaming-en-0.6b` | `device` | `cuda` (default), `cpu` |
+| `sherpa` | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` (auto-downloaded by default) | `sherpa_provider` | `cpu` (default), `cuda` |
+| `moonshine` | `moonshine/base` (also `moonshine/tiny`) | N/A (CPU runtime) | `cpu` |
+
+Model locations in this repo/runtime:
+
+- NeMo model ID: `nvidia/nemotron-speech-streaming-en-0.6b` (downloaded to Hugging Face cache)
+- Sherpa model dir: auto-download default `~/.local/share/shuvoice/models/sherpa/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06/` (or custom `sherpa_model_dir`)
+- Moonshine models: Hugging Face `UsefulSensors/moonshine` (`base`/`tiny`)
+
+> Note: Sherpa CUDA requires a source-built `sherpa-onnx` GPU wheel plus CUDA 12 compatibility libs on this host stack.
+
+## Backend accuracy/performance snapshot (manual regression suite)
+
+Results below were measured on 2026-02-22 using `scripts/tts_roundtrip.py` with the
+same 10-utterance phrase set used by `tests/integration/test_roundtrip_regression.py`
+(2 phrases × 5 repeats, `--flush-chunks 5`).
+
+| Model/profile | Median similarity | Mean similarity | Empty ratio | Wall time (10 utt) | RTF (wall/audio, lower is faster) |
+|---|---:|---:|---:|---:|---:|
+| NeMo `nvidia/nemotron-speech-streaming-en-0.6b` (`device=cuda`) | 0.776 | 0.775 | 0.000 | 8.33s | 0.26 |
+| Sherpa `...kroko-2025-08-06` (`provider=cuda`) | 0.720 | 0.720 | 0.000 | 2.52s | 0.08 |
+| Sherpa `...kroko-2025-08-06` (`provider=cpu`) | 0.720 | 0.720 | 0.000 | 1.62s | 0.05 |
+| Moonshine `moonshine/base` | 0.625 | 0.625 | 0.000 | 21.93s | 0.68 |
+| Moonshine `moonshine/tiny` | 0.795 | 0.795 | 0.000 | 10.03s | 0.31 |
+
+Notes:
+- This is a **regression stress fixture**, not a universal quality ranking.
+- Numbers include model load + full roundtrip harness runtime.
+- Moonshine throughput improved via deferred chunk-buffer coalescing in `MoonshineBackend.process_chunk()`.
+- For day-to-day dictation quality, run your own workload-specific benchmark before choosing defaults.
 
 ## Requirements
 
@@ -33,55 +76,35 @@ sudo pacman -S \
 ### Python packages
 
 ```bash
-pip install -e .
-# ASR runtime (NeMo compatibility alias):
-pip install -e .[asr]
-# Explicit backend extras:
-pip install -e .[asr-nemo]
-pip install -e .[asr-sherpa]
-pip install -e .[asr-moonshine]
-# test tooling:
-pip install -e .[dev]
+# Install base + dev tooling (creates venv automatically):
+uv sync --dev
+
+# ASR backend extras:
+uv sync --extra asr-nemo
+uv sync --extra asr-sherpa
+uv sync --extra asr-moonshine
+
+# NeMo convenience alias:
+uv sync --extra asr
 ```
 
-Using uv is equivalent:
-
-```bash
-uv pip install -e .
-uv pip install -e .[asr-nemo]
-# or
-uv pip install -e .[asr-sherpa]
-# or
-uv pip install -e .[asr-moonshine]
-```
-
-For Python 3.14 + uv with NeMo, prefer the repo override file to avoid
+For Python 3.14 + NeMo, prefer the repo override file to avoid
 `kaldialign` source-build issues:
 
 ```bash
-uv pip install -e .[asr-nemo] --overrides packaging/constraints/py314-overrides.txt
+uv sync --extra asr-nemo --override packaging/constraints/py314-overrides.txt
 ```
 
 If NeMo wheels are unavailable for your environment:
 
 ```bash
-pip install "git+https://github.com/NVIDIA/NeMo.git@main#egg=nemo_toolkit[asr]"
+uv pip install "git+https://github.com/NVIDIA/NeMo.git@main#egg=nemo_toolkit[asr]"
 ```
 
 ## Permissions
 
-### evdev backend
-
-evdev hotkey capture requires access to `/dev/input/event*`.
-
-```bash
-sudo usermod -aG input "$USER"
-# log out/in after group change
-```
-
-### IPC backend (no input group)
-
-Use `hotkey_backend = "ipc"` and trigger start/stop via Hyprland `bind` / `bindr`.
+ShuVoice uses IPC control commands (no `/dev/input` access required).
+Trigger start/stop via Hyprland `bind` / `bindr` commands.
 
 ## Preflight
 
@@ -99,7 +122,7 @@ Checks include:
 - ASR backend dependencies for selected `asr_backend`
 - required binaries (`wtype`, `wl-copy`, `wl-paste`)
 - `libgtk4-layer-shell.so`
-- configured hotkey backend / hotkey / output mode
+- output mode validity
 
 ## Run
 
@@ -115,14 +138,12 @@ python -m shuvoice --download-model
 python -m shuvoice --asr-backend nemo --right-context 13
 python -m shuvoice --asr-backend sherpa --sherpa-model-dir /path/to/model
 python -m shuvoice --asr-backend moonshine --moonshine-model-name moonshine/base
-python -m shuvoice --hotkey KEY_F9
 python -m shuvoice --output-mode streaming_partial
-python -m shuvoice --hotkey-backend ipc
 python -m shuvoice --list-audio-devices
 python -m shuvoice --audio-device 2 --input-gain 1.5
 ```
 
-`--download-model` currently supports NeMo only. Sherpa and Moonshine print setup guidance.
+`--download-model` supports NeMo and Sherpa. Moonshine downloads lazily on first load via useful-moonshine-onnx.
 
 ## systemd user service
 
@@ -140,7 +161,7 @@ cp packaging/systemd/user/shuvoice.service ~/.config/systemd/user/shuvoice.servi
 systemctl --user edit shuvoice.service
 # [Service]
 # ExecStart=
-# ExecStart=%h/repos/shuvoice/.venv312/bin/shuvoice
+# ExecStart=%h/.venv/bin/shuvoice
 
 systemctl --user daemon-reload
 systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_RUNTIME_DIR HYPRLAND_INSTANCE_SIGNATURE DBUS_SESSION_BUS_ADDRESS XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
@@ -159,11 +180,97 @@ python -m shuvoice --control toggle
 python -m shuvoice --control status
 ```
 
+Notes:
+- `start`/`stop` is recommended for push-to-talk flows (`bind` + `bindr`).
+- `status` may report `processing` briefly after `stop`/`toggle` while final text is being flushed/typed.
+- CLI waits up to 2s after `stop` (or a stop-side `toggle`) for processing to finish; adjust with `--control-wait-sec`.
+
 Hyprland example:
 
 ```ini
 bind = , F9, exec, shuvoice --control start
 bindr = , F9, exec, shuvoice --control stop
+```
+
+## Waybar module (tray-style status icon)
+
+ShuVoice ships a Waybar helper command (`shuvoice-waybar`) that outputs JSON
+for a `custom/*` module and can handle click actions.
+
+Quick checks:
+
+```bash
+shuvoice-waybar status
+shuvoice-waybar toggle-record
+```
+
+Waybar config example:
+
+```jsonc
+"custom/shuvoice": {
+  "return-type": "json",
+  "exec": "shuvoice-waybar status",
+  "interval": 1,
+  "on-click": "shuvoice-waybar toggle-record",
+  "on-click-middle": "shuvoice-waybar service-toggle",
+  "on-click-right": "shuvoice-waybar service-restart",
+  "tooltip": true
+}
+```
+
+If Waybar cannot find the command from your shell PATH, point to the full
+venv path (for example `$HOME/.venv/bin/shuvoice-waybar`) or use the wrapper
+script in this repo: `scripts/shuvoice-waybar.sh`.
+
+Wrapper quick check:
+
+```bash
+./scripts/shuvoice-waybar.sh status
+```
+
+Optional: install a PATH symlink (default: `~/.local/bin/shuvoice-waybar`):
+
+```bash
+./scripts/install-waybar-wrapper.sh
+```
+
+Optional: remove that symlink later:
+
+```bash
+./scripts/uninstall-waybar-wrapper.sh
+```
+
+If your user unit has a different name, set `SHUVOICE_SERVICE` in Waybar's
+exec/on-click commands.
+
+State classes exported by the module:
+`recording`, `processing`, `idle`, `starting`, `stopped`, `error`.
+
+Example CSS:
+
+```css
+#custom-shuvoice.recording { color: #f38ba8; }
+#custom-shuvoice.processing { color: #fab387; }
+#custom-shuvoice.idle { color: #a6e3a1; }
+#custom-shuvoice.starting { color: #f9e2af; }
+#custom-shuvoice.stopped { color: #7f849c; }
+#custom-shuvoice.error { color: #f38ba8; }
+```
+
+Hyprland blur/transparency for the overlay layer surface:
+
+```ini
+# ShuVoice uses layer-shell namespace: stt-overlay
+layerrule = blur, stt-overlay
+layerrule = ignorealpha 0.20, stt-overlay
+layerrule = xray 1, stt-overlay
+```
+
+Then tune overlay alpha in `~/.config/shuvoice/config.toml`:
+
+```toml
+[overlay]
+bg_opacity = 0.55
 ```
 
 ## Configuration
@@ -174,15 +281,35 @@ Config file path:
 
 Example config:
 
-- `examples/config.toml`
+- `examples/config.toml` (full reference)
+- `examples/config-nemo-cuda.toml`
+- `examples/config-nemo-cpu.toml`
+- `examples/config-sherpa-cuda.toml`
+- `examples/config-sherpa-cpu.toml`
+- `examples/config-moonshine-cpu.toml`
+- `examples/waybar-custom-shuvoice.jsonc` (Waybar custom module snippet)
+- `examples/waybar-custom-shuvoice-wrapper.jsonc` (wrapper-script variant)
+- `examples/waybar-shuvoice.css` (Waybar state color classes)
 
 Backend selection is controlled by `asr_backend`:
 
-- `asr_backend = "nemo"` (default): uses `model_name`, `right_context`, `device`
-- `asr_backend = "sherpa"`: requires `sherpa_model_dir` and uses `sherpa_*` settings
+- `asr_backend = "sherpa"` (default): uses `sherpa_*` settings; if `sherpa_model_dir` is unset, ShuVoice auto-downloads the default streaming model
+- `asr_backend = "nemo"`: uses `model_name`, `right_context`, `device`
 - `asr_backend = "moonshine"`: uses `moonshine_*` settings (16k sample rate expected)
 
 `right_context` applies to NeMo only.
+
+Final text corrections can be configured with `[typing.text_replacements]`:
+
+```toml
+[typing.text_replacements]
+"shove voice" = "ShuVoice"
+"hyper land" = "Hyprland"
+"um" = ""
+```
+
+Matches are case-insensitive and only apply to whole words/phrases (longest
+source phrases first). Empty values delete the matched word/phrase.
 
 If you hit RNNT CUDA-graph decoder issues on your driver/toolkit combo,
 keep this setting disabled (default):
@@ -202,10 +329,10 @@ use_cuda_graph_decoder = false
 Install development tooling and run local quality checks:
 
 ```bash
-pip install -e .[dev]
-ruff check shuvoice tests
-ruff format --check shuvoice tests
-pytest -m "not gui" -v
+uv sync --dev
+uv run ruff check shuvoice tests
+uv run ruff format --check shuvoice tests
+uv run pytest -m "not gui" -v
 ```
 
 IPC end-to-end smoke tests (CLI -> control socket):
@@ -223,6 +350,14 @@ SHUVOICE_RUN_ROUNDTRIP=1 \
 SHUVOICE_ROUNDTRIP_BACKEND=nemo \
 SHUVOICE_ROUNDTRIP_DEVICE=cuda \
 pytest -m integration -k roundtrip_regression -v
+```
+
+Sherpa GPU low-noise regression suite (from field notes):
+
+```bash
+SHUVOICE_RUN_SHERPA_LOW_NOISE=1 \
+SHUVOICE_SHERPA_PROVIDER=cuda \
+pytest -m integration -k sherpa_gpu_low_noise_phrase_regression -v
 ```
 
 To remove local build/test artifacts generated during development:
@@ -260,6 +395,7 @@ The script:
 - Contribution guidelines: `CONTRIBUTING.md`
 - Code of Conduct: `CODE_OF_CONDUCT.md`
 - Security policy: `SECURITY.md`
+- Brand assets: `docs/BRANDING.md`
 
 ## License
 
@@ -268,27 +404,26 @@ ShuVoice is released under the MIT License. See `LICENSE`.
 ## Troubleshooting
 
 - `No module named 'torch'` or `No module named 'nemo'`
-  - Install NeMo ASR deps (`pip install -e .[asr-nemo]` or `.[asr]`) or Arch CUDA torch package.
+  - Install NeMo ASR deps (`uv sync --extra asr-nemo` or `--extra asr`) or Arch CUDA torch package.
 - `No module named 'sherpa_onnx'`
-  - Install Sherpa deps (`pip install -e .[asr-sherpa]`).
+  - Install Sherpa deps (`uv sync --extra asr-sherpa`).
 - `No module named 'moonshine_onnx'`
-  - Install Moonshine deps (`pip install -e .[asr-moonshine]`).
-- `sherpa_model_dir is required` or missing `encoder/decoder/joiner` artifacts
+  - Install Moonshine deps (`uv sync --extra asr-moonshine`).
+- `sherpa_model_dir` exists but is missing `encoder/decoder/joiner` artifacts
   - Point `sherpa_model_dir` to a streaming transducer model directory containing
     `tokens.txt` and ONNX files for encoder/decoder/joiner.
+  - If `sherpa_model_dir` is unset, ShuVoice will auto-download the default model.
 - `moonshine_model_dir` missing `encoder_model.onnx` / `decoder_model_merged.onnx`
   - Point `moonshine_model_dir` to a valid local Moonshine ONNX export, or unset it
     and let useful-moonshine-onnx fetch weights from Hugging Face.
 - `No module named 'gi'`
-  - Install GTK Python bindings (`pip/uv install -e .` now includes `PyGObject`).
+  - Install GTK Python bindings (`uv sync` now includes `PyGObject`).
   - If build fails, install system deps: `sudo pacman -S python-gobject gtk4 gtk4-layer-shell`.
 - `Failed to build kaldialign` when installing NeMo extras on Python 3.14
-  - Use: `uv pip install -e .[asr-nemo] --overrides packaging/constraints/py314-overrides.txt`.
+  - Use: `uv sync --extra asr-nemo --override packaging/constraints/py314-overrides.txt`.
   - Or use a Python 3.13 virtualenv for ASR installs.
 - `espeak-ng not found` when running `scripts/tts_roundtrip.py`
   - Install with: `sudo pacman -S espeak-ng`.
-- `No keyboard device found ... input group`
-  - Add user to `input` group and re-login, or use `hotkey_backend = "ipc"`.
 - `Control socket not found ...`
   - Start ShuVoice first (`python -m shuvoice`) before sending `--control` commands.
 - `libgtk4-layer-shell.so not found`
@@ -296,7 +431,6 @@ ShuVoice is released under the MIT License. See `LICENSE`.
 - `wtype not found in PATH`
   - `sudo pacman -S wtype`
 - Recognition quality is poor / start-stop triggers repeatedly
-  - Set a single keyboard device in config (`hotkey_device=/dev/input/eventX`) or keep `hotkey_listen_all_devices=false`.
   - Increase ASR context for accuracy (eg. `right_context=13`, with higher latency).
   - Select the correct mic (`python -m shuvoice --list-audio-devices`, then set `audio_device`). Prefer device *name* over numeric index, because indices can change between runs.
   - Increase `input_gain` moderately (eg. `1.3` to `1.8`) if your mic is too quiet.

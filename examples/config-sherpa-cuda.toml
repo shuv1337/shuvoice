@@ -1,0 +1,32 @@
+# ShuVoice example: Sherpa ONNX on CUDA
+# Profile tuned for lower false-silent drops in low-noise desktop environments.
+
+[audio]
+sample_rate = 16000
+chunk_ms = 100
+fallback_sample_rate = 48000
+# Sherpa uses app-side auto-gain; keep raw capture gain neutral.
+input_gain = 1.0
+audio_queue_max_size = 200
+silence_rms_threshold = 0.006
+silence_rms_multiplier = 1.3
+min_speech_ms = 80
+auto_gain_target_peak = 0.15
+auto_gain_max = 10.0
+auto_gain_settle_chunks = 2
+
+[asr]
+asr_backend = "sherpa"
+# Set this to your local model directory. See README.md for Sherpa model setup.
+sherpa_model_dir = "/path/to/sherpa-model-dir"
+sherpa_provider = "cuda"
+sherpa_num_threads = 2
+sherpa_chunk_ms = 100
+
+[control]
+# Defaults to "$XDG_RUNTIME_DIR/shuvoice/control.sock" when unset.
+# control_socket = "/path/to/control.sock"
+
+[typing]
+output_mode = "final_only"
+use_clipboard_for_final = true
