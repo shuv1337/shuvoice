@@ -79,7 +79,9 @@ class MoonshineBackend(ASRBackend):
         self._tokenizer: Any = None
 
         self._sample_rate = int(self.config.sample_rate)
-        self._max_window_samples = int(float(self.config.moonshine_max_window_sec) * self._sample_rate)
+        self._max_window_samples = int(
+            float(self.config.moonshine_max_window_sec) * self._sample_rate
+        )
         self._min_segment_samples = int(self._MIN_SEGMENT_S * self._sample_rate)
         self._min_infer_samples = int(self._INFER_INTERVAL_S * self._sample_rate)
 
@@ -152,8 +154,7 @@ class MoonshineBackend(ASRBackend):
             missing = [str(p.name) for p in required if not p.is_file()]
             if missing:
                 raise ValueError(
-                    "moonshine_model_dir is missing required model artifacts: "
-                    + ", ".join(missing)
+                    "moonshine_model_dir is missing required model artifacts: " + ", ".join(missing)
                 )
 
         max_window = float(self.config.moonshine_max_window_sec)
@@ -338,7 +339,7 @@ class MoonshineBackend(ASRBackend):
 
             kept_len = repeated.start() + len(repeated.group(1))
             kept_token = token[:kept_len]
-            text = f"{text[:token_match.start()]}{kept_token}{text[token_match.end():]}"
+            text = f"{text[: token_match.start()]}{kept_token}{text[token_match.end() :]}"
             log.debug(
                 "Repetition guard: token %r has repeated pattern %r, truncating token",
                 token,
@@ -382,9 +383,7 @@ class MoonshineBackend(ASRBackend):
 
         # 3. N-gram repetition: find repeated 1–12 word patterns.
         for plen in range(1, cls._MAX_PATTERN_WORDS + 1):
-            threshold = (
-                cls._REPETITION_THRESHOLD if plen <= 4 else cls._LONG_REPETITION_THRESHOLD
-            )
+            threshold = cls._REPETITION_THRESHOLD if plen <= 4 else cls._LONG_REPETITION_THRESHOLD
             min_words = plen * threshold
             if len(words) < min_words:
                 continue
@@ -395,9 +394,7 @@ class MoonshineBackend(ASRBackend):
                 count = 0
                 pos = start
                 while pos + plen <= len(words):
-                    candidate = tuple(
-                        w.lower().strip(".,!?;:'\"") for w in words[pos : pos + plen]
-                    )
+                    candidate = tuple(w.lower().strip(".,!?;:'\"") for w in words[pos : pos + plen])
                     if candidate == pattern:
                         count += 1
                         pos += plen

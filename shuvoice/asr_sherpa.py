@@ -135,8 +135,7 @@ class SherpaBackend(ASRBackend):
                 urllib.request.urlretrieve(archive_url, archive_path)
             except (urllib.error.URLError, TimeoutError) as e:
                 raise RuntimeError(
-                    "Failed to download Sherpa model archive. "
-                    f"URL: {archive_url}. Error: {e}"
+                    f"Failed to download Sherpa model archive. URL: {archive_url}. Error: {e}"
                 ) from e
 
             cls._safe_extract_tar(archive_path, extracted_dir)
@@ -153,8 +152,7 @@ class SherpaBackend(ASRBackend):
 
         if not cls._is_model_dir_complete(target_dir):
             raise RuntimeError(
-                "Sherpa model download completed but artifacts are incomplete: "
-                f"{target_dir}"
+                f"Sherpa model download completed but artifacts are incomplete: {target_dir}"
             )
 
         log.info("Sherpa model ready: %s", target_dir)
@@ -181,8 +179,7 @@ class SherpaBackend(ASRBackend):
             self.download_model(model_dir=str(model_dir))
             if not self._is_model_dir_complete(model_dir):
                 raise RuntimeError(
-                    "Sherpa auto-download failed to populate model directory: "
-                    f"{model_dir}"
+                    f"Sherpa auto-download failed to populate model directory: {model_dir}"
                 )
 
             self.config.sherpa_model_dir = str(model_dir)

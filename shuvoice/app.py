@@ -1,7 +1,7 @@
 """Main ShuVoice application — ties all components together.
 
 IMPORTANT: ctypes.CDLL('libgtk4-layer-shell.so') must be called
-before this module is imported. See __main__.py.
+before do_activate() imports .overlay. See __main__.py.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ import asyncio
 import logging
 import signal
 import threading
+from typing import TYPE_CHECKING
 
 import gi
 import numpy as np
@@ -23,12 +24,14 @@ from .config import Config
 from .control import ControlServer
 from .feedback import play_tone
 from .hotkey import HotkeyListener
-from .overlay import CaptionOverlay
 from .postprocess import apply_text_replacements, capitalize_first
 from .streaming_health import should_trigger_stall_flush
 from .transcript import prefer_transcript
 from .typer import StreamingTyper
 from .utterance_state import _UtteranceState
+
+if TYPE_CHECKING:
+    from .overlay import CaptionOverlay
 
 log = logging.getLogger(__name__)
 
@@ -121,6 +124,8 @@ class ShuVoiceApp(Gtk.Application):
     # -- GTK lifecycle ------------------------------------------------------
 
     def do_activate(self):
+        from .overlay import CaptionOverlay
+
         self.overlay = CaptionOverlay(self, self.config)
 
         self.audio.start()
@@ -577,7 +582,7 @@ class ShuVoiceApp(Gtk.Application):
             # Escalate amplitude on stalled steps so even very quiet
             # environments eventually produce enough energy to trigger
             # token emission.
-            escalation = self._FLUSH_NOISE_ESCALATION ** stalled_consecutive
+            escalation = self._FLUSH_NOISE_ESCALATION**stalled_consecutive
             flush_audio = self._make_flush_noise(native, escalation=escalation)
             if not self.asr.wants_raw_audio:
                 flush_audio = self._apply_utterance_gain(flush_audio, state.utterance_gain)
