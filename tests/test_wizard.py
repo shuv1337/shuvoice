@@ -242,8 +242,28 @@ def test_auto_add_hyprland_keybind_adds_lines_when_key_unused(tmp_path):
     assert status == "added"
     assert "Added ShuVoice keybind" in message
     content = hypr_conf.read_text()
-    assert "bind = , Insert, exec, shuvoice --control start" in content
-    assert "bindr = , Insert, exec, shuvoice --control stop" in content
+    assert "bind = , Insert, exec," in content
+    assert "bindr = , Insert, exec," in content
+    assert "--control start" in content
+    assert "--control stop" in content
+
+
+def test_auto_add_hyprland_keybind_uses_resolved_binary(tmp_path):
+    hypr_dir = tmp_path / "hypr"
+    hypr_dir.mkdir(parents=True)
+    hypr_conf = hypr_dir / "hyprland.conf"
+    hypr_conf.write_text("# user config\n")
+
+    with patch("shuvoice.wizard_state.Config") as mock_config, patch(
+        "shuvoice.wizard_state._resolve_shuvoice_command", return_value="/opt/shuvoice/bin/shuvoice"
+    ):
+        mock_config.config_dir.return_value = tmp_path / "shuvoice"
+        status, _message = auto_add_hyprland_keybind("insert")
+
+    assert status == "added"
+    content = hypr_conf.read_text()
+    assert "/opt/shuvoice/bin/shuvoice --control start" in content
+    assert "/opt/shuvoice/bin/shuvoice --control stop" in content
 
 
 def test_auto_add_hyprland_keybind_reports_conflict(tmp_path):

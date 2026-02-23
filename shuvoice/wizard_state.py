@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import logging
 import re
+import shlex
+import shutil
+import sys
 from pathlib import Path
 
 from .config import Config
@@ -57,11 +60,11 @@ KEYBIND_PRESETS = [
 ]
 
 
-def format_hyprland_bind(hypr_key_spec: str) -> str:
+def format_hyprland_bind(hypr_key_spec: str, *, shuvoice_command: str = "shuvoice") -> str:
     """Format Hyprland bind/bindr lines for a push-to-talk keybind."""
     return (
-        f"bind = {hypr_key_spec}, exec, shuvoice --control start\n"
-        f"bindr = {hypr_key_spec}, exec, shuvoice --control stop"
+        f"bind = {hypr_key_spec}, exec, {_control_exec('start', shuvoice_command=shuvoice_command)}\n"
+        f"bindr = {hypr_key_spec}, exec, {_control_exec('stop', shuvoice_command=shuvoice_command)}"
     )
 
 
@@ -72,6 +75,29 @@ def hyprland_config_path() -> Path:
 
 def _hypr_key_spec_for_preset(keybind_id: str) -> str | None:
     return next((hk for kid, _label, hk, _desc in KEYBIND_PRESETS if kid == keybind_id), None)
+
+
+def _resolve_shuvoice_command() -> str:
+    """Resolve an executable command for Hyprland exec lines.
+
+    Prefers a sibling ``shuvoice`` next to the running Python interpreter
+    (venv-safe), then falls back to ``shutil.which('shuvoice')``.
+    """
+    python_bin = Path(sys.executable)
+    sibling = python_bin.with_name("shuvoice")
+    if sibling.exists() and sibling.is_file():
+        return str(sibling)
+
+    discovered = shutil.which("shuvoice")
+    if discovered:
+        return discovered
+
+    return "shuvoice"
+
+
+def _control_exec(command: str, *, shuvoice_command: str | None = None) -> str:
+    binary = shuvoice_command or _resolve_shuvoice_command()
+    return f"{shlex.quote(binary)} --control {command}"
 
 
 def _normalize_bind_spec(mods: str, key: str) -> str | None:
@@ -145,8 +171,9 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
     except Exception as exc:  # noqa: BLE001
         return "error", f"Failed to read {config_file}: {exc}"
 
-    start_line = f"bind = {hypr_key_spec}, exec, shuvoice --control start"
-    stop_line = f"bindr = {hypr_key_spec}, exec, shuvoice --control stop"
+    shuvoice_command = _resolve_shuvoice_command()
+    bind_text = format_hyprland_bind(hypr_key_spec, shuvoice_command=shuvoice_command)
+    start_line, stop_line = bind_text.splitlines()
 
     has_start = False
     has_stop = False
