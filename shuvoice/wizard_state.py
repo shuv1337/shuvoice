@@ -33,6 +33,34 @@ ASR_BACKENDS = [
     ),
 ]
 
+# Keybind presets for push-to-talk setup.
+# (id, display_label, hyprland_bind_key_spec, description)
+# hyprland_bind_key_spec is the "MODS, KEY" portion for bind/bindr lines.
+KEYBIND_PRESETS = [
+    ("f9", "F9", ", F9", "Simple single-key push-to-talk."),
+    (
+        "super_v",
+        "Super + V",
+        "SUPER, V",
+        "Modifier combo \u2014 mnemonic for Voice.",
+    ),
+    (
+        "scroll_lock",
+        "Scroll Lock",
+        ", Scroll_Lock",
+        "Dedicated key, no modifier needed.",
+    ),
+    ("custom", "Custom", None, "Set your own key in Hyprland config later."),
+]
+
+
+def format_hyprland_bind(hypr_key_spec: str) -> str:
+    """Format Hyprland bind/bindr lines for a push-to-talk keybind."""
+    return (
+        f"bind = {hypr_key_spec}, exec, shuvoice --control start\n"
+        f"bindr = {hypr_key_spec}, exec, shuvoice --control stop"
+    )
+
 
 def needs_wizard() -> bool:
     """Return True when the welcome wizard should run (first launch).
@@ -75,13 +103,40 @@ def write_config(asr_backend: str):
     log.info("Wrote %s", config_file)
 
 
-def format_summary(asr_backend: str) -> str:
+def format_summary(asr_backend: str, keybind_id: str = "f9") -> str:
     """Build a human-readable summary of wizard selections."""
     asr_name = next(
         (label for bid, label, _ in ASR_BACKENDS if bid == asr_backend),
         asr_backend,
     )
-    return (
-        f"ASR backend:    {asr_name}\n"
-        "Push-to-talk:   Hyprland bind/bindr via shuvoice --control"
+    keybind_label, hypr_key = next(
+        (
+            (label, hk)
+            for kid, label, hk, _ in KEYBIND_PRESETS
+            if kid == keybind_id
+        ),
+        ("Custom", None),
     )
+
+    lines = [
+        f"ASR backend:    {asr_name}",
+        f"Push-to-talk:   {keybind_label}",
+    ]
+
+    if hypr_key:
+        bind_lines = format_hyprland_bind(hypr_key)
+        indented = "\n".join(f"  {l}" for l in bind_lines.splitlines())
+        lines.extend([
+            "",
+            "Add to ~/.config/hypr/hyprland.conf:",
+            "",
+            indented,
+        ])
+    else:
+        lines.extend([
+            "",
+            "Configure your keybind in ~/.config/hypr/hyprland.conf",
+            "See README.md for bind/bindr examples.",
+        ])
+
+    return "\n".join(lines)

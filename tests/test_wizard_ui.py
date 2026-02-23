@@ -46,6 +46,7 @@ def test_on_finish_writes_config_releases_window_and_quits():
 
     wizard = WelcomeWizard.__new__(WelcomeWizard)
     wizard._asr_backend = "moonshine"
+    wizard._keybind = "f9"
     wizard.completed = False
     wizard._release_input_and_destroy_window = MagicMock()
     wizard.quit = MagicMock()

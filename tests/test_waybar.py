@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from shuvoice.waybar import build_waybar_payload
+from shuvoice.config import Config
+from shuvoice.waybar import build_waybar_payload, config_info_lines
 
 
 def test_build_waybar_payload_recording_state():
     payload = build_waybar_payload("recording")
 
-    assert payload["text"] == ""
+    assert payload["text"] == "\uf130"
     assert payload["alt"] == "recording"
     assert payload["class"] == "recording"
     assert "ShuVoice: Recording" in payload["tooltip"]
@@ -15,7 +16,7 @@ def test_build_waybar_payload_recording_state():
 def test_build_waybar_payload_stopped_state():
     payload = build_waybar_payload("stopped")
 
-    assert payload["text"] == ""
+    assert payload["text"] == "\uf131"
     assert payload["alt"] == "stopped"
     assert payload["class"] == "stopped"
     assert "ShuVoice: Stopped" in payload["tooltip"]
@@ -24,7 +25,7 @@ def test_build_waybar_payload_stopped_state():
 def test_build_waybar_payload_error_reason_class_is_sanitized():
     payload = build_waybar_payload("error:asr_thread_dead")
 
-    assert payload["text"] == ""
+    assert payload["text"] == "\uf071"
     assert payload["alt"] == "error"
     assert payload["class"] == "error"
     assert "Reason: asr_thread_dead" in payload["tooltip"]
@@ -42,3 +43,67 @@ def test_build_waybar_payload_includes_service_and_control_details_for_error_sta
     assert "Service: failed" in payload["tooltip"]
     assert "Control: Control socket not found" in payload["tooltip"]
     assert "Action: systemctl restart failed" in payload["tooltip"]
+
+
+# -- config_lines integration -------------------------------------------------
+
+
+def test_build_waybar_payload_includes_config_lines_in_tooltip():
+    info = ["Backend:  NeMo (NVIDIA)", "Model:    nemotron", "Device:   GPU (CUDA)"]
+    payload = build_waybar_payload("idle", config_lines=info)
+
+    tooltip = payload["tooltip"]
+    assert "Backend:  NeMo (NVIDIA)" in tooltip
+    assert "Model:    nemotron" in tooltip
+    assert "Device:   GPU (CUDA)" in tooltip
+    # Config info should appear before the click actions
+    assert tooltip.index("Backend:") < tooltip.index("Left click:")
+
+
+def test_build_waybar_payload_without_config_lines_still_works():
+    payload = build_waybar_payload("idle")
+    assert "Left click:" in payload["tooltip"]
+
+
+# -- config_info_lines ---------------------------------------------------------
+
+
+def test_config_info_lines_nemo():
+    cfg = Config(asr_backend="nemo", model_name="nvidia/nemotron-speech-streaming-en-0.6b", device="cuda")
+    lines = config_info_lines(cfg)
+
+    assert any("NeMo" in l for l in lines)
+    assert any("nemotron-speech-streaming-en-0.6b" in l for l in lines)
+    assert any("GPU (CUDA)" in l for l in lines)
+
+
+def test_config_info_lines_nemo_cpu():
+    cfg = Config(asr_backend="nemo", device="cpu")
+    lines = config_info_lines(cfg)
+
+    assert any("CPU" in l for l in lines)
+
+
+def test_config_info_lines_sherpa_default_model():
+    cfg = Config(asr_backend="sherpa", sherpa_provider="cpu")
+    lines = config_info_lines(cfg)
+
+    assert any("Sherpa-ONNX" in l for l in lines)
+    assert any("auto-download" in l for l in lines)
+    assert any("CPU" in l for l in lines)
+
+
+def test_config_info_lines_sherpa_custom_model():
+    cfg = Config(asr_backend="sherpa", sherpa_model_dir="/opt/models/my-zipformer")
+    lines = config_info_lines(cfg)
+
+    assert any("my-zipformer" in l for l in lines)
+
+
+def test_config_info_lines_moonshine():
+    cfg = Config(asr_backend="moonshine", moonshine_model_name="moonshine/tiny", moonshine_provider="cpu")
+    lines = config_info_lines(cfg)
+
+    assert any("Moonshine-ONNX" in l for l in lines)
+    assert any("moonshine/tiny" in l for l in lines)
+    assert any("CPU" in l for l in lines)

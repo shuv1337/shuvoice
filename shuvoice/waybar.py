@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 from .config import Config
@@ -89,6 +90,88 @@ def _query_runtime_state(config: Config, service: str) -> tuple[str, str | None,
     return "error:control_unreachable", service_state, control_error
 
 
+def config_info_lines(config: Config) -> list[str]:
+    """Build tooltip info lines from the active configuration."""
+    backend = config.asr_backend
+    backend_labels = {
+        "nemo": "NeMo (NVIDIA)",
+        "sherpa": "Sherpa-ONNX",
+        "moonshine": "Moonshine-ONNX",
+    }
+
+    lines = [f"Backend:  {backend_labels.get(backend, backend)}"]
+
+    # Model name (shortened for readability)
+    if backend == "nemo":
+        model = config.model_name
+        if "/" in model:
+            model = model.rsplit("/", 1)[-1]
+        lines.append(f"Model:    {model}")
+    elif backend == "sherpa":
+        if config.sherpa_model_dir:
+            model = Path(config.sherpa_model_dir).name
+        else:
+            model = "default (auto-download)"
+        lines.append(f"Model:    {model}")
+    elif backend == "moonshine":
+        lines.append(f"Model:    {config.moonshine_model_name}")
+
+    # Device (GPU vs CPU)
+    if backend == "nemo":
+        device = "GPU (CUDA)" if config.device == "cuda" else "CPU"
+    elif backend == "sherpa":
+        device = "GPU (CUDA)" if config.sherpa_provider == "cuda" else "CPU"
+    elif backend == "moonshine":
+        device = "GPU (CUDA)" if config.moonshine_provider == "cuda" else "CPU"
+    else:
+        device = "unknown"
+    lines.append(f"Device:   {device}")
+
+    return lines
+
+
+def detect_keybind() -> str | None:
+    """Detect the ShuVoice push-to-talk keybind from active Hyprland binds.
+
+    Uses ``hyprctl binds -j`` to query live bind state.  Returns a
+    human-readable key label like ``F9`` or ``Super + V``, or None if
+    detection fails.
+    """
+    try:
+        result = subprocess.run(
+            ["hyprctl", "binds", "-j"],
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+        )
+        if result.returncode != 0:
+            return None
+        binds = json.loads(result.stdout)
+        for bind in binds:
+            arg = bind.get("arg", "")
+            if "shuvoice" not in arg or "start" not in arg:
+                continue
+            key = bind.get("key", "")
+            if not key:
+                continue
+            modmask = bind.get("modmask", 0)
+            mod_names: list[str] = []
+            if modmask & 1:
+                mod_names.append("Shift")
+            if modmask & 4:
+                mod_names.append("Ctrl")
+            if modmask & 8:
+                mod_names.append("Alt")
+            if modmask & 64:
+                mod_names.append("Super")
+            if mod_names:
+                return " + ".join(mod_names + [key])
+            return key
+    except Exception:
+        return None
+    return None
+
+
 def _sanitize_class(value: str) -> str:
     cleaned = re.sub(r"[^a-z0-9_-]+", "-", value.lower()).strip("-")
     return cleaned or "unknown"
@@ -97,6 +180,7 @@ def _sanitize_class(value: str) -> str:
 def build_waybar_payload(
     state: str,
     *,
+    config_lines: list[str] | None = None,
     service_state: str | None = None,
     control_error: str | None = None,
     action_error: str | None = None,
@@ -138,6 +222,10 @@ def build_waybar_payload(
         lines.append(f"Control: {control_error}")
     if action_error:
         lines.append(f"Action: {action_error}")
+
+    if config_lines:
+        lines.append("")
+        lines.extend(config_lines)
 
     lines.extend(
         [
@@ -274,9 +362,15 @@ def main(argv: list[str] | None = None) -> int:
         action_error = str(e)
         exit_code = 1
 
+    info = config_info_lines(config)
+    keybind = detect_keybind()
+    if keybind:
+        info.append(f"Keybind:  {keybind}")
+
     state, service_state, control_error = _query_runtime_state(config, args.service)
     payload = build_waybar_payload(
         state,
+        config_lines=info,
         service_state=service_state,
         control_error=control_error,
         action_error=action_error,

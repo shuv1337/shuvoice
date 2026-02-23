@@ -29,6 +29,8 @@ from gi.repository import Gtk4LayerShell as LayerShell
 
 from .wizard_state import (
     ASR_BACKENDS,
+    KEYBIND_PRESETS,
+    format_hyprland_bind,
     format_summary,
     needs_wizard,
     write_config,
@@ -68,6 +70,7 @@ class WelcomeWizard(Gtk.Application):
         super().__init__(application_id="io.github.shuv1337.shuvoice.wizard")
         self.completed = False
         self._asr_backend = "sherpa"
+        self._keybind = "f9"
         self._win: Gtk.Window | None = None
         self._stack: Gtk.Stack | None = None
 
@@ -94,6 +97,7 @@ class WelcomeWizard(Gtk.Application):
 
         self._stack.add_named(self._build_welcome_page(), "welcome")
         self._stack.add_named(self._build_asr_page(), "asr")
+        self._stack.add_named(self._build_keybind_page(), "keybind")
         self._stack.add_named(self._build_done_page(), "done")
 
         win.set_child(self._stack)
@@ -246,6 +250,63 @@ class WelcomeWizard(Gtk.Application):
 
         nav = self._make_nav_row(
             back_page="welcome",
+            next_page="keybind",
+        )
+        nav.set_margin_top(20)
+        page.append(nav)
+
+        return page
+
+    def _build_keybind_page(self) -> Gtk.Widget:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        page.add_css_class("wizard-page")
+        page.set_halign(Gtk.Align.CENTER)
+        page.set_valign(Gtk.Align.CENTER)
+        page.set_spacing(4)
+
+        self._add_text_title(page, "Push-to-Talk Keybind")
+
+        sub = Gtk.Label(
+            label="ShuVoice uses Hyprland bind/bindr for push-to-talk.\n"
+            "Hold the key to record, release to stop."
+        )
+        sub.add_css_class("wizard-subtitle")
+        sub.set_justify(Gtk.Justification.CENTER)
+        page.append(sub)
+
+        group: Gtk.CheckButton | None = None
+        self._keybind_radios: dict[str, Gtk.CheckButton] = {}
+
+        for kb_id, label, _hypr_key, description in KEYBIND_PRESETS:
+            radio = Gtk.CheckButton(label=label)
+            radio.add_css_class("wizard-radio")
+            if group is None:
+                group = radio
+            else:
+                radio.set_group(group)
+
+            if kb_id == "f9":
+                radio.set_active(True)
+
+            radio.connect("toggled", self._on_keybind_toggled, kb_id)
+            page.append(radio)
+            self._keybind_radios[kb_id] = radio
+
+            desc_label = Gtk.Label(label=description)
+            desc_label.add_css_class("wizard-radio-desc")
+            desc_label.set_halign(Gtk.Align.START)
+            page.append(desc_label)
+
+        # Live preview of the Hyprland config lines
+        self._keybind_preview = Gtk.Label()
+        self._keybind_preview.add_css_class("wizard-summary")
+        self._keybind_preview.set_halign(Gtk.Align.START)
+        self._keybind_preview.set_selectable(True)
+        self._update_keybind_preview()
+        page.append(self._keybind_preview)
+
+        nav = self._make_nav_row(
+            back_page="asr",
             next_page="done",
             next_label="Finish",
         )
@@ -273,8 +334,8 @@ class WelcomeWizard(Gtk.Application):
         page.append(self._summary_label)
 
         tip = Gtk.Label(
-            label="Edit ~/.config/shuvoice/config.toml any time\n"
-            "to adjust these and other settings."
+            label="Edit ~/.config/shuvoice/config.toml to adjust ASR and overlay settings.\n"
+            "Edit ~/.config/hypr/hyprland.conf to change the push-to-talk keybind."
         )
         tip.add_css_class("wizard-desc")
         tip.set_halign(Gtk.Align.CENTER)
@@ -295,6 +356,30 @@ class WelcomeWizard(Gtk.Application):
     def _on_asr_toggled(self, button: Gtk.CheckButton, backend_id: str):
         if button.get_active():
             self._asr_backend = backend_id
+
+    def _on_keybind_toggled(self, button: Gtk.CheckButton, kb_id: str):
+        if button.get_active():
+            self._keybind = kb_id
+            self._update_keybind_preview()
+
+    def _update_keybind_preview(self):
+        """Refresh the keybind preview box based on current selection."""
+        if not hasattr(self, "_keybind_preview") or self._keybind_preview is None:
+            return
+        hypr_key = next(
+            (hk for kid, _, hk, _ in KEYBIND_PRESETS if kid == self._keybind),
+            None,
+        )
+        if hypr_key:
+            bind_text = format_hyprland_bind(hypr_key)
+            indented = "\n".join(f"  {l}" for l in bind_text.splitlines())
+            text = f"Add to ~/.config/hypr/hyprland.conf:\n\n{indented}"
+        else:
+            text = (
+                "Configure your keybind in ~/.config/hypr/hyprland.conf\n"
+                "See README.md for bind/bindr examples."
+            )
+        self._keybind_preview.set_text(text)
 
     def _release_input_and_destroy_window(self):
         win = self._win
@@ -327,7 +412,7 @@ class WelcomeWizard(Gtk.Application):
         write_config(self._asr_backend)
         write_marker()
         self.completed = True
-        log.info("Wizard completed: asr_backend=%s", self._asr_backend)
+        log.info("Wizard completed: asr_backend=%s keybind=%s", self._asr_backend, self._keybind)
         self._release_input_and_destroy_window()
         self.quit()
 
@@ -337,7 +422,7 @@ class WelcomeWizard(Gtk.Application):
         """Refresh the summary label text based on current selections."""
         if not hasattr(self, "_summary_label") or self._summary_label is None:
             return
-        self._summary_label.set_text(format_summary(self._asr_backend))
+        self._summary_label.set_text(format_summary(self._asr_backend, self._keybind))
 
     @staticmethod
     def _add_text_title(box: Gtk.Box, text: str):
