@@ -33,6 +33,7 @@ coverage.xml
 .pi/
 .jules/
 .Jules/
+docs/internal/
 
 # Native artifacts
 *.so

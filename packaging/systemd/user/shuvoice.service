@@ -9,7 +9,7 @@ Type=simple
 #   systemctl --user edit shuvoice.service
 #   [Service]
 #   ExecStart=
-#   ExecStart=%h/repos/shuvoice/.venv312/bin/shuvoice
+#   ExecStart=%h/.venv/bin/shuvoice
 ExecStart=/usr/bin/shuvoice
 Restart=on-failure
 RestartSec=2

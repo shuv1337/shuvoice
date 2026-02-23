@@ -13,8 +13,6 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     cfg = Config.load()
 
     assert cfg.sample_rate == 16000
-    assert cfg.hotkey == "KEY_RIGHTCTRL"
-    assert cfg.hotkey_backend == "evdev"
     assert cfg.output_mode == "final_only"
     assert cfg.audio_queue_max_size == 200
     assert cfg.auto_gain_target_peak == 0.15
@@ -22,17 +20,18 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     assert cfg.auto_gain_settle_chunks == 2
     assert cfg.audio_feedback is True
     assert cfg.auto_capitalize is True
+    assert cfg.text_replacements == {}
     assert cfg.streaming_stall_guard is True
     assert cfg.streaming_stall_chunks == 4
-    assert cfg.asr_backend == "nemo"
+    assert cfg.asr_backend == "sherpa"
     assert cfg.sherpa_provider == "cpu"
     assert cfg.sherpa_num_threads == 2
     assert cfg.sherpa_chunk_ms == 100
     assert cfg.moonshine_model_name == "moonshine/base"
     assert cfg.moonshine_model_precision == "float"
     assert cfg.moonshine_chunk_ms == 100
-    assert cfg.moonshine_max_window_sec == 10.0
-    assert cfg.moonshine_max_tokens == 192
+    assert cfg.moonshine_max_window_sec == 5.0
+    assert cfg.moonshine_max_tokens == 128
 
 
 def test_load_flattens_sections_and_ignores_unknown(monkeypatch, tmp_path: Path):
@@ -73,12 +72,6 @@ moonshine_chunk_ms = 110
 moonshine_max_window_sec = 20.0
 moonshine_max_tokens = 160
 
-[hotkey]
-hotkey_backend = "ipc"
-hotkey = "KEY_F9"
-hold_threshold_ms = 250
-hotkey_device = "/dev/input/event9"
-
 [typing]
 output_mode = "streaming_partial"
 use_clipboard_for_final = true
@@ -86,6 +79,11 @@ preserve_clipboard = true
 typing_retry_attempts = 3
 typing_retry_delay_ms = 20
 auto_capitalize = false
+
+[typing.text_replacements]
+"shove voice" = "ShuVoice"
+"hyper land" = "Hyprland"
+"um" = ""
 
 [streaming]
 streaming_stall_guard = false
@@ -126,16 +124,13 @@ foo = "bar"
     assert cfg.moonshine_chunk_ms == 110
     assert cfg.moonshine_max_window_sec == 20.0
     assert cfg.moonshine_max_tokens == 160
-    assert cfg.hotkey_backend == "ipc"
-    assert cfg.hotkey == "KEY_F9"
-    assert cfg.hold_threshold_ms == 250
-    assert cfg.hotkey_device == "/dev/input/event9"
     assert cfg.output_mode == "streaming_partial"
     assert cfg.use_clipboard_for_final is True
     assert cfg.preserve_clipboard is True
     assert cfg.typing_retry_attempts == 3
     assert cfg.typing_retry_delay_ms == 20
     assert cfg.auto_capitalize is False
+    assert cfg.text_replacements == {"shove voice": "ShuVoice", "hyper land": "Hyprland", "um": ""}
     assert cfg.streaming_stall_guard is False
     assert cfg.streaming_stall_chunks == 6
     assert cfg.streaming_stall_rms_ratio == 0.9
@@ -228,3 +223,29 @@ def test_streaming_stall_validation():
 
     with pytest.raises(ValueError):
         Config(streaming_stall_rms_ratio=0)
+
+
+def test_text_replacements_validation():
+    # Bad type
+    with pytest.raises(ValueError, match="text_replacements"):
+        Config(text_replacements="nope")
+
+    # Non-string key/value types
+    with pytest.raises(ValueError, match="keys must be strings"):
+        Config(text_replacements={1: "value"})
+
+    with pytest.raises(ValueError, match="values must be strings"):
+        Config(text_replacements={"um": 1})
+
+    # Empty/whitespace key
+    with pytest.raises(ValueError, match="keys must not be empty"):
+        Config(text_replacements={"   ": "value"})
+
+    # Empty values are allowed (deletion)
+    cfg = Config(text_replacements={"um": ""})
+    assert cfg.text_replacements == {"um": ""}
+
+
+def test_text_replacements_are_normalized():
+    cfg = Config(text_replacements={" shove voice ": " ShuVoice "})
+    assert cfg.text_replacements == {"shove voice": "ShuVoice"}

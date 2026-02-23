@@ -10,6 +10,7 @@ import logging
 
 import gi
 
+gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gtk4LayerShell", "1.0")
 from gi.repository import Gdk, GLib, Gtk
@@ -154,7 +155,7 @@ class CaptionOverlay:
             self._icon.set_tooltip_text(status_text)
             self._icon.update_property([Gtk.AccessibleProperty.LABEL], [status_text])
 
-    # -- Thread-safe public API (called from ASR / hotkey threads) ----------
+    # -- Thread-safe public API (called from ASR / control threads) ----------
 
     def set_text(self, text: str):
         GLib.idle_add(self._do_set_text, text)

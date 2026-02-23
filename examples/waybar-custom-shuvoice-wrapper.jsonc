@@ -1,0 +1,13 @@
+{
+  // Repo-checkout variant using the shell wrapper script.
+  // Update the repo path if your checkout is elsewhere.
+  "custom/shuvoice": {
+    "return-type": "json",
+    "exec": "$HOME/repos/shuvoice/scripts/shuvoice-waybar.sh status",
+    "interval": 1,
+    "on-click": "$HOME/repos/shuvoice/scripts/shuvoice-waybar.sh toggle-record",
+    "on-click-middle": "$HOME/repos/shuvoice/scripts/shuvoice-waybar.sh service-toggle",
+    "on-click-right": "$HOME/repos/shuvoice/scripts/shuvoice-waybar.sh service-restart",
+    "tooltip": true
+  }
+}
