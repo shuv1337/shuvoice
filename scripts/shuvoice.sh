@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Thin wrapper so `shuvoice` works from PATH during development.
+#
+# Resolution order:
+#   1. Installed console script (pip install -e .) if it isn't this wrapper
+#   2. Repo virtualenv console script
+#   3. Repo virtualenv `python -m shuvoice`
+#   4. System python -m shuvoice
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+resolved_path() {
+  if command -v readlink >/dev/null 2>&1; then
+    readlink -f "$1" 2>/dev/null || printf '%s' "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
+
+if command -v shuvoice >/dev/null 2>&1; then
+  CMD_PATH="$(command -v shuvoice)"
+  if [ "$(resolved_path "$CMD_PATH")" != "$SELF" ]; then
+    exec "$CMD_PATH" "$@"
+  fi
+fi
+
+if [ -x "$ROOT_DIR/.venv/bin/shuvoice" ]; then
+  exec "$ROOT_DIR/.venv/bin/shuvoice" "$@"
+fi
+
+if [ -x "$ROOT_DIR/.venv/bin/python" ]; then
+  exec "$ROOT_DIR/.venv/bin/python" -m shuvoice "$@"
+fi
+
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 -m shuvoice "$@"
+fi
+
+exec python -m shuvoice "$@"
