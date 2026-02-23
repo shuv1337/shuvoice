@@ -118,12 +118,59 @@ class ShuVoiceApp(Gtk.Application):
         self._streaming_stall_flush_chunks = max(1, int(self.config.streaming_stall_flush_chunks))
 
     def load_model(self):
-        """Load the ASR model. Call before run() — this blocks."""
+        """Load the ASR model synchronously (legacy helper).
+
+        Prefer letting ``do_activate`` load the model asynchronously with a
+        splash screen.  Call this only when you need the model ready before
+        ``run()`` (e.g. in tests).
+        """
         self.asr.load()
+        self._model_loaded = True
 
     # -- GTK lifecycle ------------------------------------------------------
 
     def do_activate(self):
+        GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGINT, self._on_sigint)
+
+        if getattr(self, "_model_loaded", False):
+            # Model was pre-loaded (legacy / test path) — skip splash.
+            self._finish_activation()
+            return
+
+        # Show splash while model loads in the background.
+        from .splash import SplashOverlay
+
+        self._splash = SplashOverlay(self)
+        threading.Thread(target=self._load_model_async, name="model-loader", daemon=True).start()
+
+    def _load_model_async(self):
+        """Background thread: load the ASR model, then signal the main thread."""
+        try:
+            self.asr.load()
+            GLib.idle_add(self._on_model_loaded)
+        except Exception as exc:
+            error_msg = str(exc)
+            GLib.idle_add(self._on_model_load_failed, error_msg)
+
+    def _on_model_loaded(self):
+        self._model_loaded = True
+        splash = getattr(self, "_splash", None)
+        if splash:
+            splash.dismiss()
+            self._splash = None
+        self._finish_activation()
+        return GLib.SOURCE_REMOVE
+
+    def _on_model_load_failed(self, error_msg: str):
+        log.critical("Model loading failed: %s", error_msg)
+        splash = getattr(self, "_splash", None)
+        if splash:
+            splash.set_status(f"Error: {error_msg}")
+        GLib.timeout_add(3000, self.quit)
+        return GLib.SOURCE_REMOVE
+
+    def _finish_activation(self):
+        """Complete app activation after the model is ready."""
         from .overlay import CaptionOverlay
 
         self.overlay = CaptionOverlay(self, self.config)
@@ -140,8 +187,6 @@ class ShuVoiceApp(Gtk.Application):
         threading.Thread(target=self._asr_worker, name="asr", daemon=True).start()
         if self.hotkey:
             threading.Thread(target=self._hotkey_worker, name="hotkey", daemon=True).start()
-
-        GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGINT, self._on_sigint)
 
         if self.hotkey:
             log.info("Ready — press %s to talk", self.config.hotkey)

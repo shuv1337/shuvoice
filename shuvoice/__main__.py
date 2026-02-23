@@ -13,6 +13,54 @@ from ctypes import CDLL
 from typing import Callable
 
 
+def _apply_cli_overrides(args, config):
+    """Apply CLI argument overrides onto a Config instance."""
+    if args.asr_backend:
+        config.asr_backend = args.asr_backend
+    if args.device:
+        config.device = args.device
+    if args.right_context is not None:
+        config.right_context = int(args.right_context)
+    if args.sherpa_model_dir is not None:
+        config.sherpa_model_dir = args.sherpa_model_dir
+    if args.sherpa_provider:
+        config.sherpa_provider = args.sherpa_provider
+    if args.sherpa_num_threads is not None:
+        config.sherpa_num_threads = int(args.sherpa_num_threads)
+    if args.sherpa_chunk_ms is not None:
+        config.sherpa_chunk_ms = int(args.sherpa_chunk_ms)
+    if args.moonshine_model_name is not None:
+        config.moonshine_model_name = args.moonshine_model_name
+    if args.moonshine_model_dir is not None:
+        config.moonshine_model_dir = args.moonshine_model_dir
+    if args.moonshine_model_precision is not None:
+        config.moonshine_model_precision = args.moonshine_model_precision
+    if args.moonshine_chunk_ms is not None:
+        config.moonshine_chunk_ms = int(args.moonshine_chunk_ms)
+    if args.moonshine_max_window_sec is not None:
+        config.moonshine_max_window_sec = float(args.moonshine_max_window_sec)
+    if args.moonshine_max_tokens is not None:
+        config.moonshine_max_tokens = int(args.moonshine_max_tokens)
+    if args.audio_device is not None:
+        config.audio_device = (
+            int(args.audio_device) if str(args.audio_device).isdigit() else args.audio_device
+        )
+    if args.input_gain is not None:
+        config.input_gain = float(args.input_gain)
+    if args.hotkey_backend:
+        config.hotkey_backend = args.hotkey_backend
+    if args.hotkey:
+        config.hotkey = args.hotkey
+    if args.hotkey_device:
+        config.hotkey_device = args.hotkey_device
+    if args.hotkey_listen_all_devices:
+        config.hotkey_listen_all_devices = True
+    if args.output_mode:
+        config.output_mode = args.output_mode
+    if args.control_socket:
+        config.control_socket = args.control_socket
+
+
 def _run_preflight(config) -> bool:
     """Check runtime prerequisites and print a human-readable report."""
     checks: list[tuple[str, bool, str]] = []
@@ -299,52 +347,7 @@ def main():
     from .config import Config
 
     config = Config.load()
-
-    if args.asr_backend:
-        config.asr_backend = args.asr_backend
-    if args.device:
-        config.device = args.device
-    if args.right_context is not None:
-        config.right_context = int(args.right_context)
-    if args.sherpa_model_dir is not None:
-        config.sherpa_model_dir = args.sherpa_model_dir
-    if args.sherpa_provider:
-        config.sherpa_provider = args.sherpa_provider
-    if args.sherpa_num_threads is not None:
-        config.sherpa_num_threads = int(args.sherpa_num_threads)
-    if args.sherpa_chunk_ms is not None:
-        config.sherpa_chunk_ms = int(args.sherpa_chunk_ms)
-    if args.moonshine_model_name is not None:
-        config.moonshine_model_name = args.moonshine_model_name
-    if args.moonshine_model_dir is not None:
-        config.moonshine_model_dir = args.moonshine_model_dir
-    if args.moonshine_model_precision is not None:
-        config.moonshine_model_precision = args.moonshine_model_precision
-    if args.moonshine_chunk_ms is not None:
-        config.moonshine_chunk_ms = int(args.moonshine_chunk_ms)
-    if args.moonshine_max_window_sec is not None:
-        config.moonshine_max_window_sec = float(args.moonshine_max_window_sec)
-    if args.moonshine_max_tokens is not None:
-        config.moonshine_max_tokens = int(args.moonshine_max_tokens)
-    if args.audio_device is not None:
-        # Accept numeric indexes or raw device names
-        config.audio_device = (
-            int(args.audio_device) if str(args.audio_device).isdigit() else args.audio_device
-        )
-    if args.input_gain is not None:
-        config.input_gain = float(args.input_gain)
-    if args.hotkey_backend:
-        config.hotkey_backend = args.hotkey_backend
-    if args.hotkey:
-        config.hotkey = args.hotkey
-    if args.hotkey_device:
-        config.hotkey_device = args.hotkey_device
-    if args.hotkey_listen_all_devices:
-        config.hotkey_listen_all_devices = True
-    if args.output_mode:
-        config.output_mode = args.output_mode
-    if args.control_socket:
-        config.control_socket = args.control_socket
+    _apply_cli_overrides(args, config)
 
     try:
         config.__post_init__()
@@ -439,6 +442,26 @@ def main():
         )
         sys.exit(1)
 
+    # Welcome wizard on first run — guides the user through basic setup
+    # and writes config.toml before the main app starts.
+    from .wizard_state import needs_wizard
+
+    if needs_wizard():
+        from .wizard import WelcomeWizard
+
+        wizard = WelcomeWizard()
+        wizard.run(None)
+        if not wizard.completed:
+            return  # User closed wizard without finishing
+        # Reload config so wizard selections take effect.
+        config = Config.load()
+        _apply_cli_overrides(args, config)
+        try:
+            config.__post_init__()
+        except ValueError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(1)
+
     try:
         from .app import ShuVoiceApp
     except ModuleNotFoundError as e:
@@ -454,11 +477,11 @@ def main():
 
     try:
         app = ShuVoiceApp(config)
-        app.load_model()
     except (RuntimeError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # Model loading happens asynchronously in do_activate() with a splash screen.
     sys.exit(app.run(None))
 
 
