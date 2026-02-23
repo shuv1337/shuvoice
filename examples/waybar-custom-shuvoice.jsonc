@@ -7,8 +7,7 @@
     "interval": 1,
     "on-click": "shuvoice-waybar toggle-record",
     "on-click-middle": "shuvoice-waybar service-toggle",
-    "on-click-right": "shuvoice-waybar service-restart",
-    "on-scroll-down": "shuvoice-waybar launch-wizard",
+    "on-click-right": "shuvoice-waybar menu",
     "tooltip": true
   }
 }

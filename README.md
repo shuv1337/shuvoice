@@ -209,7 +209,7 @@ Quick checks:
 
 ```bash
 shuvoice-waybar status
-shuvoice-waybar toggle-record
+shuvoice-waybar menu
 shuvoice-waybar launch-wizard
 ```
 
@@ -222,11 +222,12 @@ Waybar config example:
   "interval": 1,
   "on-click": "shuvoice-waybar toggle-record",
   "on-click-middle": "shuvoice-waybar service-toggle",
-  "on-click-right": "shuvoice-waybar service-restart",
-  "on-scroll-down": "shuvoice-waybar launch-wizard",
+  "on-click-right": "shuvoice-waybar menu",
   "tooltip": true
 }
 ```
+
+Right-click menu uses one of: `wofi`, `rofi`, `bemenu`, or `dmenu`.
 
 If Waybar cannot find the command from your shell PATH, point to the full
 venv path (for example `$HOME/.venv/bin/shuvoice-waybar`) or use the wrapper

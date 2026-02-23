@@ -3,6 +3,7 @@
 Usage:
     shuvoice-waybar status
     shuvoice-waybar toggle-record
+    shuvoice-waybar menu
     shuvoice-waybar launch-wizard
     shuvoice-waybar service-toggle
 
@@ -16,6 +17,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -27,6 +29,12 @@ from .control import send_control_command
 
 DEFAULT_SERVICE = "shuvoice.service"
 _STATUS_TIMEOUT_SEC = 0.35
+_MENU_LAUNCHERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("wofi", ("wofi", "--dmenu", "--prompt", "{prompt}")),
+    ("rofi", ("rofi", "-dmenu", "-p", "{prompt}")),
+    ("bemenu", ("bemenu", "-p", "{prompt}")),
+    ("dmenu", ("dmenu", "-p", "{prompt}")),
+)
 
 
 def _run_systemctl_user(*args: str, timeout: float = 2.0) -> subprocess.CompletedProcess[str]:
@@ -233,8 +241,7 @@ def build_waybar_payload(
             "",
             "Left click: toggle recording",
             "Middle click: toggle service",
-            "Right click: restart service",
-            "Scroll down: relaunch setup wizard",
+            "Right click: open action menu",
         ]
     )
 
@@ -257,6 +264,69 @@ def _wait_for_control_socket(config: Config, timeout_sec: float = 2.0) -> bool:
         except Exception:
             time.sleep(0.08)
     return False
+
+
+def _prompt_menu_choice(prompt: str, options: list[str]) -> str | None:
+    menu_input = "\n".join(options) + "\n"
+
+    for binary, template in _MENU_LAUNCHERS:
+        if shutil.which(binary) is None:
+            continue
+
+        argv = [arg.format(prompt=prompt) for arg in template]
+        try:
+            result = subprocess.run(
+                argv,
+                input=menu_input,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=20.0,
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            raise RuntimeError(f"{binary} failed: {e}") from e
+
+        if result.returncode != 0:
+            # User cancel is common here (Esc / click outside).
+            return None
+
+        selection = result.stdout.strip()
+        return selection or None
+
+    raise RuntimeError("No menu launcher found (install wofi, rofi, bemenu, or dmenu)")
+
+
+def _action_menu(config: Config, service: str):
+    runtime_state, _, _ = _query_runtime_state(config, service)
+    service_state = _service_active_state(service)
+
+    recording_label = "Stop recording" if runtime_state == "recording" else "Start recording"
+    recording_command = "stop-record" if runtime_state == "recording" else "start-record"
+
+    service_label = (
+        "Stop service"
+        if service_state in {"active", "activating", "reloading"}
+        else "Start service"
+    )
+
+    options: list[tuple[str, str]] = [
+        (recording_label, recording_command),
+        ("Toggle recording", "toggle-record"),
+        (service_label, "service-toggle"),
+        ("Relaunch setup wizard", "launch-wizard"),
+        ("Restart service (advanced)", "service-restart"),
+    ]
+
+    choice = _prompt_menu_choice("ShuVoice", [label for label, _ in options])
+    if not choice:
+        return
+
+    action_map = {label: command for label, command in options}
+    command = action_map.get(choice)
+    if not command:
+        return
+
+    _perform_action(command, config, service)
 
 
 def _ensure_service_running(service: str):
@@ -296,6 +366,10 @@ def _launch_wizard_detached():
 
 def _perform_action(command: str, config: Config, service: str):
     if command == "status":
+        return
+
+    if command == "menu":
+        _action_menu(config, service)
         return
 
     if command == "toggle-record":
@@ -353,6 +427,7 @@ def main(argv: list[str] | None = None) -> int:
         default="status",
         choices=[
             "status",
+            "menu",
             "toggle-record",
             "start-record",
             "stop-record",

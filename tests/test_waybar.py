@@ -3,7 +3,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from shuvoice.config import Config
-from shuvoice.waybar import _perform_action, build_waybar_payload, config_info_lines
+from shuvoice.waybar import _action_menu, _perform_action, build_waybar_payload, config_info_lines
 
 
 def test_build_waybar_payload_recording_state():
@@ -65,7 +65,7 @@ def test_build_waybar_payload_includes_config_lines_in_tooltip():
 def test_build_waybar_payload_without_config_lines_still_works():
     payload = build_waybar_payload("idle")
     assert "Left click:" in payload["tooltip"]
-    assert "Scroll down: relaunch setup wizard" in payload["tooltip"]
+    assert "Right click: open action menu" in payload["tooltip"]
 
 
 def test_perform_action_launch_wizard_calls_detached_launcher():
@@ -73,6 +73,25 @@ def test_perform_action_launch_wizard_calls_detached_launcher():
         _perform_action("launch-wizard", Config(), "shuvoice.service")
 
     launch_wizard.assert_called_once_with()
+
+
+def test_perform_action_menu_calls_menu_handler():
+    with patch("shuvoice.waybar._action_menu") as action_menu:
+        _perform_action("menu", Config(), "shuvoice.service")
+
+    action_menu.assert_called_once()
+
+
+def test_action_menu_dispatches_selected_command():
+    config = Config()
+    with patch("shuvoice.waybar._query_runtime_state", return_value=("idle", None, None)), patch(
+        "shuvoice.waybar._service_active_state", return_value="active"
+    ), patch("shuvoice.waybar._prompt_menu_choice", return_value="Relaunch setup wizard"), patch(
+        "shuvoice.waybar._perform_action"
+    ) as perform_action:
+        _action_menu(config, "shuvoice.service")
+
+    perform_action.assert_called_once_with("launch-wizard", config, "shuvoice.service")
 
 
 # -- config_info_lines ---------------------------------------------------------
