@@ -56,6 +56,7 @@ dev = [
 
 [project.scripts]
 shuvoice = "shuvoice.__main__:main"
+shuvoice-waybar = "shuvoice.waybar:main"
 
 [project.urls]
 Homepage = "https://github.com/shuv1337/shuvoice"

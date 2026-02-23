@@ -1,0 +1,23 @@
+#custom-shuvoice.recording {
+  color: #f38ba8;
+}
+
+#custom-shuvoice.processing {
+  color: #fab387;
+}
+
+#custom-shuvoice.idle {
+  color: #a6e3a1;
+}
+
+#custom-shuvoice.starting {
+  color: #f9e2af;
+}
+
+#custom-shuvoice.stopped {
+  color: #7f849c;
+}
+
+#custom-shuvoice.error {
+  color: #f38ba8;
+}

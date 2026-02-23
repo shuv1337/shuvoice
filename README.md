@@ -215,6 +215,71 @@ bind = , F9, exec, shuvoice --control start
 bindr = , F9, exec, shuvoice --control stop
 ```
 
+## Waybar module (tray-style status icon)
+
+ShuVoice ships a Waybar helper command (`shuvoice-waybar`) that outputs JSON
+for a `custom/*` module and can handle click actions.
+
+Quick checks:
+
+```bash
+shuvoice-waybar status
+shuvoice-waybar toggle-record
+```
+
+Waybar config example:
+
+```jsonc
+"custom/shuvoice": {
+  "return-type": "json",
+  "exec": "shuvoice-waybar status",
+  "interval": 1,
+  "on-click": "shuvoice-waybar toggle-record",
+  "on-click-middle": "shuvoice-waybar service-toggle",
+  "on-click-right": "shuvoice-waybar service-restart",
+  "tooltip": true
+}
+```
+
+If Waybar cannot find the command from your shell PATH, point to the full
+venv path (for example `$HOME/.venv/bin/shuvoice-waybar`) or use the wrapper
+script in this repo: `scripts/shuvoice-waybar.sh`.
+
+Wrapper quick check:
+
+```bash
+./scripts/shuvoice-waybar.sh status
+```
+
+Optional: install a PATH symlink (default: `~/.local/bin/shuvoice-waybar`):
+
+```bash
+./scripts/install-waybar-wrapper.sh
+```
+
+Optional: remove that symlink later:
+
+```bash
+./scripts/uninstall-waybar-wrapper.sh
+```
+
+If your user unit has a different name, set `SHUVOICE_SERVICE` in Waybar's
+exec/on-click commands.
+
+State classes exported by the module:
+`recording`, `processing`, `idle`, `starting`, `stopped`, `error`.
+
+Example CSS:
+
+```css
+#custom-shuvoice.recording { color: #f38ba8; }
+#custom-shuvoice.processing { color: #fab387; }
+#custom-shuvoice.idle { color: #a6e3a1; }
+#custom-shuvoice.starting { color: #f9e2af; }
+#custom-shuvoice.stopped { color: #7f849c; }
+#custom-shuvoice.error { color: #f38ba8; }
+```
+
 Hyprland blur/transparency for the overlay layer surface:
 
 ```ini
@@ -245,6 +310,9 @@ Example config:
 - `examples/config-sherpa-cuda.toml`
 - `examples/config-sherpa-cpu.toml`
 - `examples/config-moonshine-cpu.toml`
+- `examples/waybar-custom-shuvoice.jsonc` (Waybar custom module snippet)
+- `examples/waybar-custom-shuvoice-wrapper.jsonc` (wrapper-script variant)
+- `examples/waybar-shuvoice.css` (Waybar state color classes)
 
 Backend selection is controlled by `asr_backend`:
 
