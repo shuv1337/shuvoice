@@ -40,6 +40,13 @@ def test_release_input_and_destroy_window_is_idempotent():
     WelcomeWizard._release_input_and_destroy_window(wizard)
 
 
+def test_finish_status_text_maps_known_states():
+    from shuvoice.wizard import WelcomeWizard
+
+    assert "Added push-to-talk" in WelcomeWizard._finish_status_text("added")
+    assert "already configured" in WelcomeWizard._finish_status_text("already_configured")
+    assert "already bound" in WelcomeWizard._finish_status_text("conflict")
+
 
 def test_on_finish_writes_config_releases_window_and_quits():
     from shuvoice.wizard import WelcomeWizard

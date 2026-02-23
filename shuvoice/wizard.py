@@ -24,12 +24,13 @@ import gi
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gtk4LayerShell", "1.0")
-from gi.repository import Gdk, Gtk
+from gi.repository import Gdk, GLib, Gtk
 from gi.repository import Gtk4LayerShell as LayerShell
 
 from .wizard_state import (
     ASR_BACKENDS,
     KEYBIND_PRESETS,
+    auto_add_hyprland_keybind,
     format_hyprland_bind,
     format_summary,
     needs_wizard,
@@ -71,7 +72,8 @@ class WelcomeWizard(Gtk.Application):
         self.completed = False
         self._force_reconfigure = force_reconfigure
         self._asr_backend = "sherpa"
-        self._keybind = "f9"
+        self._keybind = "insert"
+        self._finish_in_progress = False
         self._win: Gtk.Window | None = None
         self._stack: Gtk.Stack | None = None
 
@@ -286,7 +288,7 @@ class WelcomeWizard(Gtk.Application):
             else:
                 radio.set_group(group)
 
-            if kb_id == "f9":
+            if kb_id == "insert":
                 radio.set_active(True)
 
             radio.connect("toggled", self._on_keybind_toggled, kb_id)
@@ -298,11 +300,31 @@ class WelcomeWizard(Gtk.Application):
             desc_label.set_halign(Gtk.Align.START)
             page.append(desc_label)
 
+        self._auto_add_last_non_custom = True
+        self._auto_add_keybind = Gtk.CheckButton(
+            label="Try to add this keybind to ~/.config/hypr/hyprland.conf automatically"
+        )
+        self._auto_add_keybind.add_css_class("wizard-radio")
+        self._auto_add_keybind.set_active(True)
+        self._auto_add_keybind.connect("toggled", self._on_auto_add_keybind_toggled)
+        page.append(self._auto_add_keybind)
+
+        auto_add_desc = Gtk.Label(
+            label=(
+                "Only applies when the selected key is not already used by another bind. "
+                "If there is a conflict, wizard will leave your Hyprland config unchanged."
+            )
+        )
+        auto_add_desc.add_css_class("wizard-radio-desc")
+        auto_add_desc.set_halign(Gtk.Align.START)
+        page.append(auto_add_desc)
+
         # Live preview of the Hyprland config lines
         self._keybind_preview = Gtk.Label()
         self._keybind_preview.add_css_class("wizard-summary")
         self._keybind_preview.set_halign(Gtk.Align.START)
         self._keybind_preview.set_selectable(True)
+        self._sync_auto_add_keybind_state()
         self._update_keybind_preview()
         page.append(self._keybind_preview)
 
@@ -336,13 +358,21 @@ class WelcomeWizard(Gtk.Application):
 
         tip = Gtk.Label(
             label="Edit ~/.config/shuvoice/config.toml to adjust ASR and overlay settings.\n"
-            "Edit ~/.config/hypr/hyprland.conf to change the push-to-talk keybind."
+            "If enabled, wizard will try to add your push-to-talk keybind in ~/.config/hypr/hyprland.conf."
         )
         tip.add_css_class("wizard-desc")
         tip.set_halign(Gtk.Align.CENTER)
         tip.set_justify(Gtk.Justification.CENTER)
         tip.set_margin_top(16)
         page.append(tip)
+
+        self._finish_status_label = Gtk.Label(label="")
+        self._finish_status_label.add_css_class("wizard-desc")
+        self._finish_status_label.set_halign(Gtk.Align.CENTER)
+        self._finish_status_label.set_justify(Gtk.Justification.CENTER)
+        self._finish_status_label.set_visible(False)
+        self._finish_status_label.set_margin_top(8)
+        page.append(self._finish_status_label)
 
         btn = self._make_button("Launch ShuVoice", primary=True)
         btn.connect("clicked", self._on_finish)
@@ -361,7 +391,40 @@ class WelcomeWizard(Gtk.Application):
     def _on_keybind_toggled(self, button: Gtk.CheckButton, kb_id: str):
         if button.get_active():
             self._keybind = kb_id
+            self._sync_auto_add_keybind_state()
             self._update_keybind_preview()
+
+    def _on_auto_add_keybind_toggled(self, _button: Gtk.CheckButton):
+        if not hasattr(self, "_auto_add_keybind"):
+            return
+
+        if self._auto_add_keybind.get_sensitive():
+            self._auto_add_last_non_custom = self._auto_add_keybind.get_active()
+        self._update_keybind_preview()
+
+    def _sync_auto_add_keybind_state(self):
+        if not hasattr(self, "_auto_add_keybind"):
+            return
+
+        hypr_key = next(
+            (hk for kid, _, hk, _ in KEYBIND_PRESETS if kid == self._keybind),
+            None,
+        )
+        if hypr_key is None:
+            self._auto_add_last_non_custom = self._auto_add_keybind.get_active()
+            self._auto_add_keybind.set_sensitive(False)
+            self._auto_add_keybind.set_active(False)
+            return
+
+        self._auto_add_keybind.set_sensitive(True)
+        self._auto_add_keybind.set_active(getattr(self, "_auto_add_last_non_custom", True))
+
+    def _auto_add_enabled(self) -> bool:
+        return bool(
+            hasattr(self, "_auto_add_keybind")
+            and self._auto_add_keybind is not None
+            and self._auto_add_keybind.get_active()
+        )
 
     def _update_keybind_preview(self):
         """Refresh the keybind preview box based on current selection."""
@@ -374,7 +437,14 @@ class WelcomeWizard(Gtk.Application):
         if hypr_key:
             bind_text = format_hyprland_bind(hypr_key)
             indented = "\n".join(f"  {line}" for line in bind_text.splitlines())
-            text = f"Add to ~/.config/hypr/hyprland.conf:\n\n{indented}"
+            if self._auto_add_enabled():
+                text = (
+                    "Wizard will try to add this to ~/.config/hypr/hyprland.conf\n"
+                    "(only if no conflicting bind already uses that key):\n\n"
+                    f"{indented}"
+                )
+            else:
+                text = f"Add to ~/.config/hypr/hyprland.conf:\n\n{indented}"
         else:
             text = (
                 "Configure your keybind in ~/.config/hypr/hyprland.conf\n"
@@ -409,16 +479,70 @@ class WelcomeWizard(Gtk.Application):
         self._release_input_and_destroy_window()
         Gtk.Application.do_shutdown(self)
 
-    def _on_finish(self, _button):
+    def _on_finish(self, button):
+        if getattr(self, "_finish_in_progress", False):
+            return
+        self._finish_in_progress = True
+
+        if button is not None:
+            try:
+                button.set_sensitive(False)
+            except Exception:
+                log.debug("Failed to disable finish button", exc_info=True)
+
         write_config(
             self._asr_backend,
             overwrite_existing=getattr(self, "_force_reconfigure", False),
         )
+
+        keybind_status = "not_attempted"
+        keybind_message = "automatic keybind setup disabled"
+        if self._auto_add_enabled():
+            keybind_status, keybind_message = auto_add_hyprland_keybind(self._keybind)
+            if keybind_status in {"added", "already_configured"}:
+                log.info("Wizard keybind setup: %s", keybind_message)
+            else:
+                log.warning("Wizard keybind setup: %s", keybind_message)
+
         write_marker()
         self.completed = True
-        log.info("Wizard completed: asr_backend=%s keybind=%s", self._asr_backend, self._keybind)
+        log.info(
+            "Wizard completed: asr_backend=%s keybind=%s keybind_setup=%s",
+            self._asr_backend,
+            self._keybind,
+            keybind_status,
+        )
+
+        self._show_finish_status(self._finish_status_text(keybind_status))
+        if hasattr(self, "_finish_status_label") and self._finish_status_label is not None:
+            GLib.timeout_add(950, self._finalize_and_quit)
+            return
+        self._finalize_and_quit()
+
+    def _show_finish_status(self, text: str):
+        label = getattr(self, "_finish_status_label", None)
+        if label is None:
+            return
+        label.set_text(text)
+        label.set_visible(True)
+
+    @staticmethod
+    def _finish_status_text(keybind_status: str) -> str:
+        messages = {
+            "added": "✓ Added push-to-talk keybind to Hyprland config.",
+            "already_configured": "✓ Push-to-talk keybind already configured.",
+            "conflict": "⚠ Selected key is already bound; Hyprland config unchanged.",
+            "missing_config": "⚠ Hyprland config not found; add keybind manually.",
+            "skipped_custom": "ℹ Custom keybind selected; configure it manually in Hyprland.",
+            "not_attempted": "ℹ Automatic keybind setup disabled.",
+            "error": "⚠ Could not update Hyprland config; check logs.",
+        }
+        return messages.get(keybind_status, "⚠ Keybind setup status unknown; check logs.")
+
+    def _finalize_and_quit(self):
         self._release_input_and_destroy_window()
         self.quit()
+        return False
 
     # -- Helpers ---------------------------------------------------------------
 
@@ -426,7 +550,13 @@ class WelcomeWizard(Gtk.Application):
         """Refresh the summary label text based on current selections."""
         if not hasattr(self, "_summary_label") or self._summary_label is None:
             return
-        self._summary_label.set_text(format_summary(self._asr_backend, self._keybind))
+        self._summary_label.set_text(
+            format_summary(
+                self._asr_backend,
+                self._keybind,
+                auto_add_keybind=self._auto_add_enabled(),
+            )
+        )
 
     @staticmethod
     def _add_text_title(box: Gtk.Box, text: str):

@@ -39,18 +39,19 @@ ASR_BACKENDS = [
 # (id, display_label, hyprland_bind_key_spec, description)
 # hyprland_bind_key_spec is the "MODS, KEY" portion for bind/bindr lines.
 KEYBIND_PRESETS = [
+    ("insert", "Insert", ", Insert", "Usually unused and easy to dedicate."),
+    (
+        "right_ctrl",
+        "Right Control",
+        ", Control_R",
+        "Comfortable hold-to-talk key on many keyboards.",
+    ),
     ("f9", "F9", ", F9", "Simple single-key push-to-talk."),
     (
         "super_v",
         "Super + V",
         "SUPER, V",
         "Modifier combo — mnemonic for Voice.",
-    ),
-    (
-        "scroll_lock",
-        "Scroll Lock",
-        ", Scroll_Lock",
-        "Dedicated key, no modifier needed.",
     ),
     ("custom", "Custom", None, "Set your own key in Hyprland config later."),
 ]
@@ -62,6 +63,148 @@ def format_hyprland_bind(hypr_key_spec: str) -> str:
         f"bind = {hypr_key_spec}, exec, shuvoice --control start\n"
         f"bindr = {hypr_key_spec}, exec, shuvoice --control stop"
     )
+
+
+def hyprland_config_path() -> Path:
+    """Return the default Hyprland config path (~/.config/hypr/hyprland.conf)."""
+    return Config.config_dir().parent / "hypr" / "hyprland.conf"
+
+
+def _hypr_key_spec_for_preset(keybind_id: str) -> str | None:
+    return next((hk for kid, _label, hk, _desc in KEYBIND_PRESETS if kid == keybind_id), None)
+
+
+def _normalize_bind_spec(mods: str, key: str) -> str | None:
+    mods_norm = " ".join(mods.strip().upper().split())
+    key_norm = " ".join(key.strip().upper().split())
+    if not key_norm:
+        return None
+    return f"{mods_norm},{key_norm}" if mods_norm else f",{key_norm}"
+
+
+def _normalize_hypr_key_spec(hypr_key_spec: str) -> str | None:
+    if "," not in hypr_key_spec:
+        return None
+    mods, key = hypr_key_spec.split(",", 1)
+    return _normalize_bind_spec(mods, key)
+
+
+def _strip_inline_comment(line: str) -> str:
+    # Good enough for Hyprland bind syntax in practice.
+    return line.split("#", 1)[0].strip()
+
+
+def _parse_hypr_bind_line(line: str) -> tuple[str, str] | None:
+    """Parse a Hyprland bind line into (normalized_spec, command_text)."""
+    text = _strip_inline_comment(line)
+    if not text:
+        return None
+
+    match = re.match(r"^\s*bind[a-z]*\s*=\s*(.+)$", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+
+    rhs = match.group(1)
+    parts = [part.strip() for part in rhs.split(",", 3)]
+    if len(parts) < 2:
+        return None
+
+    spec = _normalize_bind_spec(parts[0], parts[1])
+    if spec is None:
+        return None
+
+    command = ",".join(parts[2:]).strip()
+    return spec, command
+
+
+def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
+    """Try to add ShuVoice bind/bindr lines to Hyprland config.
+
+    Returns ``(status, message)`` where ``status`` is one of:
+    - ``added``: one or more missing ShuVoice bind lines were appended.
+    - ``already_configured``: both start/stop lines already exist.
+    - ``conflict``: selected key is already used by another command.
+    - ``missing_config``: Hyprland config file was not found.
+    - ``skipped_custom``: keybind preset has no concrete key spec.
+    - ``error``: unexpected error while reading/writing config.
+    """
+    hypr_key_spec = _hypr_key_spec_for_preset(keybind_id)
+    if hypr_key_spec is None:
+        return "skipped_custom", "Selected keybind is custom; no automatic Hyprland edit attempted."
+
+    target_spec = _normalize_hypr_key_spec(hypr_key_spec)
+    if target_spec is None:
+        return "error", f"Invalid Hyprland key spec for preset '{keybind_id}': {hypr_key_spec!r}"
+
+    config_file = hyprland_config_path()
+    if not config_file.exists():
+        return "missing_config", f"Hyprland config not found: {config_file}"
+
+    try:
+        content = config_file.read_text()
+    except Exception as exc:  # noqa: BLE001
+        return "error", f"Failed to read {config_file}: {exc}"
+
+    start_line = f"bind = {hypr_key_spec}, exec, shuvoice --control start"
+    stop_line = f"bindr = {hypr_key_spec}, exec, shuvoice --control stop"
+
+    has_start = False
+    has_stop = False
+    conflict_lines: list[int] = []
+
+    for line_no, raw_line in enumerate(content.splitlines(), start=1):
+        parsed = _parse_hypr_bind_line(raw_line)
+        if parsed is None:
+            continue
+
+        spec, command = parsed
+        if spec != target_spec:
+            continue
+
+        command_lc = command.lower()
+        is_shuvoice = "shuvoice" in command_lc and "--control" in command_lc
+        is_start = is_shuvoice and "--control start" in command_lc
+        is_stop = is_shuvoice and "--control stop" in command_lc
+
+        if is_start:
+            has_start = True
+        elif is_stop:
+            has_stop = True
+        elif not is_shuvoice:
+            conflict_lines.append(line_no)
+
+    if conflict_lines:
+        line_refs = ", ".join(str(n) for n in conflict_lines[:3])
+        if len(conflict_lines) > 3:
+            line_refs += ", ..."
+        return (
+            "conflict",
+            f"Key is already bound in {config_file} (line(s): {line_refs}); not adding ShuVoice binds.",
+        )
+
+    missing_lines: list[str] = []
+    if not has_start:
+        missing_lines.append(start_line)
+    if not has_stop:
+        missing_lines.append(stop_line)
+
+    if not missing_lines:
+        return "already_configured", f"ShuVoice keybind already configured in {config_file}."
+
+    append_parts: list[str] = []
+    if content and not content.endswith("\n"):
+        append_parts.append("\n")
+    if content.strip():
+        append_parts.append("\n")
+    append_parts.append("# Added by ShuVoice setup wizard\n")
+    append_parts.extend(f"{line}\n" for line in missing_lines)
+
+    try:
+        config_file.write_text(content + "".join(append_parts))
+    except Exception as exc:  # noqa: BLE001
+        return "error", f"Failed to update {config_file}: {exc}"
+
+    return "added", f"Added ShuVoice keybind to {config_file}."
 
 
 def needs_wizard() -> bool:
@@ -194,7 +337,12 @@ def write_config(asr_backend: str, *, overwrite_existing: bool = False):
     log.info("Wrote %s (provider=%s)", config_file, provider)
 
 
-def format_summary(asr_backend: str, keybind_id: str = "f9") -> str:
+def format_summary(
+    asr_backend: str,
+    keybind_id: str = "insert",
+    *,
+    auto_add_keybind: bool = True,
+) -> str:
     """Build a human-readable summary of wizard selections."""
     asr_name = next(
         (label for bid, label, _ in ASR_BACKENDS if bid == asr_backend),
@@ -213,14 +361,25 @@ def format_summary(asr_backend: str, keybind_id: str = "f9") -> str:
     if hypr_key:
         bind_lines = format_hyprland_bind(hypr_key)
         indented = "\n".join(f"  {line}" for line in bind_lines.splitlines())
-        lines.extend(
-            [
-                "",
-                "Add to ~/.config/hypr/hyprland.conf:",
-                "",
-                indented,
-            ]
-        )
+        if auto_add_keybind:
+            lines.extend(
+                [
+                    "",
+                    "Wizard will try to add this to ~/.config/hypr/hyprland.conf",
+                    "(only if no conflicting bind already uses that key):",
+                    "",
+                    indented,
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "",
+                    "Add to ~/.config/hypr/hyprland.conf:",
+                    "",
+                    indented,
+                ]
+            )
     else:
         lines.extend(
             [

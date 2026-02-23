@@ -7,6 +7,7 @@ from unittest.mock import patch
 from shuvoice.wizard_state import (
     ASR_BACKENDS,
     KEYBIND_PRESETS,
+    auto_add_hyprland_keybind,
     format_hyprland_bind,
     format_summary,
     needs_wizard,
@@ -174,7 +175,7 @@ def test_format_summary_contains_backend_and_keybind():
     """format_summary includes backend name and keybind label."""
     result = format_summary("sherpa")
     assert "Sherpa-ONNX" in result
-    assert "F9" in result
+    assert "Insert" in result
     assert "hyprland.conf" in result
 
 
@@ -185,6 +186,11 @@ def test_format_summary_includes_hyprland_bind_lines_for_preset():
     assert "Super + V" in result
     assert "bind = SUPER, V, exec, shuvoice --control start" in result
     assert "bindr = SUPER, V, exec, shuvoice --control stop" in result
+
+
+def test_format_summary_manual_mode_shows_manual_copy_hint():
+    result = format_summary("sherpa", "insert", auto_add_keybind=False)
+    assert "Add to ~/.config/hypr/hyprland.conf" in result
 
 
 def test_format_summary_custom_keybind_shows_readme_hint():
@@ -220,14 +226,72 @@ def test_format_hyprland_bind_with_modifier():
     )
 
 
+# -- auto_add_hyprland_keybind ------------------------------------------------
+
+
+def test_auto_add_hyprland_keybind_adds_lines_when_key_unused(tmp_path):
+    hypr_dir = tmp_path / "hypr"
+    hypr_dir.mkdir(parents=True)
+    hypr_conf = hypr_dir / "hyprland.conf"
+    hypr_conf.write_text("# user config\n")
+
+    with patch("shuvoice.wizard_state.Config") as mock_config:
+        mock_config.config_dir.return_value = tmp_path / "shuvoice"
+        status, message = auto_add_hyprland_keybind("insert")
+
+    assert status == "added"
+    assert "Added ShuVoice keybind" in message
+    content = hypr_conf.read_text()
+    assert "bind = , Insert, exec, shuvoice --control start" in content
+    assert "bindr = , Insert, exec, shuvoice --control stop" in content
+
+
+def test_auto_add_hyprland_keybind_reports_conflict(tmp_path):
+    hypr_dir = tmp_path / "hypr"
+    hypr_dir.mkdir(parents=True)
+    hypr_conf = hypr_dir / "hyprland.conf"
+    hypr_conf.write_text("bind = , Insert, exec, grimblast save area\n")
+
+    with patch("shuvoice.wizard_state.Config") as mock_config:
+        mock_config.config_dir.return_value = tmp_path / "shuvoice"
+        status, message = auto_add_hyprland_keybind("insert")
+
+    assert status == "conflict"
+    assert "not adding ShuVoice binds" in message
+    content = hypr_conf.read_text()
+    assert "shuvoice --control" not in content
+
+
+def test_auto_add_hyprland_keybind_detects_existing_bind(tmp_path):
+    hypr_dir = tmp_path / "hypr"
+    hypr_dir.mkdir(parents=True)
+    hypr_conf = hypr_dir / "hyprland.conf"
+    hypr_conf.write_text(
+        "bind = , Insert, exec, shuvoice --control start\n"
+        "bindr = , Insert, exec, shuvoice --control stop\n"
+    )
+
+    with patch("shuvoice.wizard_state.Config") as mock_config:
+        mock_config.config_dir.return_value = tmp_path / "shuvoice"
+        status, _message = auto_add_hyprland_keybind("insert")
+
+    assert status == "already_configured"
+
+
+def test_auto_add_hyprland_keybind_skips_custom():
+    status, _message = auto_add_hyprland_keybind("custom")
+    assert status == "skipped_custom"
+
+
 # -- KEYBIND_PRESETS ----------------------------------------------------------
 
 
 def test_keybind_presets_structure():
-    """KEYBIND_PRESETS has at least 3 presets plus a custom option."""
+    """KEYBIND_PRESETS has useful presets plus a custom option."""
     assert len(KEYBIND_PRESETS) >= 4
     ids = [kid for kid, _, _, _ in KEYBIND_PRESETS]
-    assert "f9" in ids
+    assert "insert" in ids
+    assert "right_ctrl" in ids
     assert "custom" in ids
     # custom must have None for the hyprland key spec
     custom = next(p for p in KEYBIND_PRESETS if p[0] == "custom")

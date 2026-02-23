@@ -192,8 +192,8 @@ Notes:
 Hyprland example:
 
 ```ini
-bind = , F9, exec, shuvoice --control start
-bindr = , F9, exec, shuvoice --control stop
+bind = , Insert, exec, shuvoice --control start
+bindr = , Insert, exec, shuvoice --control stop
 ```
 
 ## Waybar module (tray-style status icon)
@@ -291,6 +291,10 @@ Relaunch setup wizard at any time:
 ```bash
 shuvoice --wizard
 ```
+
+The wizard can optionally auto-add Hyprland push-to-talk binds when the
+selected key is not already used (default presets include **Insert** and
+**Right Control**).
 
 (From Waybar, map an action to `shuvoice-waybar launch-wizard`.)
 
