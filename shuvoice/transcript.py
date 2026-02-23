@@ -57,10 +57,13 @@ def _stitch_by_word_overlap(previous: str, candidate: str) -> str | None:
 
     min_words = max(1, MIN_OVERLAP_WORDS)
     max_words = min(len(prev_words), len(new_words))
+
+    # Optimization: normalize relevant word ranges once (O(M) instead of O(M^2))
+    prev_tail_norm = [_normalize_word(word) for word in prev_words[-max_words:]]
+    new_head_norm = [_normalize_word(word) for word in new_words[:max_words]]
+
     for overlap in range(max_words, min_words - 1, -1):
-        prev_tail = [_normalize_word(word) for word in prev_words[-overlap:]]
-        new_head = [_normalize_word(word) for word in new_words[:overlap]]
-        if prev_tail != new_head:
+        if prev_tail_norm[-overlap:] != new_head_norm[:overlap]:
             continue
 
         suffix_words = new_words[overlap:]
