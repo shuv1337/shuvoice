@@ -7,7 +7,7 @@ import os
 import re
 import shutil
 import tempfile
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -50,7 +50,7 @@ def backup_config(path: str | Path) -> Path | None:
     if not config_path.exists():
         return None
 
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup_path = config_path.with_name(f"{config_path.name}.bak-{stamp}")
     shutil.copy2(config_path, backup_path)
     return backup_path
