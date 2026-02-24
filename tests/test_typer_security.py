@@ -1,4 +1,3 @@
-
 import logging
 import subprocess
 from unittest.mock import patch
@@ -24,5 +23,7 @@ def test_typer_does_not_log_sensitive_text(caplog):
 
         # Check logs
         for record in caplog.records:
-            assert sensitive_text not in record.message, f"Sensitive text found in log: {record.message}"
+            assert sensitive_text not in record.message, (
+                f"Sensitive text found in log: {record.message}"
+            )
             assert "wtype direct type failed" in record.message
