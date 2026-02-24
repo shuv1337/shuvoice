@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 
-from .asr_base import ASRBackend
+from .asr_base import ASRBackend, ASRCapabilities
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -21,6 +21,13 @@ log = logging.getLogger(__name__)
 
 class SherpaBackend(ASRBackend):
     """Sherpa ONNX streaming transducer backend (v1 contract)."""
+
+    capabilities = ASRCapabilities(
+        supports_gpu=True,
+        supports_model_download=True,
+        wants_raw_audio=False,
+        expected_chunking="streaming",
+    )
 
     _EXPECTED_SAMPLE_RATE = 16000
     _RELEASE_URL = "https://github.com/k2-fsa/sherpa-onnx/releases"

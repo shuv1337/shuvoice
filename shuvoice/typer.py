@@ -27,6 +27,7 @@ class StreamingTyper:
         retry_delay_ms: int = 40,
     ):
         self.last_partial_len = 0
+        self.last_partial_text = ""
         self.preserve_clipboard = preserve_clipboard
         self.retry_attempts = max(1, retry_attempts)
         self.retry_delay_s = max(0.0, retry_delay_ms / 1000.0)
@@ -72,6 +73,14 @@ class StreamingTyper:
     def _backspace_partial(self) -> bool:
         return self._send_backspaces(self.last_partial_len, "wtype backspace")
 
+    @staticmethod
+    def _common_prefix_len(left: str, right: str) -> int:
+        limit = min(len(left), len(right))
+        idx = 0
+        while idx < limit and left[idx] == right[idx]:
+            idx += 1
+        return idx
+
     def _type_direct(self, text: str) -> bool:
         if not text:
             return True
@@ -115,24 +124,31 @@ class StreamingTyper:
             self._run(["wl-copy", "--clear"], "wl-copy clear", attempts=1)
 
     def update_partial(self, new_text: str):
-        """Replace previous partial text with new partial text."""
-        if not new_text and self.last_partial_len == 0:
+        """Replace previous partial text using a diff-based suffix update."""
+        old_text = self.last_partial_text
+        if not new_text and not old_text:
             return
 
-        backspaced = self._send_backspaces(self.last_partial_len, "wtype partial backspace")
-        if not backspaced:
-            self.last_partial_len = 0
-            return
+        common_prefix = self._common_prefix_len(old_text, new_text)
+        to_delete = len(old_text) - common_prefix
+        to_insert = new_text[common_prefix:]
 
-        if new_text:
-            typed = self._run(["wtype", "--", new_text], "wtype partial type")
-            if typed:
-                self.last_partial_len = len(new_text)
-            else:
+        if to_delete > 0:
+            backspaced = self._send_backspaces(to_delete, "wtype partial backspace")
+            if not backspaced:
                 self.last_partial_len = 0
-            return
+                self.last_partial_text = ""
+                return
 
-        self.last_partial_len = 0
+        if to_insert:
+            typed = self._run(["wtype", "--", to_insert], "wtype partial type")
+            if not typed:
+                self.last_partial_len = 0
+                self.last_partial_text = ""
+                return
+
+        self.last_partial_text = new_text
+        self.last_partial_len = len(new_text)
 
     def commit_final(self, final_text: str):
         """Erase partial text, then paste final text (with direct-typing fallback)."""
@@ -151,7 +167,9 @@ class StreamingTyper:
 
         self._restore_clipboard(had_clip, clip_content)
         self.last_partial_len = 0
+        self.last_partial_text = ""
 
     def reset(self):
         """Reset tracking state without sending any keystrokes."""
         self.last_partial_len = 0
+        self.last_partial_text = ""

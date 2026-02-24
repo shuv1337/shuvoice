@@ -40,10 +40,15 @@ jobs:
         run: uv sync --dev
 
       - name: Ruff check
-        run: uv run ruff check shuvoice/ tests/
+        run: uv run ruff check shuvoice tests scripts
 
       - name: Ruff format check
-        run: uv run ruff format --check shuvoice/ tests/
+        run: uv run ruff format --check shuvoice tests scripts
+
+      - name: Docs/config drift checks
+        run: |
+          uv run python scripts/validate-doc-config-sync.py
+          uv run python scripts/validate-cli-help-sync.py
 
   unit:
     runs-on: ubuntu-latest

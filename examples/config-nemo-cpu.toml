@@ -1,5 +1,7 @@
 # ShuVoice example: NeMo on CPU (fallback only; high latency)
 
+config_version = 1
+
 [audio]
 sample_rate = 16000
 chunk_ms = 100

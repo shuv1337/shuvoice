@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from argparse import Namespace
 
+import pytest
+
 from shuvoice.__main__ import _apply_cli_overrides
+from shuvoice.cli.parser import create_parser, resolve_command
 from shuvoice.config import Config
 
 
@@ -32,6 +35,13 @@ def _args(**overrides) -> Namespace:
     return Namespace(**values)
 
 
+def _parse(argv: list[str]):
+    parser = create_parser()
+    args = parser.parse_args(argv)
+    route, warnings = resolve_command(args, parser)
+    return parser, args, route, warnings
+
+
 def test_apply_cli_overrides_moonshine_provider_and_threads() -> None:
     config = Config()
 
@@ -49,3 +59,61 @@ def test_apply_cli_overrides_moonshine_provider_and_threads() -> None:
     assert config.moonshine_provider == "cuda"
     assert config.moonshine_onnx_threads == 4
     assert config.audio_device == 2
+
+
+def test_default_route_is_run():
+    _parser, _args, route, warnings = _parse([])
+    assert route == "run"
+    assert warnings == []
+
+
+def test_legacy_preflight_maps_to_preflight_route():
+    _parser, _args, route, warnings = _parse(["--preflight"])
+    assert route == "preflight"
+    assert warnings
+
+
+def test_legacy_control_maps_to_control_route_and_action():
+    _parser, args, route, warnings = _parse(["--control", "status"])
+    assert route == "control"
+    assert args.control_action == "status"
+    assert warnings
+
+
+def test_subcommand_control_maps_without_legacy_warning():
+    _parser, args, route, warnings = _parse(["control", "status"])
+    assert route == "control"
+    assert args.control_action == "status"
+    assert warnings == []
+
+
+def test_subcommand_config_effective_route():
+    _parser, _args, route, _warnings = _parse(["config", "effective"])
+    assert route == "config_effective"
+
+
+def test_subcommand_config_validate_route():
+    _parser, _args, route, _warnings = _parse(["config", "validate"])
+    assert route == "config_validate"
+
+
+def test_subcommand_model_download_route():
+    _parser, _args, route, _warnings = _parse(["model", "download"])
+    assert route == "model_download"
+
+
+def test_subcommand_audio_list_devices_route():
+    _parser, _args, route, _warnings = _parse(["audio", "list-devices"])
+    assert route == "audio_list_devices"
+
+
+def test_subcommand_diagnostics_route():
+    _parser, _args, route, _warnings = _parse(["diagnostics"])
+    assert route == "diagnostics"
+
+
+def test_legacy_flags_are_mutually_exclusive():
+    parser = create_parser()
+    args = parser.parse_args(["--preflight", "--wizard"])
+    with pytest.raises(SystemExit):
+        resolve_command(args, parser)

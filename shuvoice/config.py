@@ -2,15 +2,91 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Mapping
 
-try:  # Python 3.11+
-    import tomllib
-except ModuleNotFoundError:  # Python 3.10
-    import tomli as tomllib
+log = logging.getLogger(__name__)
+
+CURRENT_CONFIG_VERSION = 1
+"""Current config schema version.
+
+Versioning policy
+-----------------
+- Bump this only when config shape/semantics require migration.
+- Missing ``config_version`` is treated as legacy v0 and migrated forward.
+- Migration steps must be deterministic and idempotent.
+"""
+
+
+CONFIG_SECTION_FIELDS: dict[str, tuple[str, ...]] = {
+    "audio": (
+        "sample_rate",
+        "chunk_ms",
+        "fallback_sample_rate",
+        "audio_device",
+        "input_gain",
+        "audio_queue_max_size",
+        "silence_rms_threshold",
+        "silence_rms_multiplier",
+        "min_speech_ms",
+        "auto_gain_target_peak",
+        "auto_gain_max",
+        "auto_gain_settle_chunks",
+    ),
+    "asr": (
+        "asr_backend",
+        "model_name",
+        "right_context",
+        "device",
+        "use_cuda_graph_decoder",
+        "sherpa_model_dir",
+        "sherpa_provider",
+        "sherpa_num_threads",
+        "sherpa_chunk_ms",
+        "moonshine_model_name",
+        "moonshine_model_dir",
+        "moonshine_model_precision",
+        "moonshine_chunk_ms",
+        "moonshine_max_window_sec",
+        "moonshine_max_tokens",
+        "moonshine_provider",
+        "moonshine_onnx_threads",
+    ),
+    "overlay": (
+        "font_size",
+        "font_family",
+        "bg_opacity",
+        "border_radius",
+        "bottom_margin",
+    ),
+    "control": ("control_socket",),
+    "typing": (
+        "output_mode",
+        "use_clipboard_for_final",
+        "preserve_clipboard",
+        "typing_retry_attempts",
+        "typing_retry_delay_ms",
+        "auto_capitalize",
+        "text_replacements",
+    ),
+    "streaming": (
+        "streaming_stall_guard",
+        "streaming_stall_chunks",
+        "streaming_stall_rms_ratio",
+        "streaming_stall_flush_chunks",
+    ),
+    "feedback": (
+        "audio_feedback",
+        "feedback_start_freq",
+        "feedback_stop_freq",
+        "feedback_duration_ms",
+        "feedback_volume",
+    ),
+}
 
 
 def _xdg_config_home() -> Path:
@@ -67,6 +143,9 @@ _FONT_FAMILY_RE = re.compile(r"^[A-Za-z0-9 ._-]+$")
 
 @dataclass
 class Config:
+    # Schema metadata
+    config_version: int = CURRENT_CONFIG_VERSION
+
     # Audio
     sample_rate: int = 16000
     chunk_ms: int = 100
@@ -138,7 +217,27 @@ class Config:
     feedback_duration_ms: int = 70
     feedback_volume: float = 0.08
 
+    # Runtime cache for hot-path post-processing.
+    _compiled_text_replacements: tuple[tuple[re.Pattern[str], str], ...] = field(
+        init=False,
+        repr=False,
+        compare=False,
+        default_factory=tuple,
+    )
+
     def __post_init__(self):
+        try:
+            self.config_version = int(self.config_version)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("config_version must be an integer") from exc
+        if self.config_version < 1:
+            raise ValueError("config_version must be >= 1")
+        if self.config_version > CURRENT_CONFIG_VERSION:
+            raise ValueError(
+                "config_version is newer than this ShuVoice build supports "
+                f"(got {self.config_version}, max {CURRENT_CONFIG_VERSION})"
+            )
+
         self.asr_backend = str(self.asr_backend).strip().lower()
         if self.asr_backend not in {"nemo", "sherpa", "moonshine"}:
             raise ValueError("asr_backend must be one of: nemo, sherpa, moonshine")
@@ -259,6 +358,14 @@ class Config:
             normalized_replacements[key_text] = value.strip()
         self.text_replacements = normalized_replacements
 
+        from .postprocess import compile_text_replacements
+
+        self._compiled_text_replacements = compile_text_replacements(self.text_replacements)
+
+    @property
+    def compiled_text_replacements(self) -> tuple[tuple[re.Pattern[str], str], ...]:
+        return self._compiled_text_replacements
+
     @property
     def chunk_samples(self) -> int:
         return self.sample_rate * self.chunk_ms // 1000
@@ -270,27 +377,81 @@ class Config:
         return d
 
     @classmethod
+    def config_path(cls) -> Path:
+        return cls.config_dir() / "config.toml"
+
+    @classmethod
     def data_dir(cls) -> Path:
         d = _xdg_data_home() / "shuvoice"
         d.mkdir(parents=True, exist_ok=True)
         return d
 
     @classmethod
-    def load(cls) -> "Config":
-        config_file = cls.config_dir() / "config.toml"
-        if not config_file.exists():
-            return cls()
-
-        with open(config_file, "rb") as f:
-            data = tomllib.load(f)
-
-        flat: dict = {}
-        for key, value in data.items():
+    def _flatten_raw(cls, raw: Mapping[str, Any]) -> dict[str, Any]:
+        flat: dict[str, Any] = {}
+        for key, value in raw.items():
+            if key == "config_version":
+                flat[key] = value
+                continue
             if isinstance(value, dict):
                 flat.update(value)
             else:
                 flat[key] = value
+        return flat
 
-        valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
+    @classmethod
+    def load(cls) -> "Config":
+        from .config_io import load_raw, write_atomic
+        from .config_migrations import migrate_to_latest
+
+        config_file = cls.config_path()
+
+        raw = load_raw(config_file)
+        migrated, report = migrate_to_latest(raw)
+
+        flat = cls._flatten_raw(migrated)
+
+        valid_fields = {
+            f.name for f in cls.__dataclass_fields__.values() if not f.name.startswith("_")
+        }
+        ignored = sorted(k for k in flat if k not in valid_fields)
+        if ignored:
+            log.debug("Ignoring unknown config keys: %s", ", ".join(ignored))
+
         filtered = {k: v for k, v in flat.items() if k in valid_fields}
-        return cls(**filtered)
+        cfg = cls(**filtered)
+
+        if config_file.exists() and report.to_version != report.from_version:
+            try:
+                write_atomic(config_file, migrated)
+                log.info(
+                    "Migrated config schema v%d -> v%d",
+                    report.from_version,
+                    report.to_version,
+                )
+            except Exception:  # noqa: BLE001
+                log.warning("Failed to persist migrated config file", exc_info=True)
+
+        return cfg
+
+    @classmethod
+    def config_field_names(cls) -> set[str]:
+        return {f.name for f in cls.__dataclass_fields__.values() if not f.name.startswith("_")}
+
+    def to_nested_dict(self, *, include_none: bool = False) -> dict[str, Any]:
+        data: dict[str, Any] = {"config_version": int(self.config_version)}
+
+        for section, fields in CONFIG_SECTION_FIELDS.items():
+            section_data: dict[str, Any] = {}
+            for key in fields:
+                value = getattr(self, key)
+                if value is None and not include_none:
+                    continue
+                if key == "text_replacements":
+                    section_data[key] = dict(value)
+                else:
+                    section_data[key] = value
+            if section_data:
+                data[section] = section_data
+
+        return data

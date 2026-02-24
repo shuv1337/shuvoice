@@ -25,6 +25,7 @@ def test_run_retries_until_success(monkeypatch):
 def test_update_partial_batches_backspaces(monkeypatch):
     typer = StreamingTyper(retry_attempts=1, retry_delay_ms=0)
     typer.last_partial_len = 120
+    typer.last_partial_text = "x" * 120
 
     calls: list[tuple[list[str], str, int | None]] = []
 
@@ -42,6 +43,27 @@ def test_update_partial_batches_backspaces(monkeypatch):
     assert calls[2][0].count("BackSpace") == 20
     assert calls[3][0] == ["wtype", "--", "abc"]
     assert typer.last_partial_len == 3
+
+
+def test_update_partial_uses_common_prefix_for_small_suffix_edits(monkeypatch):
+    typer = StreamingTyper(retry_attempts=1, retry_delay_ms=0)
+    typer.last_partial_text = "hello world"
+    typer.last_partial_len = len(typer.last_partial_text)
+
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], op: str, attempts: int | None = None) -> bool:
+        calls.append(args)
+        return True
+
+    monkeypatch.setattr(typer, "_run", fake_run)
+
+    typer.update_partial("hello there")
+
+    # Only remove the differing suffix ("world" -> "there"), not full retype.
+    assert len(calls) == 2
+    assert calls[0].count("BackSpace") == 5
+    assert calls[1] == ["wtype", "--", "there"]
 
 
 def test_commit_final_falls_back_to_direct_type_and_restores_clipboard(monkeypatch):

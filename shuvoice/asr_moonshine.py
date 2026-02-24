@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from .asr_base import ASRBackend
+from .asr_base import ASRBackend, ASRCapabilities
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -39,6 +39,13 @@ class MoonshineBackend(ASRBackend):
        transformer failure mode) are detected and truncated before the
        result is returned.
     """
+
+    capabilities = ASRCapabilities(
+        supports_gpu=True,
+        supports_model_download=False,
+        wants_raw_audio=True,
+        expected_chunking="windowed",
+    )
 
     _EXPECTED_SAMPLE_RATE = 16000
     # The upstream helper asserts >0.1s, but very short windows often decode as
@@ -99,10 +106,6 @@ class MoonshineBackend(ASRBackend):
         self._last_text = ""
         self._step_num = 0
         self._samples_since_infer = 0
-
-    @property
-    def wants_raw_audio(self) -> bool:
-        return True
 
     @property
     def native_chunk_samples(self) -> int:

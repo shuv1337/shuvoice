@@ -1,5 +1,7 @@
 # ShuVoice example: NeMo on CUDA (best quality)
 
+config_version = 1
+
 [audio]
 sample_rate = 16000
 chunk_ms = 100

@@ -13,6 +13,7 @@ from shuvoice.control import (
     _ensure_secure_directory,
     default_control_socket_path,
     resolve_control_socket_path,
+    send_control_command,
 )
 
 
@@ -164,3 +165,27 @@ def test_ensure_secure_directory_rejects_unsafe_ownership(tmp_path: Path):
         # We expect RuntimeError with message "not owned by current user"
         with pytest.raises(RuntimeError, match="not owned by current user"):
             _ensure_secure_directory(unsafe_dir)
+
+
+def test_control_server_metrics_command(tmp_path: Path):
+    socket_path = tmp_path / "control.sock"
+    server = ControlServer(
+        socket_path=str(socket_path),
+        on_start=noop,
+        on_stop=noop,
+        on_toggle=noop,
+        on_status=lambda: "ok",
+        on_metrics=lambda: '{"chunks": 12}',
+    )
+
+    server.start()
+    try:
+        for _ in range(50):
+            if socket_path.exists():
+                break
+            time.sleep(0.05)
+
+        response = send_control_command("metrics", str(socket_path), timeout=1.0)
+        assert response == 'OK {"chunks": 12}'
+    finally:
+        server.stop()

@@ -3,12 +3,24 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass
+from typing import Any
 
 import numpy as np
 
 
+@dataclass(frozen=True)
+class ASRCapabilities:
+    supports_gpu: bool = False
+    supports_model_download: bool = False
+    wants_raw_audio: bool = False
+    expected_chunking: str = "streaming"  # "streaming" | "windowed"
+
+
 class ASRBackend(ABC):
     """Common runtime surface used by the ShuVoice app loop."""
+
+    capabilities = ASRCapabilities()
 
     @abstractmethod
     def load(self) -> None:
@@ -29,17 +41,8 @@ class ASRBackend(ABC):
 
     @property
     def wants_raw_audio(self) -> bool:
-        """If True the app must **not** apply per-chunk utterance gain.
-
-        This is for backends that already normalize internally (for example,
-        Moonshine's buffer-level normalization and NeMo's preprocessor
-        feature normalization). Applying app-side per-chunk gain on top can
-        introduce level discontinuities and hurt recognition.
-
-        Backends that rely on app-side gain tuning (for example Sherpa)
-        should keep the default ``False``.
-        """
-        return False
+        """Backward-compatible passthrough to ``capabilities.wants_raw_audio``."""
+        return bool(self.capabilities.wants_raw_audio)
 
     @property
     def debug_step_num(self) -> int | None:
@@ -52,6 +55,20 @@ class ASRBackend(ABC):
         """Return import/runtime dependency errors for this backend."""
 
     @classmethod
+    def dependency_diagnostics(cls) -> dict[str, Any]:
+        errors = cls.dependency_errors()
+        return {
+            "backend": cls.__name__,
+            "ok": not errors,
+            "errors": errors,
+            "capabilities": asdict(cls.capabilities),
+        }
+
+    @classmethod
     def download_model(cls, **kwargs) -> None:
         """Optional model pre-download hook."""
+        if cls.capabilities.supports_model_download:
+            raise NotImplementedError(
+                f"{cls.__name__} advertises model download support but does not implement it"
+            )
         raise NotImplementedError(f"{cls.__name__} does not support model download")
