@@ -299,10 +299,12 @@ layerrule = ignorealpha 0.20, stt-overlay
 layerrule = xray 1, stt-overlay
 ```
 
-Then tune overlay alpha in `~/.config/shuvoice/config.toml`:
+Then tune overlay styling in `~/.config/shuvoice/config.toml`:
 
 ```toml
 [overlay]
+font_size = 24
+font_family = "JetBrains Mono" # optional
 bg_opacity = 0.55
 ```
 

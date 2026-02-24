@@ -76,6 +76,10 @@ class CaptionOverlay:
 
     def _setup_css(self):
         cfg = self._config
+        font_family_css = (
+            f'  font-family: "{cfg.font_family}";\n' if getattr(cfg, "font_family", None) else ""
+        )
+
         css = Gtk.CssProvider()
         css.load_from_string(
             f"window {{ background-color: transparent; }}\n"
@@ -90,6 +94,7 @@ class CaptionOverlay:
             ".caption-label {\n"
             "  color: white;\n"
             f"  font-size: {cfg.font_size}px;\n"
+            f"{font_family_css}"
             "  font-weight: bold;\n"
             "}\n"
             ".recording-icon {\n"

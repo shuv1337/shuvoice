@@ -19,6 +19,21 @@ def test_overlay_font_size_validation():
         Config(font_size="22; background: red")
 
 
+def test_overlay_font_family_validation():
+    cfg = Config(font_family="JetBrains Mono")
+    assert cfg.font_family == "JetBrains Mono"
+
+    # Empty/whitespace should normalize to None (fallback to GTK/system default)
+    cfg = Config(font_family="   ")
+    assert cfg.font_family is None
+
+    with pytest.raises(ValueError, match="font_family"):
+        Config(font_family=123)
+
+    with pytest.raises(ValueError, match="font_family"):
+        Config(font_family='Sans"; color: red;')
+
+
 def test_overlay_bg_opacity_validation():
     # Should be float between 0.0 and 1.0
     with pytest.raises(ValueError, match="bg_opacity"):

@@ -53,6 +53,9 @@ use_cuda_graph_decoder = false
 
 [overlay]
 font_size = 22
+# Optional per-overlay font family (app-only, does not change system/global GTK fonts)
+# Allowed characters: letters, numbers, spaces, '.', '_' and '-'
+# font_family = "JetBrains Mono"
 bg_opacity = 0.75
 border_radius = 16
 bottom_margin = 60

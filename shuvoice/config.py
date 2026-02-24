@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -61,6 +62,9 @@ def _default_text_replacements() -> dict[str, str]:
     return dict(DEFAULT_TEXT_REPLACEMENTS)
 
 
+_FONT_FAMILY_RE = re.compile(r"^[A-Za-z0-9 ._-]+$")
+
+
 @dataclass
 class Config:
     # Audio
@@ -104,6 +108,7 @@ class Config:
 
     # Overlay
     font_size: int = 22
+    font_family: str | None = None
     bg_opacity: float = 0.75
     border_radius: int = 16
     bottom_margin: int = 60
@@ -201,6 +206,22 @@ class Config:
         if int(self.font_size) <= 0:
             raise ValueError("font_size must be > 0")
         self.font_size = int(self.font_size)
+
+        if self.font_family is None:
+            pass
+        elif not isinstance(self.font_family, str):
+            raise ValueError("font_family must be a string")
+        else:
+            normalized_font_family = self.font_family.strip()
+            if not normalized_font_family:
+                self.font_family = None
+            elif not _FONT_FAMILY_RE.fullmatch(normalized_font_family):
+                raise ValueError(
+                    "font_family contains unsupported characters "
+                    "(allowed: letters, numbers, spaces, '.', '_' and '-')"
+                )
+            else:
+                self.font_family = normalized_font_family
 
         if not (0.0 <= float(self.bg_opacity) <= 1.0):
             raise ValueError("bg_opacity must be between 0.0 and 1.0")

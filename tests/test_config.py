@@ -21,6 +21,7 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     assert cfg.audio_feedback is True
     assert cfg.auto_capitalize is True
     assert cfg.text_replacements == DEFAULT_TEXT_REPLACEMENTS
+    assert cfg.font_family is None
     assert cfg.streaming_stall_guard is True
     assert cfg.streaming_stall_chunks == 4
     assert cfg.asr_backend == "sherpa"
@@ -74,6 +75,10 @@ moonshine_chunk_ms = 110
 moonshine_max_window_sec = 20.0
 moonshine_max_tokens = 160
 
+[overlay]
+font_size = 28
+font_family = "JetBrains Mono"
+
 [typing]
 output_mode = "streaming_partial"
 use_clipboard_for_final = true
@@ -126,6 +131,8 @@ foo = "bar"
     assert cfg.moonshine_chunk_ms == 110
     assert cfg.moonshine_max_window_sec == 20.0
     assert cfg.moonshine_max_tokens == 160
+    assert cfg.font_size == 28
+    assert cfg.font_family == "JetBrains Mono"
     assert cfg.output_mode == "streaming_partial"
     assert cfg.use_clipboard_for_final is True
     assert cfg.preserve_clipboard is True
