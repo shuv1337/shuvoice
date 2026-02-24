@@ -71,9 +71,11 @@ typing_retry_delay_ms = 40
 auto_capitalize = true
 # Optional word/phrase corrections applied to final text before typing.
 # Case-insensitive, whole-word/phrase matches. Use empty value to delete a word.
+# Built-in defaults already normalize common ShuVoice/Hyprland variants
+# (e.g. "shove voice", "shu voice", "show voice", "hyper land", "high per land").
+# Add your own entries (or override built-ins) below.
 # [typing.text_replacements]
-# "shove voice" = "ShuVoice"
-# "hyper land" = "Hyprland"
+# "speech to text" = "speech-to-text"
 # "um" = ""
 
 [streaming]

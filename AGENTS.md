@@ -131,15 +131,17 @@ Applied only for backends that do **not** request raw audio.
 
 ### Typing text replacements
 
-Use `[typing.text_replacements]` to correct common ASR mistakes with exact
-replacement text.  Matches are case-insensitive and applied to whole
-words/phrases only (longest first).  Empty values delete the matched word.
+ShuVoice includes built-in brand corrections for common ASR variants of
+`ShuVoice` and `Hyprland` (for example: `shove voice`, `shu voice`,
+`show voice`, `hyper land`, `hyperland`, `high per land`).
+
+Use `[typing.text_replacements]` to add or override replacements. Matches are
+case-insensitive and applied to whole words/phrases only (longest first).
+Empty values delete the matched word.
 
 ```toml
 [typing.text_replacements]
-"shove voice" = "ShuVoice"
 "speech to text" = "speech-to-text"
-"hyper land" = "Hyprland"
 "um" = ""
 ```
 

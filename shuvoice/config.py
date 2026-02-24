@@ -20,6 +20,47 @@ def _xdg_data_home() -> Path:
     return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
 
 
+DEFAULT_TEXT_REPLACEMENTS: dict[str, str] = {
+    # ShuVoice name variants (common ASR confusions)
+    "shove voice": "ShuVoice",
+    "shove-voice": "ShuVoice",
+    "shovevoice": "ShuVoice",
+    "shu voice": "ShuVoice",
+    "shu-voice": "ShuVoice",
+    "shuvoice": "ShuVoice",
+    "shoo voice": "ShuVoice",
+    "shoo-voice": "ShuVoice",
+    "shoovoice": "ShuVoice",
+    "shoe voice": "ShuVoice",
+    "shoe-voice": "ShuVoice",
+    "shoevoice": "ShuVoice",
+    "show voice": "ShuVoice",
+    "show-voice": "ShuVoice",
+    "showvoice": "ShuVoice",
+    # Hyprland name variants (common ASR confusions)
+    "hyper land": "Hyprland",
+    "hyper-land": "Hyprland",
+    "hyperland": "Hyprland",
+    "hypr land": "Hyprland",
+    "hypr-land": "Hyprland",
+    "hyprland": "Hyprland",
+    "hype land": "Hyprland",
+    "hype-land": "Hyprland",
+    "high per land": "Hyprland",
+    "high-per-land": "Hyprland",
+    "highper land": "Hyprland",
+    "highper-land": "Hyprland",
+    "highperland": "Hyprland",
+    "hyper lend": "Hyprland",
+    "hyper-lend": "Hyprland",
+    "hyperlend": "Hyprland",
+}
+
+
+def _default_text_replacements() -> dict[str, str]:
+    return dict(DEFAULT_TEXT_REPLACEMENTS)
+
+
 @dataclass
 class Config:
     # Audio
@@ -77,7 +118,7 @@ class Config:
     typing_retry_attempts: int = 2
     typing_retry_delay_ms: int = 40
     auto_capitalize: bool = True
-    text_replacements: dict[str, str] = field(default_factory=dict)
+    text_replacements: dict[str, str] = field(default_factory=_default_text_replacements)
 
     # Streaming stability
     streaming_stall_guard: bool = True
@@ -180,10 +221,11 @@ class Config:
             raise ValueError("typing_retry_delay_ms must be >= 0")
 
         # Normalize text_replacements: strip whitespace and validate string types.
-        # Empty values are allowed (they delete the matched word/phrase).
+        # Built-in brand corrections are always included; user config can add
+        # or override entries. Empty values are allowed (word/phrase deletion).
         if not isinstance(self.text_replacements, dict):
             raise ValueError("text_replacements must be a table/map of string keys to values")
-        normalized_replacements: dict[str, str] = {}
+        normalized_replacements: dict[str, str] = _default_text_replacements()
         for key, value in self.text_replacements.items():
             if not isinstance(key, str):
                 raise ValueError("text_replacements keys must be strings")

@@ -358,12 +358,16 @@ Backend selection is controlled by `asr_backend`:
 
 `right_context` applies to NeMo only.
 
-Final text corrections can be configured with `[typing.text_replacements]`:
+ShuVoice includes built-in brand corrections for common ASR variants of
+`ShuVoice` and `Hyprland` (for example: `shove voice`, `shu voice`,
+`show voice`, `hyper land`, `hyperland`, `high per land`).
+
+You can add/override corrections with `[typing.text_replacements]`:
 
 ```toml
 [typing.text_replacements]
-"shove voice" = "ShuVoice"
-"hyper land" = "Hyprland"
+# Add your own replacements (or override a built-in one)
+"speech to text" = "speech-to-text"
 "um" = ""
 ```
 
