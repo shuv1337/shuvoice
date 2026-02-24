@@ -1,8 +1,10 @@
 
 import logging
 import subprocess
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
 from shuvoice.typer import StreamingTyper
+
 
 def test_typer_does_not_log_sensitive_text(caplog):
     """Verify that sensitive text is not logged when subprocess fails."""
