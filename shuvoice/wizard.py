@@ -185,6 +185,7 @@ class WelcomeWizard(Gtk.Application):
             try:
                 logo = Gtk.Picture.new_for_filename(str(logo_path))
                 logo.set_can_shrink(True)
+                logo.set_alternative_text("ShuVoice logo")
                 logo.set_size_request(320, -1)
                 logo.set_halign(Gtk.Align.CENTER)
                 logo.set_margin_bottom(12)
