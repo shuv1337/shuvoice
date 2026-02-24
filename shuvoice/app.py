@@ -22,9 +22,26 @@ from .asr import create_backend
 from .audio import AudioCapture, audio_rms
 from .config import Config
 from .control import ControlServer
+from .diagnostics import metrics_to_json
 from .feedback import play_tone
+from .metrics import MetricsCollector
 from .postprocess import apply_text_replacements, capitalize_first
-from .streaming_health import should_trigger_stall_flush
+from .runtime import (
+    append_recording_chunk,
+    apply_utterance_gain,
+    begin_utterance,
+    drain_and_buffer,
+    flush_streaming_stall,
+    flush_tail_silence,
+    make_flush_noise,
+    on_recording_start,
+    on_recording_stop,
+    on_recording_toggle,
+    process_recording_chunks,
+    recording_status,
+    transcribe_native_chunk,
+    update_noise_floor,
+)
 from .transcript import prefer_transcript
 from .typer import StreamingTyper
 from .utterance_state import _UtteranceState
@@ -59,6 +76,7 @@ class ShuVoiceApp(Gtk.Application):
             retry_attempts=config.typing_retry_attempts,
             retry_delay_ms=config.typing_retry_delay_ms,
         )
+        self.metrics = MetricsCollector()
 
         if config.output_mode not in {"final_only", "streaming_partial"}:
             raise ValueError(
@@ -72,6 +90,7 @@ class ShuVoiceApp(Gtk.Application):
             on_stop=self._on_recording_stop,
             on_toggle=self._on_recording_toggle,
             on_status=self._recording_status,
+            on_metrics=self._metrics_status,
         )
 
         self.overlay: CaptionOverlay | None = None
@@ -104,6 +123,8 @@ class ShuVoiceApp(Gtk.Application):
         self._streaming_stall_chunks = max(1, int(self.config.streaming_stall_chunks))
         self._streaming_stall_rms_ratio = max(0.0, float(self.config.streaming_stall_rms_ratio))
         self._streaming_stall_flush_chunks = max(1, int(self.config.streaming_stall_flush_chunks))
+
+        self._next_metrics_log_monotonic = time.monotonic() + 10.0
 
     def load_model(self):
         """Load the ASR model synchronously (legacy helper).
@@ -256,6 +277,9 @@ class ShuVoiceApp(Gtk.Application):
                 return
             try:
                 self.asr.reset()
+                metrics = getattr(self, "metrics", None)
+                if metrics is not None:
+                    metrics.observe_recovery_reset()
             except Exception:
                 self._consecutive_asr_failures += 1
                 failures = self._consecutive_asr_failures
@@ -316,93 +340,49 @@ class ShuVoiceApp(Gtk.Application):
         )
 
     def _on_recording_start(self):
-        if self._recording.is_set():
-            log.debug("Recording already active; ignoring start")
-            return
-
-        if not self._asr_thread_alive:
-            self._show_overlay_error("⚠ ASR thread crashed — restart ShuVoice")
-            return
-
-        with self._asr_lock:
-            if self._asr_disabled:
-                log.warning("ASR disabled; attempting one-shot reset on recording start")
-                try:
-                    self.asr.reset()
-                except Exception:
-                    log.exception("ASR recovery reset failed; still disabled")
-                    self._show_overlay_error("⚠ ASR error — restart ShuVoice")
-                    return
-                self._asr_disabled = False
-                self._consecutive_asr_failures = 0
-
-            self.audio.clear()
-
-            try:
-                self.asr.reset()
-            except Exception:
-                self._consecutive_asr_failures += 1
-                failures = self._consecutive_asr_failures
-                log.exception(
-                    "ASR reset failed on recording start (%d/%d)",
-                    failures,
-                    self._ASR_MAX_FAILURES,
-                )
-                if failures >= self._ASR_MAX_FAILURES:
-                    self._disable_asr("ASR disabled after repeated reset failures")
-                else:
-                    self._show_overlay_error("⚠ ASR error — restart ShuVoice")
-                return
-
-            self.audio.clear()
-
-        self._processing.clear()
-        self._recording.set()
-        log.info("Recording started")
-
-        if self.overlay:
-            self.overlay.show()
-            self.overlay.set_state("listening")
-            self.overlay.set_text("Listening…")
-
-        self._play_feedback_tone(is_start=True)
+        return on_recording_start(self)
 
     def _on_recording_stop(self):
-        if not self._recording.is_set():
-            log.debug("Recording already stopped; ignoring stop")
-            return
-
-        log.info("Recording stopped")
-        self._recording.clear()
-        self._processing.set()
-        self._play_feedback_tone(is_start=False)
-
-        if self.overlay:
-            self.overlay.set_state("processing")
+        return on_recording_stop(self)
 
     def _on_recording_toggle(self):
-        if self._recording.is_set():
-            self._on_recording_stop()
-        else:
-            self._on_recording_start()
+        return on_recording_toggle(self)
 
     def _recording_status(self) -> str:
-        if self._asr_disabled:
-            return "error:asr_disabled"
-        if not self._asr_thread_alive:
-            return "error:asr_thread_dead"
-        if self._recording.is_set():
-            return "recording"
-        if self._processing.is_set():
-            return "processing"
-        return "idle"
+        return recording_status(self)
+
+    def _metrics_status(self) -> str:
+        return metrics_to_json(self.metrics.snapshot())
+
+    def _on_transcript_update(self, text: str):
+        rendered_text = self._render_transcript_text(text)
+        if self.overlay:
+            self.overlay.set_text(rendered_text)
+        if self.config.output_mode == "streaming_partial":
+            self.typer.update_partial(rendered_text)
+            metrics = getattr(self, "metrics", None)
+            if metrics is not None:
+                metrics.observe_partial_update()
+
+    def _log_metrics_if_due(self):
+        if not log.isEnabledFor(logging.INFO):
+            return
+        now = time.monotonic()
+        if now < self._next_metrics_log_monotonic:
+            return
+        self._next_metrics_log_monotonic = now + 10.0
+        log.info(self.metrics.summary_line())
 
     def _render_transcript_text(self, text: str) -> str:
         """Render transcript text for preview/final output consistency."""
         if not text:
             return text
 
-        rendered = apply_text_replacements(text, self.config.text_replacements)
+        rendered = apply_text_replacements(
+            text,
+            self.config.text_replacements,
+            compiled_replacements=getattr(self.config, "compiled_text_replacements", None),
+        )
         if not rendered:
             return rendered
 
@@ -414,190 +394,31 @@ class ShuVoiceApp(Gtk.Application):
     # -- ASR processing helpers ---------------------------------------------
 
     def _apply_utterance_gain(self, audio: np.ndarray, gain: float) -> np.ndarray:
-        if gain <= 1.05 or audio.size == 0:
-            return audio
-        # Use a single pre-allocated output buffer to avoid temporary arrays in
-        # this hot path.
-        result = np.empty_like(audio, dtype=np.float32)
-        np.multiply(audio, gain, out=result)
-        np.clip(result, -1.0, 1.0, out=result)
-        return result
+        return apply_utterance_gain(audio, gain)
 
     def _update_noise_floor(self, chunk_rms: float):
-        if chunk_rms <= 0.0:
-            return
-        if self._noise_floor_rms <= 0.0:
-            self._noise_floor_rms = chunk_rms
-        else:
-            self._noise_floor_rms = 0.98 * self._noise_floor_rms + 0.02 * chunk_rms
+        return update_noise_floor(self, chunk_rms)
 
     def _begin_utterance(self, state: _UtteranceState):
-        # Defensive reset: ensure ASR model is clean after any potential
-        # contamination from tail flush race conditions.
-        with self._asr_lock:
-            if not self._asr_disabled:
-                try:
-                    self.asr.reset()
-                except Exception:
-                    log.exception("ASR reset failed at utterance start")
-                    self._recover_asr_after_failure("ASR reset at utterance start")
-
-        threshold = max(
-            self._speech_rms_threshold,
-            self._noise_floor_rms * self._speech_rms_multiplier,
-        )
-        state.reset(rms_threshold=threshold)
-        log.debug(
-            "Recording energy threshold: %.4f (noise_floor=%.4f, floor=%.4f, x%.2f)",
-            threshold,
-            self._noise_floor_rms,
-            self._speech_rms_threshold,
-            self._speech_rms_multiplier,
-        )
+        return begin_utterance(self, state)
 
     def _append_recording_chunk(self, state: _UtteranceState, chunk: np.ndarray):
-        state.add_chunk(chunk)
-        chunk_rms = audio_rms(chunk)
-        state.last_chunk_rms = chunk_rms
-        state.peak_rms = max(state.peak_rms, chunk_rms)
-
-        if chunk_rms >= state.utterance_rms_threshold:
-            state.speech_samples += len(chunk)
-            state.speech_chunks_seen += 1
-
-        # Backends with internal normalization (e.g. NeMo/Moonshine) bypass
-        # app-side gain entirely.
-        if self.asr.wants_raw_audio:
-            return
-
-        if state.speech_chunks_seen < self._auto_gain_settle_chunks:
-            return
-
-        if state.peak_rms > 0.003:
-            state.utterance_gain = min(
-                self._auto_gain_target_peak / state.peak_rms,
-                self._auto_gain_max,
-            )
+        return append_recording_chunk(self, state, chunk)
 
     def _transcribe_native_chunk(self, state: _UtteranceState, error_context: str) -> bool:
-        to_process, has_more = state.consume_native_chunk(self.asr.native_chunk_samples)
-        if to_process.size == 0:
-            return False
-
-        if not self.asr.wants_raw_audio:
-            to_process = self._apply_utterance_gain(to_process, state.utterance_gain)
-
-        try:
-            text = self._process_chunk_safe(to_process)
-        except Exception:
-            self._recover_asr_after_failure(error_context)
-            return False
-
-        log.debug(
-            "ASR step=%s queue_size=%d raw_text_len=%d chunk_rms=%.4f gain=%.1f",
-            self.asr.debug_step_num,
-            self.audio.queue.qsize(),
-            len(text),
-            audio_rms(to_process),
-            state.utterance_gain,
-        )
-
-        merged = prefer_transcript(state.last_text, text)
-        if merged != state.last_text:
-            log.debug("Transcript updated: len %d -> %d", len(state.last_text), len(merged))
-            state.last_text = merged
-            state.unchanged_steps = 0
-            rendered_text = self._render_transcript_text(state.last_text)
-            if self.overlay:
-                self.overlay.set_text(rendered_text)
-            if self.config.output_mode == "streaming_partial":
-                self.typer.update_partial(rendered_text)
-        else:
-            state.unchanged_steps += 1
-
-        return has_more
+        return transcribe_native_chunk(self, state, error_context)
 
     def _flush_streaming_stall(self, state: _UtteranceState):
-        if self._asr_disabled:
-            return
-
-        native = self.asr.native_chunk_samples
-        # Intentionally feed raw digital silence here; this path is a short
-        # stall nudge and should not apply utterance gain.
-        silence = np.zeros(native, dtype=np.float32)
-
-        for _ in range(self._streaming_stall_flush_chunks):
-            try:
-                text = self._process_chunk_safe(silence)
-            except Exception:
-                self._recover_asr_after_failure("ASR stall-guard flush failed")
-                break
-
-            merged = prefer_transcript(state.last_text, text)
-            if merged != state.last_text:
-                log.debug(
-                    "Transcript updated after stall flush: len %d -> %d",
-                    len(state.last_text),
-                    len(merged),
-                )
-                state.last_text = merged
-                rendered_text = self._render_transcript_text(state.last_text)
-                if self.overlay:
-                    self.overlay.set_text(rendered_text)
-                if self.config.output_mode == "streaming_partial":
-                    self.typer.update_partial(rendered_text)
-
-        state.unchanged_steps = 0
+        metrics = getattr(self, "metrics", None)
+        if metrics is not None:
+            metrics.observe_stall_flush()
+        return flush_streaming_stall(self, state)
 
     def _process_recording_chunks(self, state: _UtteranceState):
-        while (
-            self._recording.is_set()
-            and not self._asr_disabled
-            and state.total >= self.asr.native_chunk_samples
-        ):
-            has_more = self._transcribe_native_chunk(state, "ASR chunk processing failed")
-            if not has_more:
-                break
-
-            if self._streaming_stall_guard and should_trigger_stall_flush(
-                unchanged_steps=state.unchanged_steps,
-                chunk_rms=state.last_chunk_rms,
-                utterance_threshold=state.utterance_rms_threshold,
-                stall_chunks=self._streaming_stall_chunks,
-                stall_rms_ratio=self._streaming_stall_rms_ratio,
-            ):
-                log.debug(
-                    "Streaming stall guard triggered (unchanged_steps=%d, chunk_rms=%.4f, threshold=%.4f)",
-                    state.unchanged_steps,
-                    state.last_chunk_rms,
-                    state.utterance_rms_threshold,
-                )
-                self._flush_streaming_stall(state)
+        return process_recording_chunks(self, state)
 
     def _drain_and_buffer(self, state: _UtteranceState):
-        drained = self.audio.drain_pending_chunks()
-        if drained:
-            for drained_chunk in drained:
-                self._append_recording_chunk(state, drained_chunk)
-            log.debug(
-                "Drained %d queued audio chunk(s) on stop (%d samples buffered)",
-                len(drained),
-                state.total,
-            )
-
-        tail_chunk = self.audio.get_chunk(timeout=0.12)
-        if tail_chunk is not None:
-            self._append_recording_chunk(state, tail_chunk)
-
-            drained_after_tail = self.audio.drain_pending_chunks()
-            if drained_after_tail:
-                for drained_chunk in drained_after_tail:
-                    self._append_recording_chunk(state, drained_chunk)
-                log.debug(
-                    "Drained %d queued audio chunk(s) after stop grace (%d samples buffered)",
-                    len(drained_after_tail),
-                    state.total,
-                )
+        return drain_and_buffer(self, state)
 
     # Minimum RMS for tail-flush noise.  In very quiet rooms the measured
     # noise floor can be ~0.001 which, even after utterance gain, is too
@@ -612,82 +433,10 @@ class ShuVoiceApp(Gtk.Application):
     _FLUSH_NOISE_MAX_RMS = 0.08
 
     def _make_flush_noise(self, n_samples: int, escalation: float = 1.0) -> np.ndarray:
-        """Generate low-amplitude noise for flushing streaming transducers.
-
-        Streaming transducers (e.g. Sherpa) may not flush buffered hypotheses
-        when fed perfect digital silence.  Ambient-level noise better
-        simulates the end-of-speech condition the model was trained on.
-
-        The ``escalation`` multiplier (≥1.0) is applied on top of the base
-        RMS so that stalled flush steps progressively increase amplitude,
-        ensuring even very quiet environments eventually trigger emission.
-        """
-        base_rms = max(self._noise_floor_rms, self._FLUSH_NOISE_MIN_RMS)
-        rms = min(base_rms * escalation, self._FLUSH_NOISE_MAX_RMS)
-        noise = np.random.default_rng().normal(0.0, rms, size=n_samples).astype(np.float32)
-        return np.clip(noise, -1.0, 1.0)
+        return make_flush_noise(self, n_samples, escalation)
 
     def _flush_tail_silence(self, state: _UtteranceState):
-        if self._asr_disabled:
-            return
-
-        native = self.asr.native_chunk_samples
-        stable_steps = 0
-        ever_had_text = bool(state.last_text.strip())
-        # Generous budget: streaming transducers (e.g. Sherpa) may need many
-        # silence frames to flush internally-buffered hypotheses after
-        # the user stops speaking.
-        max_flush = 20
-        stable_required = 5
-        # Track consecutive stalled steps so we can escalate noise amplitude.
-        stalled_consecutive = 0
-
-        for i in range(max_flush):
-            # Abort tail flush if a new recording has started to avoid
-            # contaminating the fresh ASR state with noise.
-            if self._recording.is_set():
-                log.debug("Aborting tail flush: new recording started")
-                break
-
-            # Use ambient-level noise at the same gain scale the model has
-            # been seeing, so streaming transducers recognise end-of-speech.
-            # Escalate amplitude on stalled steps so even very quiet
-            # environments eventually produce enough energy to trigger
-            # token emission.
-            escalation = self._FLUSH_NOISE_ESCALATION**stalled_consecutive
-            flush_audio = self._make_flush_noise(native, escalation=escalation)
-            if not self.asr.wants_raw_audio:
-                flush_audio = self._apply_utterance_gain(flush_audio, state.utterance_gain)
-
-            try:
-                text = self._process_chunk_safe(flush_audio)
-            except Exception:
-                self._recover_asr_after_failure("ASR tail flush failed")
-                break
-
-            merged = prefer_transcript(state.last_text, text)
-            if merged != state.last_text:
-                log.debug(
-                    "Tail flush step %d: len %d -> %d (escalation=%.2f)",
-                    i,
-                    len(state.last_text),
-                    len(merged),
-                    escalation,
-                )
-                state.last_text = merged
-                stable_steps = 0
-                stalled_consecutive = 0
-                ever_had_text = True
-                if self.overlay:
-                    self.overlay.set_text(self._render_transcript_text(state.last_text))
-            else:
-                stable_steps += 1
-                stalled_consecutive += 1
-                # Once we've seen text, converge quickly; otherwise keep
-                # flushing longer in case the model is still buffering.
-                needed = stable_required if ever_had_text else 5
-                if stable_steps >= needed:
-                    break
+        return flush_tail_silence(self, state)
 
     def _commit_utterance(self, state: _UtteranceState):
         final_text = state.last_text.strip()
@@ -707,6 +456,10 @@ class ShuVoiceApp(Gtk.Application):
         else:
             self.typer.update_partial(final_text)
             self.typer.reset()
+
+        metrics = getattr(self, "metrics", None)
+        if metrics is not None:
+            metrics.observe_final_commit()
 
     def _handle_recording_stop(self, state: _UtteranceState):
         if self.overlay:
@@ -805,6 +558,7 @@ class ShuVoiceApp(Gtk.Application):
                 finally:
                     self._processing.clear()
 
+            self._log_metrics_if_due()
             was_recording = is_recording
 
     def _asr_worker(self):

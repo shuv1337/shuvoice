@@ -27,8 +27,10 @@ uv sync --extra asr-moonshine
 Run these before opening a pull request:
 
 ```bash
-uv run ruff check shuvoice tests
-uv run ruff format --check shuvoice tests
+uv run ruff check shuvoice tests scripts
+uv run ruff format --check shuvoice tests scripts
+uv run python scripts/validate-doc-config-sync.py
+uv run python scripts/validate-cli-help-sync.py
 uv run pytest -m "not gui" -v
 ```
 
@@ -43,6 +45,7 @@ uv run pytest -m gui -v
 - Keep commits focused and descriptive.
 - Include tests for behavior changes when practical.
 - Update documentation for any user-facing change.
+- If config keys/defaults change, update **all three**: `shuvoice/config.py`, `examples/config.toml`, and `AGENTS.md`.
 - Ensure no generated artifacts are committed (for example: `build/`, `dist/`, coverage outputs, cache directories).
 
 ## Reporting issues

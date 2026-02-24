@@ -108,6 +108,8 @@ WantedBy=default.target
 
 **Config file**: `~/.config/shuvoice/config.toml`
 
+Top-level schema marker: `config_version = 1` (legacy unversioned files are treated as v0 and auto-migrated).
+
 Config sections map to `shuvoice/config.py::Config`:
 `[audio]`, `[asr]`, `[overlay]`, `[control]`, `[typing]`, `[streaming]`, `[feedback]`.
 Nested table: `[typing.text_replacements]` for custom phrase corrections.

@@ -136,7 +136,8 @@ Trigger start/stop via Hyprland `bind` / `bindr` commands.
 Run before first launch:
 
 ```bash
-python -m shuvoice --preflight
+python -m shuvoice preflight
+# legacy (still supported): python -m shuvoice --preflight
 ```
 
 Checks include:
@@ -155,21 +156,25 @@ Checks include:
 python -m shuvoice
 ```
 
-Useful flags:
+Useful commands:
 
 ```bash
 python -m shuvoice --help
-python -m shuvoice --download-model
-python -m shuvoice --asr-backend nemo --right-context 13
-python -m shuvoice --asr-backend sherpa --sherpa-model-dir /path/to/model
-python -m shuvoice --asr-backend moonshine --moonshine-model-name moonshine/tiny
-python -m shuvoice --asr-backend moonshine --moonshine-provider cuda
-python -m shuvoice --output-mode streaming_partial
-python -m shuvoice --list-audio-devices
-python -m shuvoice --audio-device 2 --input-gain 1.5
+python -m shuvoice run --asr-backend nemo --right-context 13
+python -m shuvoice run --asr-backend sherpa --sherpa-model-dir /path/to/model
+python -m shuvoice run --asr-backend moonshine --moonshine-model-name moonshine/tiny
+python -m shuvoice run --asr-backend moonshine --moonshine-provider cuda
+python -m shuvoice run --output-mode streaming_partial
+python -m shuvoice audio list-devices
+python -m shuvoice run --audio-device 2 --input-gain 1.5
+python -m shuvoice model download
+python -m shuvoice config effective
+python -m shuvoice config validate
 ```
 
-`--download-model` supports NeMo and Sherpa. Moonshine downloads lazily on first load via useful-moonshine-onnx.
+Legacy top-level flags (`--download-model`, `--list-audio-devices`, `--preflight`, `--wizard`, `--control`) remain available for one compatibility cycle and emit deprecation warnings.
+
+`model download` supports NeMo and Sherpa. Moonshine downloads lazily on first load via useful-moonshine-onnx.
 
 ## systemd user service
 
@@ -200,9 +205,13 @@ systemctl --user status shuvoice.service
 When ShuVoice is running, send control commands from another terminal:
 
 ```bash
-python -m shuvoice --control start
-python -m shuvoice --control stop
-python -m shuvoice --control toggle
+python -m shuvoice control start
+python -m shuvoice control stop
+python -m shuvoice control toggle
+python -m shuvoice control status
+python -m shuvoice control metrics
+
+# legacy form (still supported):
 python -m shuvoice --control status
 ```
 
@@ -313,7 +322,8 @@ bg_opacity = 0.55
 Relaunch setup wizard at any time:
 
 ```bash
-shuvoice --wizard
+shuvoice wizard
+# legacy: shuvoice --wizard
 ```
 
 The wizard can optionally auto-add Hyprland push-to-talk binds when the
@@ -339,6 +349,7 @@ Wizard screens:
 Config file path:
 
 - `~/.config/shuvoice/config.toml`
+- include top-level `config_version = 1` (added automatically on migration/write)
 
 Example config:
 
@@ -490,14 +501,14 @@ ShuVoice is released under the MIT License. See `LICENSE`.
 - `espeak-ng not found` when running `scripts/tts_roundtrip.py`
   - Install with: `sudo pacman -S espeak-ng`.
 - `Control socket not found ...`
-  - Start ShuVoice first (`python -m shuvoice`) before sending `--control` commands.
+  - Start ShuVoice first (`python -m shuvoice` or `python -m shuvoice run`) before sending `control` commands.
 - `libgtk4-layer-shell.so not found`
   - `sudo pacman -S gtk4-layer-shell`
 - `wtype not found in PATH`
   - `sudo pacman -S wtype`
 - Recognition quality is poor / start-stop triggers repeatedly
   - Increase ASR context for accuracy (eg. `right_context=13`, with higher latency).
-  - Select the correct mic (`python -m shuvoice --list-audio-devices`, then set `audio_device`). Prefer device *name* over numeric index, because indices can change between runs.
+  - Select the correct mic (`python -m shuvoice audio list-devices`, then set `audio_device`). Prefer device *name* over numeric index, because indices can change between runs.
   - Increase `input_gain` moderately (eg. `1.3` to `1.8`) if your mic is too quiet.
   - If silent presses still produce phantom text (eg. "thank you"), raise `silence_rms_threshold` slightly (eg. `0.010` to `0.015`) and/or increase `silence_rms_multiplier` (eg. `2.0`) in config.
 - Long phrases plateau or cut out mid-sentence

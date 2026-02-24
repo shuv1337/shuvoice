@@ -20,7 +20,7 @@ from typing import Callable
 
 log = logging.getLogger(__name__)
 
-VALID_COMMANDS = {"start", "stop", "toggle", "status", "ping"}
+VALID_COMMANDS = {"start", "stop", "toggle", "status", "ping", "metrics"}
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -92,12 +92,14 @@ class ControlServer:
         on_stop: Callable[[], None],
         on_toggle: Callable[[], None],
         on_status: Callable[[], str],
+        on_metrics: Callable[[], str] | None = None,
     ):
         self.socket_path = resolve_control_socket_path(socket_path)
         self._on_start = on_start
         self._on_stop = on_stop
         self._on_toggle = on_toggle
         self._on_status = on_status
+        self._on_metrics = on_metrics or (lambda: "metrics unavailable")
 
         self._running = threading.Event()
         self._thread: threading.Thread | None = None
@@ -198,6 +200,8 @@ class ControlServer:
             return "OK toggled"
         if command == "status":
             return f"OK {self._on_status()}"
+        if command == "metrics":
+            return f"OK {self._on_metrics()}"
         if command == "ping":
             return "OK pong"
         return f"ERROR unknown command: {command}"

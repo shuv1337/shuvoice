@@ -33,7 +33,11 @@ coverage.xml
 .pi/
 .jules/
 .Jules/
+.rodney/
 docs/internal/
+
+# Local planning/agent artifacts
+/PLAN-*.md
 
 # Native artifacts
 *.so

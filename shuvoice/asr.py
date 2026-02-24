@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -54,11 +55,20 @@ def create_backend(backend_name: str, config: Config) -> ASRBackend:
     return backend_cls(config)
 
 
-ASREngine = _resolve_nemo_backend()
+def __getattr__(name: str):
+    if name != "ASREngine":
+        raise AttributeError(name)
+
+    warnings.warn(
+        "`shuvoice.asr.ASREngine` is deprecated; use `get_backend_class('nemo')` instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return get_backend_class("nemo")
+
 
 __all__ = [
     "ASRBackend",
-    "ASREngine",
     "create_backend",
     "get_backend_class",
 ]

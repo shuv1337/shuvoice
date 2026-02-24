@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from .asr_base import ASRBackend
+from .asr_base import ASRBackend, ASRCapabilities
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -15,6 +15,13 @@ log = logging.getLogger(__name__)
 
 class NemoBackend(ASRBackend):
     """NeMo Nemotron backend preserving legacy ASREngine behavior."""
+
+    capabilities = ASRCapabilities(
+        supports_gpu=True,
+        supports_model_download=True,
+        wants_raw_audio=True,
+        expected_chunking="streaming",
+    )
 
     def __init__(
         self,
@@ -59,10 +66,6 @@ class NemoBackend(ASRBackend):
                 return 8960
             case _:
                 return 17920
-
-    @property
-    def wants_raw_audio(self) -> bool:
-        return True
 
     @property
     def debug_step_num(self) -> int | None:

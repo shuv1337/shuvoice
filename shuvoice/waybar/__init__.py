@@ -16,16 +16,33 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
 import time
-from pathlib import Path
 from typing import Any
 
-from .config import Config
-from .control import send_control_command
+from ..config import Config
+from ..control import send_control_command
+from .format import (
+    build_waybar_payload as _build_waybar_payload_impl,
+)
+from .format import (
+    config_info_lines as _config_info_lines_impl,
+)
+from .format import (
+    sanitize_class as _sanitize_class_impl,
+)
+from .hyprland import detect_keybind as _detect_keybind_impl
+from .systemd import (
+    run_systemctl_user as _run_systemctl_user_impl,
+)
+from .systemd import (
+    service_action as _service_action_impl,
+)
+from .systemd import (
+    service_active_state as _service_active_state_impl,
+)
 
 DEFAULT_SERVICE = "shuvoice.service"
 _STATUS_TIMEOUT_SEC = 0.35
@@ -41,38 +58,15 @@ _MENU_LAUNCHERS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 
 def _run_systemctl_user(*args: str, timeout: float = 2.0) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["systemctl", "--user", *args],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=timeout,
-    )
+    return _run_systemctl_user_impl(*args, timeout=timeout)
 
 
 def _service_active_state(service: str) -> str:
-    try:
-        result = _run_systemctl_user("show", "--property=ActiveState", "--value", service)
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return "unknown"
-
-    if result.returncode != 0:
-        return "unknown"
-
-    return (result.stdout.strip() or "unknown").lower()
+    return _service_active_state_impl(service)
 
 
 def _service_action(service: str, action: str):
-    try:
-        result = _run_systemctl_user(action, service, timeout=3.0)
-    except FileNotFoundError as e:
-        raise RuntimeError("systemctl not found") from e
-    except subprocess.TimeoutExpired as e:
-        raise RuntimeError(f"systemctl {action} timed out") from e
-
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip() or "unknown error"
-        raise RuntimeError(f"systemctl {action} {service} failed: {detail}")
+    return _service_action_impl(service, action)
 
 
 def _query_control_state(config: Config, timeout: float = _STATUS_TIMEOUT_SEC) -> str:
@@ -103,90 +97,15 @@ def _query_runtime_state(config: Config, service: str) -> tuple[str, str | None,
 
 
 def config_info_lines(config: Config) -> list[str]:
-    """Build tooltip info lines from the active configuration."""
-    backend = config.asr_backend
-    backend_labels = {
-        "nemo": "NeMo (NVIDIA)",
-        "sherpa": "Sherpa-ONNX",
-        "moonshine": "Moonshine-ONNX",
-    }
-
-    lines = [f"Backend:  {backend_labels.get(backend, backend)}"]
-
-    # Model name (shortened for readability)
-    if backend == "nemo":
-        model = config.model_name
-        if "/" in model:
-            model = model.rsplit("/", 1)[-1]
-        lines.append(f"Model:    {model}")
-    elif backend == "sherpa":
-        if config.sherpa_model_dir:
-            model = Path(config.sherpa_model_dir).name
-        else:
-            model = "default (auto-download)"
-        lines.append(f"Model:    {model}")
-    elif backend == "moonshine":
-        lines.append(f"Model:    {config.moonshine_model_name}")
-
-    # Device (GPU vs CPU)
-    if backend == "nemo":
-        device = "GPU (CUDA)" if config.device == "cuda" else "CPU"
-    elif backend == "sherpa":
-        device = "GPU (CUDA)" if config.sherpa_provider == "cuda" else "CPU"
-    elif backend == "moonshine":
-        device = "GPU (CUDA)" if config.moonshine_provider == "cuda" else "CPU"
-    else:
-        device = "unknown"
-    lines.append(f"Device:   {device}")
-
-    return lines
+    return _config_info_lines_impl(config)
 
 
 def detect_keybind() -> str | None:
-    """Detect the ShuVoice push-to-talk keybind from active Hyprland binds.
-
-    Uses ``hyprctl binds -j`` to query live bind state.  Returns a
-    human-readable key label like ``F9`` or ``Super + V``, or None if
-    detection fails.
-    """
-    try:
-        result = subprocess.run(
-            ["hyprctl", "binds", "-j"],
-            capture_output=True,
-            text=True,
-            timeout=1.0,
-        )
-        if result.returncode != 0:
-            return None
-        binds = json.loads(result.stdout)
-        for bind in binds:
-            arg = bind.get("arg", "")
-            if "shuvoice" not in arg or "start" not in arg:
-                continue
-            key = bind.get("key", "")
-            if not key:
-                continue
-            modmask = bind.get("modmask", 0)
-            mod_names: list[str] = []
-            if modmask & 1:
-                mod_names.append("Shift")
-            if modmask & 4:
-                mod_names.append("Ctrl")
-            if modmask & 8:
-                mod_names.append("Alt")
-            if modmask & 64:
-                mod_names.append("Super")
-            if mod_names:
-                return " + ".join(mod_names + [key])
-            return key
-    except Exception:
-        return None
-    return None
+    return _detect_keybind_impl()
 
 
 def _sanitize_class(value: str) -> str:
-    cleaned = re.sub(r"[^a-z0-9_-]+", "-", value.lower()).strip("-")
-    return cleaned or "unknown"
+    return _sanitize_class_impl(value)
 
 
 def build_waybar_payload(
@@ -197,65 +116,13 @@ def build_waybar_payload(
     control_error: str | None = None,
     action_error: str | None = None,
 ) -> dict[str, Any]:
-    base_state = state
-    reason = ""
-    if ":" in state:
-        base_state, reason = state.split(":", 1)
-
-    icons = {
-        "recording": "",
-        "processing": "",
-        "idle": "",
-        "starting": "",
-        "stopped": "",
-        "error": "",
-    }
-
-    labels = {
-        "recording": "Recording",
-        "processing": "Processing",
-        "idle": "Ready",
-        "starting": "Starting",
-        "stopped": "Stopped",
-        "error": "Error",
-    }
-
-    if base_state not in labels:
-        base_state = "error"
-        reason = reason or "unknown_state"
-
-    lines = [f"ShuVoice: {labels[base_state]}"]
-
-    if reason:
-        lines.append(f"Reason: {reason}")
-    if service_state and service_state != "unknown":
-        lines.append(f"Service: {service_state}")
-    if control_error and base_state in {"starting", "error"}:
-        lines.append(f"Control: {control_error}")
-    if action_error:
-        lines.append(f"Action: {action_error}")
-
-    if config_lines:
-        lines.append("")
-        lines.extend(config_lines)
-
-    lines.extend(
-        [
-            "",
-            "Left click: toggle recording",
-            "Middle click: toggle service",
-            "Right click: open action menu",
-        ]
+    return _build_waybar_payload_impl(
+        state,
+        config_lines=config_lines,
+        service_state=service_state,
+        control_error=control_error,
+        action_error=action_error,
     )
-
-    class_name = _sanitize_class(base_state)
-
-    return {
-        "text": icons[base_state],
-        "alt": base_state,
-        "class": class_name,
-        "tooltip": "\n".join(lines),
-    }
 
 
 def _wait_for_control_socket(config: Config, timeout_sec: float = 2.0) -> bool:
@@ -466,6 +333,14 @@ def main(argv: list[str] | None = None) -> int:
     keybind = detect_keybind()
     if keybind:
         info.append(f"Keybind:  {keybind}")
+
+    if os.environ.get("SHUVOICE_WAYBAR_DEBUG_METRICS", "").lower() in {"1", "true", "yes"}:
+        try:
+            metrics = send_control_command("metrics", config.control_socket, timeout=0.3)
+            if metrics.startswith("OK "):
+                info.append(f"Metrics:  {metrics[3:].strip()}")
+        except Exception:
+            info.append("Metrics:  unavailable")
 
     state, service_state, control_error = _query_runtime_state(config, args.service)
     payload = build_waybar_payload(

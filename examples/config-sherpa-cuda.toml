@@ -1,4 +1,6 @@
 # ShuVoice example: Sherpa ONNX on CUDA
+config_version = 1
+
 # Profile tuned for lower false-silent drops in low-noise desktop environments.
 
 [audio]

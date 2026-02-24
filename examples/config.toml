@@ -1,10 +1,12 @@
 # ShuVoice example configuration
 
+config_version = 1
+
 [audio]
 sample_rate = 16000
 chunk_ms = 100
 fallback_sample_rate = 48000
-# Optional explicit input device name/index (see: python -m shuvoice --list-audio-devices)
+# Optional explicit input device name/index (see: python -m shuvoice audio list-devices)
 # audio_device = 2
 # Optional mic gain multiplier (eg. 1.5 if too quiet)
 input_gain = 1.0

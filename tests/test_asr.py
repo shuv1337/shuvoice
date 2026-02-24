@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from shuvoice.asr import ASREngine, create_backend, get_backend_class
+from shuvoice.asr import create_backend, get_backend_class
 from shuvoice.config import Config
 
 
@@ -23,7 +23,8 @@ def test_dependency_errors_when_dependencies_missing(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
-    errors = ASREngine.dependency_errors()
+    backend_cls = get_backend_class("nemo")
+    errors = backend_cls.dependency_errors()
 
     assert any("PyTorch" in err for err in errors)
     assert any("NeMo ASR" in err for err in errors)
@@ -40,7 +41,8 @@ def test_dependency_errors_when_dependencies_present(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
-    assert ASREngine.dependency_errors() == []
+    backend_cls = get_backend_class("nemo")
+    assert backend_cls.dependency_errors() == []
 
 
 @pytest.mark.parametrize(
@@ -54,11 +56,13 @@ def test_dependency_errors_when_dependencies_present(monkeypatch):
     ],
 )
 def test_normalize_transcript_item_matrix(item, expected):
-    assert ASREngine._normalize_transcript_item(item) == expected
+    backend_cls = get_backend_class("nemo")
+    assert backend_cls._normalize_transcript_item(item) == expected
 
 
 def test_process_chunk_and_reset_raise_when_model_unloaded():
-    engine = ASREngine()
+    nemo_cls = get_backend_class("nemo")
+    engine = nemo_cls()
 
     with pytest.raises(RuntimeError, match="not loaded"):
         engine.reset()
@@ -68,15 +72,17 @@ def test_process_chunk_and_reset_raise_when_model_unloaded():
 
 
 def test_nemo_native_chunk_samples_scaling():
-    assert ASREngine(right_context=0).native_chunk_samples == 1280
-    assert ASREngine(right_context=1).native_chunk_samples == 2560
-    assert ASREngine(right_context=6).native_chunk_samples == 8960
-    assert ASREngine(right_context=13).native_chunk_samples == 17920
-    assert ASREngine(right_context=999).native_chunk_samples == 17920
+    nemo_cls = get_backend_class("nemo")
+    assert nemo_cls(right_context=0).native_chunk_samples == 1280
+    assert nemo_cls(right_context=1).native_chunk_samples == 2560
+    assert nemo_cls(right_context=6).native_chunk_samples == 8960
+    assert nemo_cls(right_context=13).native_chunk_samples == 17920
+    assert nemo_cls(right_context=999).native_chunk_samples == 17920
 
 
 def test_nemo_debug_step_num_property():
-    engine = ASREngine()
+    nemo_cls = get_backend_class("nemo")
+    engine = nemo_cls()
     engine._step_num = 7
     assert engine.debug_step_num == 7
 
@@ -99,6 +105,15 @@ def test_get_backend_class_resolves_known_backends():
     assert get_backend_class("nemo").__name__ == "NemoBackend"
     assert get_backend_class("sherpa").__name__ == "SherpaBackend"
     assert get_backend_class("moonshine").__name__ == "MoonshineBackend"
+
+
+def test_deprecated_asrengine_alias_is_lazy_and_points_to_nemo(monkeypatch):
+    import shuvoice.asr as asr_module
+
+    with pytest.warns(DeprecationWarning):
+        alias = asr_module.ASREngine
+
+    assert alias is get_backend_class("nemo")
 
 
 def test_resolving_nemo_backend_does_not_import_other_backend_dependencies(monkeypatch):
