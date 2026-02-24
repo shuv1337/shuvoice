@@ -12,3 +12,8 @@
 **Vulnerability:** User-controlled configuration values were directly interpolated into GTK CSS strings, allowing CSS injection.
 **Learning:** Even internal configuration files (TOML/JSON) can be vectors for injection if values are blindly trusted. Type hints in dataclasses do not enforce runtime types.
 **Prevention:** Strictly validate and cast configuration values in `__post_init__` before using them in sensitive contexts like CSS generation or shell commands.
+
+## 2026-02-23 - Sensitive Data in Subprocess Exception Logs
+**Vulnerability:** subprocess.CalledProcessError logs the full command including arguments, exposing sensitive transcribed text when wtype or wl-copy fails.
+**Learning:** Default exception logging for subprocess calls includes the command arguments, which may contain sensitive data.
+**Prevention:** Catch subprocess.SubprocessError and log a sanitized message (e.g. exit code only) instead of the raw exception object.

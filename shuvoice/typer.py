@@ -40,10 +40,19 @@ class StreamingTyper:
                 subprocess.run(args, check=True, timeout=5)
                 return True
             except (subprocess.SubprocessError, OSError) as e:
+                # Sanitize error message to avoid leaking sensitive text
+                err_msg = str(e)
+                if isinstance(e, subprocess.SubprocessError):
+                    cmd_name = args[0] if args else "subprocess"
+                    if isinstance(e, subprocess.CalledProcessError):
+                        err_msg = f"{cmd_name} failed with exit code {e.returncode}"
+                    elif isinstance(e, subprocess.TimeoutExpired):
+                        err_msg = f"{cmd_name} timed out after {e.timeout}s"
+
                 if attempt == attempts:
-                    log.error("%s failed after %d attempt(s): %s", op, attempts, e)
+                    log.error("%s failed after %d attempt(s): %s", op, attempts, err_msg)
                     return False
-                log.warning("%s attempt %d/%d failed: %s", op, attempt, attempts, e)
+                log.warning("%s attempt %d/%d failed: %s", op, attempt, attempts, err_msg)
                 if self.retry_delay_s:
                     time.sleep(self.retry_delay_s)
 
