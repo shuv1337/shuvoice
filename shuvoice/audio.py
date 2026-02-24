@@ -62,19 +62,23 @@ class AudioCapture:
         except Exception:
             return None
 
-        for idx, dev in enumerate(devices):
-            if dev.get("max_input_channels", 0) <= 0:
-                continue
-            name = str(dev.get("name", "")).lower()
-            if name == "pulse" or name.startswith("pulse "):
-                return idx
+        pipewire_idx = None
 
         for idx, dev in enumerate(devices):
             if dev.get("max_input_channels", 0) <= 0:
                 continue
+
             name = str(dev.get("name", "")).lower()
-            if "pipewire" in name:
+            if name == "pulse" or name.startswith("pulse "):
+                # Best match found immediately
                 return idx
+
+            if pipewire_idx is None and "pipewire" in name:
+                # Keep as fallback if no 'pulse' device is found
+                pipewire_idx = idx
+
+        if pipewire_idx is not None:
+            return pipewire_idx
 
         return None
 
@@ -108,7 +112,9 @@ class AudioCapture:
                 return
 
         if self.input_gain != 1.0:
-            audio = np.clip(audio * self.input_gain, -1.0, 1.0)
+            # Optimization: In-place multiplication and clip to avoid temporary array allocations
+            audio *= self.input_gain
+            np.clip(audio, -1.0, 1.0, out=audio)
 
         try:
             self.queue.put_nowait(audio)
