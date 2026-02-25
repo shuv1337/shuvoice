@@ -6,8 +6,13 @@ set -euo pipefail
 # It prefers the installed console script (`shuvoice-waybar`) and falls back
 # to the repo virtualenv/module path for local development checkouts.
 
-SELF="$(readlink -f "${BASH_SOURCE[0]}")"
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+  SELF="$(readlink -f "$SCRIPT_PATH" 2>/dev/null || printf '%s' "$SCRIPT_PATH")"
+else
+  SELF="$SCRIPT_PATH"
+fi
+ROOT_DIR="$(cd "$(dirname "$SELF")/.." && pwd)"
 
 resolved_path() {
   if command -v readlink >/dev/null 2>&1; then
