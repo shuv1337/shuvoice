@@ -440,6 +440,14 @@ You can add/override corrections with `[typing.text_replacements]`:
 Matches are case-insensitive and only apply to whole words/phrases (longest
 source phrases first). Empty values delete the matched word/phrase.
 
+Final text injection behavior is controlled under `[typing]`:
+
+- `typing_final_injection_mode = "auto"` (default): detect known clipboard watchers (`wl-paste --watch`, `wl-clip-persist`, `elephant`) and prefer direct final typing.
+- `typing_final_injection_mode = "clipboard"`: always use clipboard paste (`wl-copy` + `Ctrl+V`).
+- `typing_final_injection_mode = "direct"`: always use direct `wtype` typing.
+- `typing_clipboard_settle_delay_ms = 40`: delay between `wl-copy` and paste in clipboard mode (helps compositor/clipboard-manager timing races).
+- `use_clipboard_for_final` is soft-deprecated; if `typing_final_injection_mode` is omitted, legacy `true` maps to `clipboard` and `false` maps to `direct`.
+
 If you hit RNNT CUDA-graph decoder issues on your driver/toolkit combo,
 keep this setting disabled (default):
 
@@ -560,6 +568,8 @@ ShuVoice is released under the MIT License. See `LICENSE`.
   - `sudo pacman -S gtk4-layer-shell`
 - `wtype not found in PATH`
   - `sudo pacman -S wtype`
+- Clipboard history is polluted with transcription fragments / text not pasting (Omarchy/Walker/Elephant)
+  - Set `typing_final_injection_mode = "auto"` in your config (the new default). This detects clipboard managers and uses direct typing to prevent conflicts.
 - Recognition quality is poor / start-stop triggers repeatedly
   - Increase ASR context for accuracy (eg. `right_context=13`, with higher latency).
   - Select the correct mic (`python -m shuvoice audio list-devices`, then set `audio_device`). Prefer device *name* over numeric index, because indices can change between runs.

@@ -31,7 +31,8 @@
 
 ShuVoice is a streaming speech-to-text overlay for Hyprland/Wayland with
 pluggable ASR backends. The user holds push-to-talk, speaks, and transcribed
-text is typed into the focused window via clipboard injection.
+text is typed into the focused window via direct typing or clipboard paste
+(depending on typing mode).
 
 **Repo**: `git@github.com:shuv1337/shuvoice.git`  
 **License**: MIT
@@ -154,6 +155,15 @@ Empty values delete the matched word.
 "speech to text" = "speech-to-text"
 "um" = ""
 ```
+
+### Final text injection mode (clipboard vs direct)
+
+| Key | Default | Notes |
+|---|---:|---|
+| `typing_final_injection_mode` | `auto` | `auto`, `clipboard`, `direct`. In `auto`, ShuVoice detects known clipboard watchers (`wl-paste --watch`, `wl-clip-persist`, `elephant`) and switches to direct `wtype` final typing to avoid clipboard-history pollution/races. |
+| `typing_clipboard_settle_delay_ms` | `40` | Delay between `wl-copy` and simulated `Ctrl+V` in clipboard mode to reduce paste timing races. |
+| `use_clipboard_for_final` | `true` (legacy) | Soft-deprecated compatibility flag. If `typing_final_injection_mode` is absent, this maps to `clipboard` (`true`) or `direct` (`false`). |
+| `preserve_clipboard` | `false` | Capture/restore clipboard around final commit in clipboard mode; direct mode does not touch clipboard. |
 
 ---
 

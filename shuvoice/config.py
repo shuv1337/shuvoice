@@ -68,8 +68,10 @@ CONFIG_SECTION_FIELDS: dict[str, tuple[str, ...]] = {
     "control": ("control_socket",),
     "typing": (
         "output_mode",
+        "typing_final_injection_mode",
         "use_clipboard_for_final",
         "preserve_clipboard",
+        "typing_clipboard_settle_delay_ms",
         "typing_retry_attempts",
         "typing_retry_delay_ms",
         "auto_capitalize",
@@ -201,8 +203,10 @@ class Config:
 
     # Text injection
     output_mode: str = "final_only"  # final_only | streaming_partial
+    typing_final_injection_mode: str = "auto"  # auto | clipboard | direct
     use_clipboard_for_final: bool = True
     preserve_clipboard: bool = False
+    typing_clipboard_settle_delay_ms: int = 40
     typing_retry_attempts: int = 2
     typing_retry_delay_ms: int = 40
     auto_capitalize: bool = True
@@ -345,7 +349,17 @@ class Config:
             raise ValueError("bottom_margin must be >= 0")
         self.bottom_margin = int(self.bottom_margin)
 
-        # Validate typing retry
+        # Validate typing configs
+        self.typing_final_injection_mode = str(self.typing_final_injection_mode).strip().lower()
+        if self.typing_final_injection_mode not in {"auto", "clipboard", "direct"}:
+            raise ValueError("typing_final_injection_mode must be one of: auto, clipboard, direct")
+
+        if not isinstance(self.use_clipboard_for_final, bool):
+            raise ValueError("use_clipboard_for_final must be true or false")
+
+        if int(self.typing_clipboard_settle_delay_ms) < 0:
+            raise ValueError("typing_clipboard_settle_delay_ms must be >= 0")
+
         if int(self.typing_retry_attempts) < 0:
             raise ValueError("typing_retry_attempts must be >= 0")
         if int(self.typing_retry_delay_ms) < 0:
@@ -474,6 +488,18 @@ class Config:
         migrated, report = migrate_to_latest(raw)
 
         flat = cls._flatten_raw(migrated)
+
+        # Legacy compatibility: if users only set the historical
+        # `use_clipboard_for_final` flag, derive the new mode from it.
+        # Explicit `typing_final_injection_mode` always wins.
+        has_explicit_mode = "typing_final_injection_mode" in flat
+        has_legacy_flag = "use_clipboard_for_final" in flat
+        if not has_explicit_mode and has_legacy_flag:
+            legacy_flag = flat.get("use_clipboard_for_final")
+            if isinstance(legacy_flag, bool):
+                flat["typing_final_injection_mode"] = (
+                    "clipboard" if legacy_flag else "direct"
+                )
 
         valid_fields = {
             f.name for f in cls.__dataclass_fields__.values() if not f.name.startswith("_")

@@ -72,7 +72,9 @@ class ShuVoiceApp(Gtk.Application):
             audio_queue_max_size=config.audio_queue_max_size,
         )
         self.typer = StreamingTyper(
+            final_injection_mode=config.typing_final_injection_mode,
             preserve_clipboard=config.preserve_clipboard,
+            clipboard_settle_delay_ms=config.typing_clipboard_settle_delay_ms,
             retry_attempts=config.typing_retry_attempts,
             retry_delay_ms=config.typing_retry_delay_ms,
         )
@@ -451,11 +453,8 @@ class ShuVoiceApp(Gtk.Application):
         if self.overlay:
             self.overlay.set_text(final_text)
 
-        if self.config.use_clipboard_for_final:
-            self.typer.commit_final(final_text)
-        else:
-            self.typer.update_partial(final_text)
-            self.typer.reset()
+        # Delegate fully to typer, which resolves the correct final injection mode
+        self.typer.commit_final(final_text)
 
         metrics = getattr(self, "metrics", None)
         if metrics is not None:

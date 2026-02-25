@@ -75,6 +75,10 @@ bottom_margin = 60
 [typing]
 # final_only | streaming_partial
 output_mode = "final_only"
+# auto | clipboard | direct. Auto avoids clipboard pollution when Omarchy/Elephant is detected.
+typing_final_injection_mode = "auto"
+typing_clipboard_settle_delay_ms = 40
+# use_clipboard_for_final is soft-deprecated in favor of typing_final_injection_mode
 use_clipboard_for_final = true
 preserve_clipboard = false
 typing_retry_attempts = 2

@@ -16,21 +16,28 @@ class StreamingTyper:
 
     Strategy:
     - streaming partials: backspace previous partial + type new partial via wtype
-    - final text: clipboard paste (wl-copy + Ctrl+V) for robustness
-    - fallback: direct wtype typing when clipboard paste fails
+    - final text: mode-driven (`auto`, `clipboard`, `direct`)
+    - clipboard path fallback: direct wtype typing when paste fails
     """
 
     def __init__(
         self,
+        final_injection_mode: str = "auto",
         preserve_clipboard: bool = False,
+        clipboard_settle_delay_ms: int = 40,
         retry_attempts: int = 2,
         retry_delay_ms: int = 40,
     ):
         self.last_partial_len = 0
         self.last_partial_text = ""
+        self.final_injection_mode = final_injection_mode
         self.preserve_clipboard = preserve_clipboard
+        self.clipboard_settle_delay_s = max(0.0, clipboard_settle_delay_ms / 1000.0)
         self.retry_attempts = max(1, retry_attempts)
         self.retry_delay_s = max(0.0, retry_delay_ms / 1000.0)
+        self._watchers_detected: bool | None = None
+        self._watchers_last_checked_monotonic = 0.0
+        self._watchers_cache_ttl_s = 30.0
 
     def _run(self, args: list[str], op: str, attempts: int | None = None) -> bool:
         attempts = attempts if attempts is not None else self.retry_attempts
@@ -90,6 +97,33 @@ class StreamingTyper:
             idx += 1
         return idx
 
+    def _detect_clipboard_watchers(self) -> bool:
+        """Best-effort detection of active clipboard managers/watchers."""
+        now = time.monotonic()
+        if self._watchers_detected is not None:
+            age = now - self._watchers_last_checked_monotonic
+            if age < self._watchers_cache_ttl_s:
+                return self._watchers_detected
+
+        try:
+            # We look for common Wayland clipboard daemon command lines.
+            result = subprocess.run(
+                ["pgrep", "-a", "-f", "wl-paste --watch|wl-clip-persist|elephant"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            # pgrep returns 0 if matches found, 1 if none found
+            self._watchers_detected = result.returncode == 0
+            if self._watchers_detected:
+                log.info("Detected clipboard watcher(s), enabling direct final typing.")
+        except Exception as e:
+            log.debug("Failed to detect clipboard watchers: %s", e)
+            self._watchers_detected = False
+
+        self._watchers_last_checked_monotonic = now
+        return self._watchers_detected
+
     def _type_direct(self, text: str) -> bool:
         if not text:
             return True
@@ -102,6 +136,9 @@ class StreamingTyper:
         copied = self._run(["wl-copy", "--", text], "wl-copy set")
         if not copied:
             return False
+
+        if self.clipboard_settle_delay_s > 0:
+            time.sleep(self.clipboard_settle_delay_s)
 
         return self._run(
             ["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"],
@@ -160,7 +197,19 @@ class StreamingTyper:
         self.last_partial_len = len(new_text)
 
     def commit_final(self, final_text: str):
-        """Erase partial text, then paste final text (with direct-typing fallback)."""
+        """Erase partial text, then inject final text using the resolved mode."""
+        use_clipboard = True
+        if self.final_injection_mode == "direct":
+            use_clipboard = False
+        elif self.final_injection_mode == "auto":
+            use_clipboard = not self._detect_clipboard_watchers()
+
+        if not use_clipboard:
+            # Efficient suffix update for direct mode
+            self.update_partial(final_text)
+            self.reset()
+            return
+
         had_clip = False
         clip_content = ""
         if self.preserve_clipboard:
@@ -175,6 +224,7 @@ class StreamingTyper:
                 self._type_direct(final_text)
 
         self._restore_clipboard(had_clip, clip_content)
+
         self.last_partial_len = 0
         self.last_partial_text = ""
 

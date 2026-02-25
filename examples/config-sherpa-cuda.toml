@@ -35,4 +35,5 @@ sherpa_chunk_ms = 100
 
 [typing]
 output_mode = "final_only"
+typing_final_injection_mode = "auto"
 use_clipboard_for_final = true

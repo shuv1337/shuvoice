@@ -3,6 +3,8 @@ from __future__ import annotations
 import subprocess
 from types import SimpleNamespace
 
+import pytest
+
 from shuvoice.typer import StreamingTyper
 
 
@@ -67,7 +69,7 @@ def test_update_partial_uses_common_prefix_for_small_suffix_edits(monkeypatch):
 
 
 def test_commit_final_falls_back_to_direct_type_and_restores_clipboard(monkeypatch):
-    typer = StreamingTyper(preserve_clipboard=True)
+    typer = StreamingTyper(preserve_clipboard=True, final_injection_mode="clipboard")
     events: list[object] = []
 
     monkeypatch.setattr(typer, "_capture_clipboard", lambda: (True, "orig"))
@@ -93,6 +95,73 @@ def test_commit_final_falls_back_to_direct_type_and_restores_clipboard(monkeypat
     assert ("direct", "hello") in events
     assert ("restore", True, "orig") in events
     assert typer.last_partial_len == 0
+
+
+def test_commit_final_auto_mode_prefers_direct_when_watchers_detected(monkeypatch):
+    typer = StreamingTyper(final_injection_mode="auto", preserve_clipboard=True)
+    typer.last_partial_len = 7
+    typer.last_partial_text = "partial"
+    events: list[object] = []
+
+    monkeypatch.setattr(typer, "_detect_clipboard_watchers", lambda: True)
+    monkeypatch.setattr(typer, "update_partial", lambda text: events.append(("update", text)))
+    monkeypatch.setattr(typer, "_capture_clipboard", lambda: events.append("capture") or (True, "x"))
+    monkeypatch.setattr(typer, "_backspace_partial", lambda: events.append("backspace") or True)
+    monkeypatch.setattr(
+        typer,
+        "_paste_via_clipboard",
+        lambda text: events.append(("paste", text)) or True,
+    )
+
+    typer.commit_final("hello")
+
+    assert events == [("update", "hello")]
+    assert typer.last_partial_len == 0
+    assert typer.last_partial_text == ""
+
+
+def test_commit_final_auto_mode_uses_clipboard_when_no_watchers(monkeypatch):
+    typer = StreamingTyper(final_injection_mode="auto", preserve_clipboard=False)
+    events: list[object] = []
+
+    monkeypatch.setattr(typer, "_detect_clipboard_watchers", lambda: False)
+    monkeypatch.setattr(typer, "_backspace_partial", lambda: events.append("backspace") or True)
+    monkeypatch.setattr(
+        typer,
+        "_paste_via_clipboard",
+        lambda text: events.append(("paste", text)) or True,
+    )
+    monkeypatch.setattr(
+        typer,
+        "_type_direct",
+        lambda text: events.append(("direct", text)) or True,
+    )
+
+    typer.commit_final("hello")
+
+    assert "backspace" in events
+    assert ("paste", "hello") in events
+    assert ("direct", "hello") not in events
+
+
+def test_paste_via_clipboard_applies_settle_delay(monkeypatch):
+    typer = StreamingTyper(clipboard_settle_delay_ms=40, retry_attempts=1, retry_delay_ms=0)
+    calls: list[list[str]] = []
+    sleeps: list[float] = []
+
+    monkeypatch.setattr(
+        typer,
+        "_run",
+        lambda args, op, attempts=None: calls.append(args) or True,
+    )
+    monkeypatch.setattr("shuvoice.typer.time.sleep", lambda value: sleeps.append(value))
+
+    assert typer._paste_via_clipboard("hello") is True
+
+    assert calls[0] == ["wl-copy", "--", "hello"]
+    assert calls[1] == ["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"]
+    assert len(sleeps) == 1
+    assert sleeps[0] == pytest.approx(0.04)
 
 
 def test_restore_clipboard_clear_when_no_prior_content(monkeypatch):

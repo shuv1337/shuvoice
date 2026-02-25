@@ -81,6 +81,17 @@ def test_sample_rate_validation():
         Config(sample_rate=-16000)
 
 
+def test_typing_mode_validation():
+    with pytest.raises(ValueError, match="typing_final_injection_mode"):
+        Config(typing_final_injection_mode="fast")
+
+    with pytest.raises(ValueError, match="use_clipboard_for_final"):
+        Config(use_clipboard_for_final="yes")
+
+    with pytest.raises(ValueError, match="typing_clipboard_settle_delay_ms"):
+        Config(typing_clipboard_settle_delay_ms=-1)
+
+
 def test_typing_retry_validation():
     with pytest.raises(ValueError, match="typing_retry_attempts"):
         Config(typing_retry_attempts=-1)
