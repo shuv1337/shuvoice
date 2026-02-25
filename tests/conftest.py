@@ -21,6 +21,9 @@ try:
     import gi
 
     gi.require_version("Gtk", "4.0")
+    # Also ensure LayerShell is available, as the wizard depends on it.
+    # If Gtk is present but LayerShell is missing (e.g. CI), we must still mock.
+    gi.require_version("Gtk4LayerShell", "1.0")
 except (ImportError, ValueError):
     # Mock gi structure
     mock_gi = MagicMock()
