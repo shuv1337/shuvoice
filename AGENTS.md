@@ -126,7 +126,8 @@ Only keys for the active backend need to be present.
 Optional low-latency profile: set `[asr].instant_mode = true`.
 This applies backend-specific tuning at runtime:
 - NeMo: forces `right_context = 0`
-- Sherpa: caps `sherpa_chunk_ms` to `80`
+- Sherpa (streaming mode): caps `sherpa_chunk_ms` to `80`
+- Sherpa (offline_instant mode): uses one-shot utterance decode on key release
 - Moonshine: forces `moonshine_model_name = "moonshine/tiny"`, caps
   `moonshine_max_window_sec` to `3.0`, caps `moonshine_max_tokens` to `48`
 
@@ -254,9 +255,10 @@ sherpa_chunk_ms = 100
 |---|---:|---|
 | `sherpa_model_name` | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` | Archive/model name used for auto-download when `sherpa_model_dir` is unset |
 | `sherpa_model_dir` | *none* | If unset, ShuVoice auto-downloads `sherpa_model_name` to `~/.local/share/shuvoice/models/sherpa/<sherpa_model_name>/` |
+| `sherpa_decode_mode` | `auto` | `auto`, `streaming`, or `offline_instant`. `auto` resolves to `offline_instant` for Parakeet + `instant_mode=true`, otherwise `streaming`. |
 | `sherpa_provider` | `cpu` | `cpu` or `cuda` |
 | `sherpa_num_threads` | `2` | CPU threads |
-| `sherpa_chunk_ms` | `100` | Chunk duration |
+| `sherpa_chunk_ms` | `100` | Streaming chunk duration (ignored in `offline_instant` mode) |
 
 Parakeet TDT v3 note (Sherpa runtime):
 
@@ -264,10 +266,13 @@ Parakeet TDT v3 note (Sherpa runtime):
 [asr]
 asr_backend = "sherpa"
 sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+instant_mode = true
+sherpa_decode_mode = "offline_instant"
 ```
 
-This model is currently blocked by startup guards because ShuVoice's Sherpa
-path is streaming-only. A dedicated offline/instant Sherpa path is planned.
+Parakeet is supported via Sherpa offline instant mode. Startup guards continue
+blocking Parakeet + streaming combinations because that path is incompatible
+and can crash during recognizer initialization.
 
 #### Model directory structure
 
@@ -437,6 +442,7 @@ uv sync --dev --extra asr-nemo --extra asr-sherpa --extra asr-moonshine
 | [#13](https://github.com/shuv1337/shuvoice/issues/13) | Moonshine throughput slower than NeMo/Sherpa | Mitigated (safer defaults, ONNX tuning, GPU provider) |
 | — | `sherpa-onnx` source AUR builds may fail on GCC 15 due format-security warning flag interaction | Mitigation available (`python-sherpa-onnx-bin`, upstream patch staged) |
 | — | Prebuilt Sherpa CUDA wheels may be incompatible with newer CUDA stacks | Ongoing |
+| — | Parakeet selected with `sherpa_decode_mode = "streaming"` is blocked by startup guard (use offline instant mode) | By design |
 
 ---
 

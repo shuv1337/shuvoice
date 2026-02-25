@@ -68,7 +68,16 @@ class _CancelableBackend:
 
 
 def test_maybe_download_model_sherpa_uses_selected_model_name(monkeypatch):
-    monkeypatch.setattr("shuvoice.wizard.actions.Config.load", classmethod(lambda cls: Config()))
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions.Config.load",
+        classmethod(
+            lambda cls: Config(
+                asr_backend="sherpa",
+                instant_mode=True,
+                sherpa_decode_mode="offline_instant",
+            )
+        ),
+    )
     monkeypatch.setattr(
         "shuvoice.wizard.actions.get_backend_class", lambda _name: _DownloadCapableBackend
     )
@@ -88,6 +97,21 @@ def test_maybe_download_model_sherpa_uses_selected_model_name(monkeypatch):
     assert _DownloadCapableBackend._last_kwargs["progress_callback"] is None
     assert "cancel_check" in _DownloadCapableBackend._last_kwargs
     assert _DownloadCapableBackend._last_kwargs["cancel_check"] is None
+
+
+def test_maybe_download_model_rejects_parakeet_without_offline_mode(monkeypatch):
+    monkeypatch.setattr("shuvoice.wizard.actions.Config.load", classmethod(lambda cls: Config()))
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions.get_backend_class", lambda _name: _DownloadCapableBackend
+    )
+
+    status, message = maybe_download_model(
+        "sherpa",
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+    )
+
+    assert status == "error"
+    assert "offline_instant" in message
 
 
 def test_maybe_download_model_skips_when_deps_missing(monkeypatch):
@@ -113,7 +137,16 @@ def test_maybe_download_model_skips_for_lazy_backends(monkeypatch):
 
 
 def test_maybe_download_model_reports_progress(monkeypatch):
-    monkeypatch.setattr("shuvoice.wizard.actions.Config.load", classmethod(lambda cls: Config()))
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions.Config.load",
+        classmethod(
+            lambda cls: Config(
+                asr_backend="sherpa",
+                instant_mode=True,
+                sherpa_decode_mode="offline_instant",
+            )
+        ),
+    )
     monkeypatch.setattr("shuvoice.wizard.actions.get_backend_class", lambda _name: _ProgressBackend)
 
     events: list[tuple[float | None, str]] = []

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "shuvoice"
-version = "0.1.1"
+version = "0.1.2"
 description = "Streaming speech-to-text overlay for Hyprland"
 readme = "README.md"
 requires-python = ">=3.10"

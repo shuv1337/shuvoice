@@ -17,10 +17,15 @@ auto_gain_settle_chunks = 2
 
 [asr]
 asr_backend = "sherpa"
-# Default model:
+# Default streaming model:
 # sherpa_model_name = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
-# Parakeet TDT v3 option:
+# sherpa_decode_mode = "auto"
+#
+# Parakeet TDT v3 offline-instant option:
 # sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+# instant_mode = true
+# sherpa_decode_mode = "offline_instant"
+#
 # Set this to your local model directory. See README.md for Sherpa model setup.
 sherpa_model_dir = "/path/to/sherpa-model-dir"
 sherpa_provider = "cpu"

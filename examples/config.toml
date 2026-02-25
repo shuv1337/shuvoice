@@ -42,12 +42,15 @@ use_cuda_graph_decoder = false
 
 # Sherpa settings (used when asr_backend = "sherpa")
 # sherpa_model_name = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
-# For Parakeet TDT v3 via Sherpa release assets, use:
+# sherpa_decode_mode = "auto"  # auto | streaming | offline_instant
+# For Parakeet TDT v3 via Sherpa release assets:
 # sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
-# sherpa_model_dir = "/path/to/sherpa-streaming-model"  # optional; auto-downloads selected sherpa_model_name when unset
+# instant_mode = true
+# sherpa_decode_mode = "offline_instant"
+# sherpa_model_dir = "/path/to/sherpa-model"  # optional; auto-downloads selected sherpa_model_name when unset
 # sherpa_provider = "cpu"   # cpu | cuda
 # sherpa_num_threads = 2
-# sherpa_chunk_ms = 100
+# sherpa_chunk_ms = 100       # streaming mode only; ignored for offline_instant
 
 # Moonshine settings (used when asr_backend = "moonshine")
 # moonshine_model_name = "moonshine/tiny"         # moonshine/tiny (fast) or moonshine/base (slower, slightly more accurate)

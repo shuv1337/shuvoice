@@ -295,6 +295,13 @@ class ShuVoiceApp(Gtk.Application):
                         self._ASR_MAX_FAILURES,
                     )
 
+    @property
+    def _is_offline_instant_mode(self) -> bool:
+        return (
+            self.config.asr_backend == "sherpa"
+            and self.config.resolved_sherpa_decode_mode == "offline_instant"
+        )
+
     def _process_chunk_safe(self, audio_data: np.ndarray) -> str:
         """Serialize access to mutable ASR streaming state."""
         if self._asr_disabled:
@@ -319,6 +326,41 @@ class ShuVoiceApp(Gtk.Application):
                 else:
                     log.exception(
                         "ASR chunk processing failed (%d/%d)",
+                        failures,
+                        self._ASR_MAX_FAILURES,
+                    )
+                raise
+
+            self._consecutive_asr_failures = 0
+            return text
+
+    def _process_utterance_safe(self, audio_data: np.ndarray) -> str:
+        """Serialize access to one-shot ASR utterance decoding state."""
+        if self._asr_disabled:
+            return ""
+
+        with self._asr_lock:
+            if self._asr_disabled:
+                return ""
+
+            try:
+                process_utterance = getattr(self.asr, "process_utterance", None)
+                if not callable(process_utterance):
+                    raise RuntimeError("ASR backend does not implement process_utterance()")
+                text = process_utterance(audio_data)
+            except Exception:
+                self._consecutive_asr_failures += 1
+                failures = self._consecutive_asr_failures
+                if failures >= self._ASR_MAX_FAILURES:
+                    log.critical(
+                        "ASR process_utterance failed %d times; disabling ASR",
+                        failures,
+                        exc_info=True,
+                    )
+                    self._disable_asr("ASR disabled after repeated utterance decode failures")
+                else:
+                    log.exception(
+                        "ASR utterance decode failed (%d/%d)",
                         failures,
                         self._ASR_MAX_FAILURES,
                     )
@@ -360,7 +402,7 @@ class ShuVoiceApp(Gtk.Application):
         rendered_text = self._render_transcript_text(text)
         if self.overlay:
             self.overlay.set_text(rendered_text)
-        if self.config.output_mode == "streaming_partial":
+        if self.config.output_mode == "streaming_partial" and not self._is_offline_instant_mode:
             self.typer.update_partial(rendered_text)
             metrics = getattr(self, "metrics", None)
             if metrics is not None:
@@ -417,6 +459,8 @@ class ShuVoiceApp(Gtk.Application):
         return flush_streaming_stall(self, state)
 
     def _process_recording_chunks(self, state: _UtteranceState):
+        if self._is_offline_instant_mode:
+            return None
         return process_recording_chunks(self, state)
 
     def _drain_and_buffer(self, state: _UtteranceState):
@@ -460,6 +504,21 @@ class ShuVoiceApp(Gtk.Application):
         if metrics is not None:
             metrics.observe_final_commit()
 
+    def _decode_offline_utterance(self, state: _UtteranceState):
+        if state.total <= 0 or self._asr_disabled:
+            return
+
+        audio_data = state.buffer[0] if len(state.buffer) == 1 else np.concatenate(state.buffer)
+        if not self.asr.wants_raw_audio and state.utterance_gain > 1.05:
+            audio_data = self._apply_utterance_gain(audio_data, state.utterance_gain)
+
+        try:
+            text = self._process_utterance_safe(audio_data)
+        except Exception:
+            self._recover_asr_after_failure("ASR offline utterance decode failed")
+        else:
+            state.last_text = prefer_transcript(state.last_text, text)
+
     def _handle_recording_stop(self, state: _UtteranceState):
         if self.overlay:
             self.overlay.set_state("processing")
@@ -484,6 +543,16 @@ class ShuVoiceApp(Gtk.Application):
                 state.speech_samples,
                 self._min_speech_samples,
             )
+            if self.overlay:
+                self.overlay.hide()
+            state.reset(rms_threshold=self._speech_rms_threshold)
+            self.typer.reset()
+            return
+
+        if self._is_offline_instant_mode:
+            self._decode_offline_utterance(state)
+            self._commit_utterance(state)
+
             if self.overlay:
                 self.overlay.hide()
             state.reset(rms_threshold=self._speech_rms_threshold)
@@ -548,7 +617,7 @@ class ShuVoiceApp(Gtk.Application):
                 else:
                     self._update_noise_floor(audio_rms(chunk))
 
-            if is_recording and not self._asr_disabled:
+            if is_recording and not self._asr_disabled and not self._is_offline_instant_mode:
                 self._process_recording_chunks(state)
 
             if was_recording and not is_recording:

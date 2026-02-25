@@ -1,0 +1,42 @@
+# ShuVoice example: Sherpa Parakeet TDT v3 (offline instant mode)
+
+config_version = 1
+
+[audio]
+sample_rate = 16000
+chunk_ms = 100
+fallback_sample_rate = 48000
+input_gain = 1.0
+audio_queue_max_size = 200
+silence_rms_threshold = 0.006
+silence_rms_multiplier = 1.3
+min_speech_ms = 80
+auto_gain_target_peak = 0.15
+auto_gain_max = 10.0
+auto_gain_settle_chunks = 2
+
+[asr]
+asr_backend = "sherpa"
+sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+# Optional local model directory. If unset, ShuVoice auto-downloads this model name.
+# sherpa_model_dir = "/path/to/sherpa-model-dir"
+
+# Required for Parakeet in ShuVoice:
+instant_mode = true
+sherpa_decode_mode = "offline_instant"
+
+# cpu | cuda (falls back to cpu at runtime if CUDA provider is unavailable)
+sherpa_provider = "cpu"
+sherpa_num_threads = 2
+
+# Streaming-only tuning key (kept for compatibility; ignored by offline_instant mode)
+sherpa_chunk_ms = 100
+
+[control]
+# Defaults to "$XDG_RUNTIME_DIR/shuvoice/control.sock" when unset.
+# control_socket = "/path/to/control.sock"
+
+[typing]
+output_mode = "final_only"
+typing_final_injection_mode = "auto"
+use_clipboard_for_final = true

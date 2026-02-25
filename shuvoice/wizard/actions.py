@@ -58,6 +58,11 @@ def maybe_download_model(
 
     _emit(0.0, "Preparing model download…")
 
+    provider_note = ""
+
+    def _with_provider_note(message: str) -> str:
+        return f"{message}{provider_note}" if provider_note else message
+
     try:
         cfg = Config.load()
         cfg.asr_backend = asr_backend
@@ -68,24 +73,54 @@ def maybe_download_model(
         cfg.__post_init__()
 
         backend_cls = get_backend_class(cfg.asr_backend)
+
+        if cfg.asr_backend == "sherpa":
+            requested_provider = cfg.sherpa_provider
+            startup_warnings = getattr(backend_cls, "startup_warnings", None)
+            warnings = startup_warnings(cfg, apply_fixes=True) if callable(startup_warnings) else []
+            if warnings:
+                for warning in warnings:
+                    log.warning("Wizard Sherpa runtime warning: %s", warning)
+                _emit(None, "Sherpa runtime warning detected; see logs for details")
+
+            if requested_provider != cfg.sherpa_provider:
+                provider_note = (
+                    f" Requested sherpa_provider='{requested_provider}' but runtime will use "
+                    f"'{cfg.sherpa_provider}'."
+                )
+
+            if (
+                "parakeet" in cfg.sherpa_model_name.lower()
+                and cfg.resolved_sherpa_decode_mode != "offline_instant"
+            ):
+                _emit(1.0, "Parakeet requires Sherpa offline instant mode")
+                return (
+                    "error",
+                    _with_provider_note(
+                        "Parakeet model selection requires sherpa_decode_mode='offline_instant' "
+                        "(or instant_mode=true with sherpa_decode_mode='auto')."
+                    ),
+                )
     except Exception as exc:  # noqa: BLE001
         _emit(1.0, "Model download setup failed")
         return "error", f"Could not prepare model download: {exc}"
 
     if _is_cancelled():
         _emit(1.0, "Model download cancelled")
-        return "cancelled", "Model download cancelled by user."
+        return "cancelled", _with_provider_note("Model download cancelled by user.")
 
     if not backend_cls.capabilities.supports_model_download:
         _emit(1.0, "Model download skipped (lazy backend)")
-        return "skipped", "Selected backend downloads models lazily at runtime."
+        return "skipped", _with_provider_note("Selected backend downloads models lazily at runtime.")
 
     missing = backend_cls.dependency_errors()
     if missing:
         _emit(1.0, "Model download skipped (missing dependencies)")
         return (
             "skipped_missing_deps",
-            "Dependencies for selected backend are missing. Run `shuvoice setup` to install them.",
+            _with_provider_note(
+                "Dependencies for selected backend are missing. Run `shuvoice setup` to install them."
+            ),
         )
 
     kwargs: dict[str, object] = {}
@@ -104,21 +139,21 @@ def maybe_download_model(
 
     if _is_cancelled():
         _emit(1.0, "Model download cancelled")
-        return "cancelled", "Model download cancelled by user."
+        return "cancelled", _with_provider_note("Model download cancelled by user.")
 
     try:
         backend_cls.download_model(**kwargs)
     except Exception as exc:  # noqa: BLE001
         if _is_cancelled() or "cancelled" in str(exc).lower():
             _emit(1.0, "Model download cancelled")
-            return "cancelled", "Model download cancelled by user."
+            return "cancelled", _with_provider_note("Model download cancelled by user.")
 
         log.warning("Wizard model download failed: %s", exc)
         _emit(1.0, "Model download failed")
-        return "error", f"Model download failed: {exc}"
+        return "error", _with_provider_note(f"Model download failed: {exc}")
 
     _emit(1.0, "Model download completed")
-    return "downloaded", "Model download completed."
+    return "downloaded", _with_provider_note("Model download completed.")
 
 
 def finish_setup(

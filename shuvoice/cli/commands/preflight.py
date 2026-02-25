@@ -73,11 +73,17 @@ def run_preflight(config: Config) -> bool:
         if errors:
             raise RuntimeError("; ".join(errors))
 
-        startup_errors = backend_cls.startup_errors(config)
+        # Evaluate startup warnings on a disposable config copy so provider
+        # fallbacks can be reported without mutating the caller's config.
+        cfg_for_checks = Config(
+            **{name: getattr(config, name) for name in Config.config_field_names()}
+        )
+
+        startup_warnings = backend_cls.startup_warnings(cfg_for_checks, apply_fixes=True)
+
+        startup_errors = backend_cls.startup_errors(cfg_for_checks)
         if startup_errors:
             raise RuntimeError("; ".join(startup_errors))
-
-        startup_warnings = backend_cls.startup_warnings(config, apply_fixes=False)
 
         caps = backend_cls.capabilities
         chunking = caps.expected_chunking
@@ -87,6 +93,26 @@ def run_preflight(config: Config) -> bool:
             f"(supports_gpu={gpu_support}, expected_chunking={chunking}, "
             f"wants_raw_audio={caps.wants_raw_audio})"
         )
+
+        if config.asr_backend == "sherpa":
+            requested_provider = config.sherpa_provider
+            effective_provider = cfg_for_checks.sherpa_provider
+            decode_mode = cfg_for_checks.resolved_sherpa_decode_mode or "streaming"
+
+            looks_like_parakeet = False
+            detector = getattr(backend_cls, "_looks_like_parakeet_model", None)
+            if callable(detector):
+                looks_like_parakeet = bool(detector(cfg_for_checks))
+
+            parakeet_runnable = "yes" if (looks_like_parakeet and not startup_errors) else "no"
+            detail += (
+                f", sherpa_decode_mode={decode_mode}"
+                f", sherpa_provider={requested_provider}->{effective_provider}"
+                f", parakeet_model={'yes' if looks_like_parakeet else 'no'}"
+            )
+            if looks_like_parakeet:
+                detail += f", parakeet_runnable={parakeet_runnable}"
+
         if startup_warnings:
             detail += " | warnings: " + " | ".join(startup_warnings)
         return detail

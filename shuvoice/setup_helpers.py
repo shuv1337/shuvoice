@@ -54,23 +54,29 @@ def model_status_for_backend(config: Config) -> str:
 
     if backend == "sherpa":
         model_name = str(config.sherpa_model_name).strip()
-        blocked_parakeet_note = ""
+        decode_mode = config.resolved_sherpa_decode_mode or "streaming"
+
+        parakeet_note = ""
         if "parakeet" in model_name.lower():
-            blocked_parakeet_note = (
-                "; guarded in current builds (requires upcoming offline/instant Sherpa path)"
-            )
+            if decode_mode == "offline_instant":
+                parakeet_note = "; Parakeet offline instant mode configured"
+            else:
+                parakeet_note = (
+                    "; Parakeet selected but decode mode resolves to streaming "
+                    "(set instant_mode=true or sherpa_decode_mode='offline_instant')"
+                )
 
         model_dir = Path(config.sherpa_model_dir).expanduser() if config.sherpa_model_dir else None
         if model_dir is None:
             model_dir = _sherpa_model_default_dir(config.sherpa_model_name)
 
         if _is_complete_sherpa_model_dir(model_dir):
-            return f"present ({model_dir}){blocked_parakeet_note}"
+            return f"present ({model_dir}; decode_mode={decode_mode}){parakeet_note}"
 
         return (
             f"missing ({model_dir}); will auto-download model "
             f"'{config.sherpa_model_name}' on first successful startup "
-            f"after dependencies are installed{blocked_parakeet_note}"
+            f"after dependencies are installed (decode_mode={decode_mode}){parakeet_note}"
         )
 
     if backend == "nemo":

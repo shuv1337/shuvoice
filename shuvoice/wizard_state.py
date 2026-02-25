@@ -44,6 +44,10 @@ ASR_BACKENDS = [
 DEFAULT_SHERPA_MODEL_NAME = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
 PARAKEET_TDT_V3_INT8_MODEL_NAME = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 
+
+def _is_parakeet_sherpa_model_name(model_name: str) -> bool:
+    return "parakeet" in str(model_name).strip().lower()
+
 # Keybind presets for push-to-talk setup.
 # (id, display_label, hyprland_bind_key_spec, description)
 # hyprland_bind_key_spec is the "MODS, KEY" portion for bind/bindr lines.
@@ -491,14 +495,21 @@ def write_config(
     true, ``[asr].asr_backend`` and the provider/device key are updated.
 
     For Sherpa, optionally persists ``sherpa_model_name`` so the runtime can
-    auto-download the selected model variant on first launch.
+    auto-download the selected model variant on first launch. When a Parakeet
+    model is selected, the wizard also writes a working decode config:
+    ``instant_mode = true`` and ``sherpa_decode_mode = "offline_instant"``.
 
     Writes use the config I/O durability path (atomic write + backup).
     For Sherpa, CUDA is selected only when the installed sherpa-onnx runtime
     exposes a CUDA provider; otherwise it defaults to CPU.
     """
     if asr_backend == "sherpa":
-        provider = "cuda" if _detect_sherpa_cuda_provider() else "cpu"
+        sherpa_cuda_available = _detect_sherpa_cuda_provider()
+        provider = "cuda" if sherpa_cuda_available else "cpu"
+        if not sherpa_cuda_available and _detect_cuda():
+            log.info(
+                "Sherpa runtime CUDAExecutionProvider not detected; defaulting to sherpa_provider='cpu'"
+            )
     else:
         provider = "cuda" if _detect_cuda() else "cpu"
 
@@ -527,6 +538,15 @@ def write_config(
     if asr_backend == "sherpa":
         chosen_model = (sherpa_model_name or DEFAULT_SHERPA_MODEL_NAME).strip()
         asr_table["sherpa_model_name"] = chosen_model
+
+        if _is_parakeet_sherpa_model_name(chosen_model):
+            # Parakeet requires the Sherpa offline instant decode path.
+            asr_table["instant_mode"] = True
+            asr_table["sherpa_decode_mode"] = "offline_instant"
+        else:
+            # Keep Sherpa defaults for streaming models.
+            asr_table["sherpa_decode_mode"] = "auto"
+            asr_table["instant_mode"] = False
 
     migrated["config_version"] = CURRENT_CONFIG_VERSION
 
@@ -568,6 +588,11 @@ def format_summary(
         else:
             model_label = chosen_model
         lines.insert(1, f"Sherpa model:   {model_label}")
+
+        if _is_parakeet_sherpa_model_name(chosen_model):
+            lines.insert(2, "Sherpa decode:  Offline instant (auto-enabled)")
+        else:
+            lines.insert(2, "Sherpa decode:  Streaming (auto)")
 
     if hypr_key:
         bind_lines = format_hyprland_bind_for_keybind(

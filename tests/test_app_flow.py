@@ -173,6 +173,7 @@ def test_handle_recording_stop_ignores_silent_utterances_without_commit():
         _speech_rms_threshold=0.008,
         typer=SimpleNamespace(reset=Mock()),
         _asr_disabled=False,
+        _is_offline_instant_mode=False,
         _commit_utterance=commit,
     )
 
@@ -202,6 +203,7 @@ def test_handle_recording_stop_commits_when_speech_threshold_met():
         _drain_and_buffer=lambda _state: None,
         _min_speech_samples=100,
         _asr_disabled=False,
+        _is_offline_instant_mode=False,
         asr=SimpleNamespace(native_chunk_samples=1600, wants_raw_audio=True, debug_step_num=0),
         _flush_tail_silence=lambda _state: None,
         _commit_utterance=commit,
@@ -214,6 +216,114 @@ def test_handle_recording_stop_commits_when_speech_threshold_met():
     assert commit_calls == 1
     app.overlay.hide.assert_called_once()
     app.typer.reset.assert_called_once()
+
+
+def test_handle_recording_stop_offline_mode_decodes_once_and_commits():
+    state = _UtteranceState(
+        speech_samples=400,
+        peak_rms=0.022,
+        utterance_rms_threshold=0.008,
+    )
+
+    def decode(_state: _UtteranceState):
+        _state.last_text = "decoded once"
+
+    commit = Mock()
+
+    app = SimpleNamespace(
+        overlay=SimpleNamespace(set_state=Mock(), hide=Mock()),
+        _drain_and_buffer=lambda _state: None,
+        _min_speech_samples=100,
+        _asr_disabled=False,
+        _is_offline_instant_mode=True,
+        _decode_offline_utterance=decode,
+        _commit_utterance=commit,
+        _speech_rms_threshold=0.008,
+        typer=SimpleNamespace(reset=Mock()),
+    )
+
+    ShuVoiceApp._handle_recording_stop(app, state)
+
+    commit.assert_called_once_with(state)
+    app.overlay.hide.assert_called_once()
+    app.typer.reset.assert_called_once()
+
+
+def test_decode_offline_utterance_applies_gain_for_non_raw_backend():
+    raw_audio = np.array([0.1, -0.2, 0.3], dtype=np.float32)
+    gained_audio = np.array([0.2, -0.4, 0.6], dtype=np.float32)
+    state = _UtteranceState(
+        buffer=[raw_audio],
+        total=3,
+        utterance_gain=2.0,
+    )
+
+    app = SimpleNamespace(
+        _asr_disabled=False,
+        asr=SimpleNamespace(wants_raw_audio=False),
+        _apply_utterance_gain=Mock(return_value=gained_audio),
+        _process_utterance_safe=Mock(return_value="offline text"),
+        _recover_asr_after_failure=Mock(),
+    )
+
+    ShuVoiceApp._decode_offline_utterance(app, state)
+
+    app._apply_utterance_gain.assert_called_once_with(raw_audio, 2.0)
+    app._process_utterance_safe.assert_called_once_with(gained_audio)
+    assert state.last_text == "offline text"
+
+
+def test_process_recording_chunks_is_noop_in_offline_mode(monkeypatch):
+    called = {"value": False}
+
+    def fake_process_recording_chunks(_app, _state):
+        called["value"] = True
+
+    monkeypatch.setattr("shuvoice.app.process_recording_chunks", fake_process_recording_chunks)
+
+    app = SimpleNamespace(_is_offline_instant_mode=True)
+    state = _UtteranceState()
+
+    result = ShuVoiceApp._process_recording_chunks(app, state)
+
+    assert result is None
+    assert called["value"] is False
+
+
+def test_on_transcript_update_skips_partials_in_offline_mode():
+    metrics = SimpleNamespace(observe_partial_update=Mock())
+    app = SimpleNamespace(
+        _render_transcript_text=lambda text: f"rendered:{text}",
+        overlay=SimpleNamespace(set_text=Mock()),
+        config=SimpleNamespace(output_mode="streaming_partial"),
+        _is_offline_instant_mode=True,
+        typer=SimpleNamespace(update_partial=Mock()),
+        metrics=metrics,
+    )
+
+    ShuVoiceApp._on_transcript_update(app, "hello")
+
+    app.overlay.set_text.assert_called_once_with("rendered:hello")
+    app.typer.update_partial.assert_not_called()
+    metrics.observe_partial_update.assert_not_called()
+
+
+def test_on_transcript_update_keeps_partials_in_streaming_mode():
+    metrics = SimpleNamespace(observe_partial_update=Mock())
+    app = SimpleNamespace(
+        _render_transcript_text=lambda text: f"rendered:{text}",
+        overlay=SimpleNamespace(set_text=Mock()),
+        config=SimpleNamespace(output_mode="streaming_partial"),
+        _is_offline_instant_mode=False,
+        typer=SimpleNamespace(update_partial=Mock()),
+        metrics=metrics,
+    )
+
+    ShuVoiceApp._on_transcript_update(app, "hello")
+
+    app.overlay.set_text.assert_called_once_with("rendered:hello")
+    app.typer.update_partial.assert_called_once_with("rendered:hello")
+    metrics.observe_partial_update.assert_called_once()
 
 
 def test_render_transcript_text_applies_replacements_and_capitalize():

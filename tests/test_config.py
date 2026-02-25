@@ -508,3 +508,13 @@ def test_parakeet_model_detection_case_insensitive():
         instant_mode=True,
     )
     assert cfg.resolved_sherpa_decode_mode == "offline_instant"
+
+
+def test_to_nested_dict_includes_sherpa_decode_mode():
+    cfg = Config(
+        asr_backend="sherpa",
+        sherpa_decode_mode="offline_instant",
+    )
+
+    data = cfg.to_nested_dict()
+    assert data["asr"]["sherpa_decode_mode"] == "offline_instant"

@@ -21,7 +21,7 @@ Streaming speech-to-text overlay for Hyprland with pluggable ASR backends.
 Core pipeline + production hardening are implemented:
 
 - PipeWire capture (`sounddevice`)
-- Pluggable streaming ASR backend layer (`nemo`, `sherpa`, `moonshine`)
+- Pluggable ASR backend layer (`nemo`, `sherpa`, `moonshine`) with Sherpa streaming + offline-instant modes
 - GTK4 layer-shell overlay
 - Hyprland IPC controls via local Unix socket
 - `wtype` / clipboard text injection with retry + fallback
@@ -31,7 +31,7 @@ Core pipeline + production hardening are implemented:
 | Backend (`asr_backend`) | Current model(s) | Provider setting | Supported providers |
 |---|---|---|---|
 | `nemo` | `nvidia/nemotron-speech-streaming-en-0.6b` | `device` | `cuda` (default), `cpu` |
-| `sherpa` | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` (default) | `sherpa_provider` | `cpu` (default), `cuda` |
+| `sherpa` | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` (streaming default), `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8` (offline instant) | `sherpa_provider` | `cpu` (default), `cuda` |
 | `moonshine` | `moonshine/tiny` (default, also `moonshine/base`) | `moonshine_provider` | `cpu` (default), `cuda` |
 
 Model locations in this repo/runtime:
@@ -42,7 +42,7 @@ Model locations in this repo/runtime:
 
 > Note: Sherpa CUDA requires a source-built `sherpa-onnx` GPU wheel plus CUDA 12 compatibility libs on this host stack.
 >
-> Note: `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8` is currently guarded in ShuVoice startup because the app's Sherpa path is streaming-only today. A dedicated offline/instant Sherpa path is planned.
+> Note: Parakeet TDT (`sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8`) is supported via Sherpa offline instant mode (`instant_mode=true` + `sherpa_decode_mode="offline_instant"`, or `sherpa_decode_mode="auto"` with instant mode on). Parakeet + streaming mode remains blocked by startup guards.
 
 ## Backend accuracy/performance snapshot (manual regression suite)
 
@@ -157,6 +157,7 @@ Checks include:
 - importability of key Python modules
 - audio input device validity
 - ASR backend dependencies for selected `asr_backend`
+- Sherpa decode diagnostics (resolved `sherpa_decode_mode`, provider requested→effective, Parakeet runnability)
 - required binaries (`wtype`, `wl-copy`, `wl-paste`)
 - `libgtk4-layer-shell.so`
 - output mode validity
@@ -180,6 +181,9 @@ shuvoice setup --install-missing
 shuvoice setup --skip-model-download --skip-preflight
 ```
 
+For Sherpa, `setup` now reports resolved decode mode, provider requested→effective,
+and whether a selected Parakeet model is runnable with the current config/runtime.
+
 ## Run
 
 ```bash
@@ -193,8 +197,12 @@ python -m shuvoice --help
 python -m shuvoice setup
 python -m shuvoice run --asr-backend nemo --right-context 13
 python -m shuvoice run --asr-backend sherpa --sherpa-model-dir /path/to/model
-# parakeet model is currently blocked in startup guards until offline/instant sherpa mode lands
-# python -m shuvoice run --asr-backend sherpa --sherpa-model-name sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8
+# Parakeet offline instant example (set in config.toml):
+# [asr]
+# asr_backend = "sherpa"
+# sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+# instant_mode = true
+# sherpa_decode_mode = "offline_instant"
 python -m shuvoice run --asr-backend moonshine --moonshine-model-name moonshine/tiny
 python -m shuvoice run --asr-backend moonshine --moonshine-provider cuda
 python -m shuvoice run --output-mode streaming_partial
@@ -399,6 +407,7 @@ Example config:
 - `examples/config-nemo-cpu.toml`
 - `examples/config-sherpa-cuda.toml`
 - `examples/config-sherpa-cpu.toml`
+- `examples/config-sherpa-parakeet-offline.toml`
 - `examples/config-moonshine-cpu.toml`
 - `examples/waybar-custom-shuvoice.jsonc` (Waybar custom module snippet)
 - `examples/waybar-custom-shuvoice-wrapper.jsonc` (wrapper-script variant)
@@ -410,23 +419,41 @@ Backend selection is controlled by `asr_backend`:
 - `asr_backend = "nemo"`: uses `model_name`, `right_context`, `device`
 - `asr_backend = "moonshine"`: uses `moonshine_*` settings (16k sample rate expected)
 
-Parakeet TDT v3 model note (Sherpa runtime):
+Sherpa decode mode controls whether ShuVoice uses streaming chunk decode or
+one-shot offline utterance decode:
+
+```toml
+[asr]
+asr_backend = "sherpa"
+sherpa_decode_mode = "auto"  # auto | streaming | offline_instant
+```
+
+Resolution rules:
+- `streaming`: always use the existing streaming chunk path.
+- `offline_instant`: accumulate audio while PTT is held, decode once on release,
+  and commit only the final transcript.
+- `auto`: resolves to `offline_instant` for Parakeet model names when
+  `instant_mode = true`; otherwise resolves to `streaming`.
+
+Parakeet TDT v3 requires offline instant mode:
 
 ```toml
 [asr]
 asr_backend = "sherpa"
 sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+instant_mode = true
+sherpa_decode_mode = "offline_instant"
 ```
 
-This model is currently blocked by startup guards because ShuVoice's current
-Sherpa integration is streaming-only. It requires a dedicated offline/instant
-Sherpa path (planned) and will otherwise crash during recognizer init.
+If Parakeet is selected with streaming decode mode, startup guards block launch
+with an actionable error and service exit code 78 (to avoid restart loops).
 
-Optional: set `instant_mode = true` under `[asr]` for a low-latency profile.
-This applies backend-specific tuning:
+Optional: set `instant_mode = true` under `[asr]` for low-latency tuning.
+This applies backend-specific behavior:
 
 - NeMo: forces `right_context = 0`
-- Sherpa: caps `sherpa_chunk_ms` at `80`
+- Sherpa streaming mode: caps `sherpa_chunk_ms` at `80`
+- Sherpa offline mode: enables one-shot release-to-final decode behavior
 - Moonshine: forces `moonshine_model_name = "moonshine/tiny"`, caps `moonshine_max_window_sec` to `3.0`, and caps `moonshine_max_tokens` to `48`
 
 `right_context` applies to NeMo only.
@@ -555,9 +582,16 @@ ShuVoice is released under the MIT License. See `LICENSE`.
 - `No module named 'moonshine_onnx'`
   - Install Moonshine deps (`uv sync --extra asr-moonshine`).
 - `sherpa_model_dir` exists but is missing `encoder/decoder/joiner` artifacts
-  - Point `sherpa_model_dir` to a streaming transducer model directory containing
+  - Point `sherpa_model_dir` to a valid transducer model directory containing
     `tokens.txt` and ONNX files for encoder/decoder/joiner.
   - If `sherpa_model_dir` is unset, ShuVoice will auto-download `sherpa_model_name`.
+- `Parakeet requires offline instant mode` startup error
+  - Use `sherpa_decode_mode = "offline_instant"`, or set `instant_mode = true` with
+    `sherpa_decode_mode = "auto"`.
+  - Do not run Parakeet with `sherpa_decode_mode = "streaming"`; startup guard blocks this.
+- `sherpa_provider='cuda' requested, but runtime does not expose CUDAExecutionProvider`
+  - Install a CUDA-enabled sherpa-onnx runtime, or run with `sherpa_provider = "cpu"`.
+  - `setup`/`preflight` now report requested vs effective provider and decode mode.
 - `moonshine_model_dir` missing `encoder_model.onnx` / `decoder_model_merged.onnx`
   - Point `moonshine_model_dir` to a valid local Moonshine ONNX export, or unset it
     and let useful-moonshine-onnx fetch weights from Hugging Face.
