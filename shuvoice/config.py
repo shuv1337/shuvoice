@@ -46,6 +46,7 @@ CONFIG_SECTION_FIELDS: dict[str, tuple[str, ...]] = {
         "use_cuda_graph_decoder",
         "sherpa_model_name",
         "sherpa_model_dir",
+        "sherpa_decode_mode",
         "sherpa_provider",
         "sherpa_num_threads",
         "sherpa_chunk_ms",
@@ -145,6 +146,11 @@ def _default_text_replacements() -> dict[str, str]:
 _FONT_FAMILY_RE = re.compile(r"^[A-Za-z0-9 ._-]+$")
 
 
+def _is_parakeet_model(model_name: str) -> bool:
+    """Check if model name indicates a Parakeet TDT model."""
+    return "parakeet" in model_name.lower()
+
+
 @dataclass
 class Config:
     # Schema metadata
@@ -177,6 +183,7 @@ class Config:
     # Sherpa (when asr_backend = "sherpa")
     sherpa_model_name: str = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
     sherpa_model_dir: str | None = None
+    sherpa_decode_mode: str = "auto"  # auto | streaming | offline_instant
     sherpa_provider: str = "cpu"  # cpu | cuda
     sherpa_num_threads: int = 2
     sherpa_chunk_ms: int = 100
@@ -256,6 +263,12 @@ class Config:
         self.sherpa_model_name = str(self.sherpa_model_name).strip()
         if not self.sherpa_model_name:
             raise ValueError("sherpa_model_name must not be empty")
+
+        self.sherpa_decode_mode = str(self.sherpa_decode_mode).strip().lower()
+        if self.sherpa_decode_mode not in {"auto", "streaming", "offline_instant"}:
+            raise ValueError(
+                "sherpa_decode_mode must be one of: auto, streaming, offline_instant"
+            )
 
         self.sherpa_provider = str(self.sherpa_provider).strip().lower()
         if self.sherpa_provider not in {"cpu", "cuda"}:
@@ -389,6 +402,39 @@ class Config:
 
         self._compiled_text_replacements = compile_text_replacements(self.text_replacements)
 
+    def _resolve_sherpa_decode_mode(self) -> str:
+        """Resolve the effective Sherpa decode mode.
+
+        Returns:
+            "streaming" or "offline_instant" based on config and model detection.
+
+        Resolution rules:
+        - If sherpa_decode_mode is explicitly set (not "auto"), use that value.
+        - If sherpa_decode_mode is "auto":
+          - If model is Parakeet-like AND instant_mode is True -> "offline_instant"
+          - Otherwise -> "streaming"
+        """
+        if self.sherpa_decode_mode != "auto":
+            return self.sherpa_decode_mode
+
+        # Auto-detection: Parakeet models with instant_mode -> offline_instant
+        if self.instant_mode and _is_parakeet_model(self.sherpa_model_name):
+            return "offline_instant"
+
+        return "streaming"
+
+    @property
+    def resolved_sherpa_decode_mode(self) -> str | None:
+        """Get the effective Sherpa decode mode for runtime use.
+
+        Returns:
+            The resolved decode mode ("streaming" or "offline_instant") if
+            asr_backend is "sherpa", otherwise None.
+        """
+        if self.asr_backend != "sherpa":
+            return None
+        return self._resolve_sherpa_decode_mode()
+
     def _apply_instant_mode_profile(self) -> None:
         """Apply low-latency backend tuning when ``instant_mode`` is enabled."""
         if not self.instant_mode:
@@ -404,14 +450,27 @@ class Config:
             return
 
         if self.asr_backend == "sherpa":
-            tuned_chunk_ms = min(int(self.sherpa_chunk_ms), 80)
-            if tuned_chunk_ms != int(self.sherpa_chunk_ms):
+            resolved_mode = self._resolve_sherpa_decode_mode()
+
+            if resolved_mode == "offline_instant":
+                # Offline instant mode: no streaming chunk tuning needed since
+                # audio is accumulated and decoded in one shot on key release.
+                # Log the resolved mode for diagnostics.
                 log.info(
-                    "instant_mode enabled: lowering sherpa_chunk_ms to %dms (was %s)",
-                    tuned_chunk_ms,
-                    self.sherpa_chunk_ms,
+                    "instant_mode enabled with Sherpa offline_instant mode "
+                    "(model: %s)",
+                    self.sherpa_model_name,
                 )
-            self.sherpa_chunk_ms = tuned_chunk_ms
+            else:
+                # Streaming mode with instant_mode: cap chunk_ms for lower latency
+                tuned_chunk_ms = min(int(self.sherpa_chunk_ms), 80)
+                if tuned_chunk_ms != int(self.sherpa_chunk_ms):
+                    log.info(
+                        "instant_mode enabled: lowering sherpa_chunk_ms to %dms (was %s)",
+                        tuned_chunk_ms,
+                        self.sherpa_chunk_ms,
+                    )
+                self.sherpa_chunk_ms = tuned_chunk_ms
             return
 
         if self.asr_backend == "moonshine":

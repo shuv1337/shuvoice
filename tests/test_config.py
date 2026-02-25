@@ -30,6 +30,7 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     assert cfg.instant_mode is False
     assert cfg.sherpa_model_name == "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
     assert cfg.sherpa_provider == "cpu"
+    assert cfg.sherpa_decode_mode == "auto"
     assert cfg.sherpa_num_threads == 2
     assert cfg.sherpa_chunk_ms == 100
     assert cfg.moonshine_model_name == "moonshine/tiny"
@@ -353,3 +354,157 @@ def test_default_text_replacements_include_common_brand_variants():
     assert cfg.text_replacements["show voice"] == "ShuVoice"
     assert cfg.text_replacements["hyperland"] == "Hyprland"
     assert cfg.text_replacements["high per land"] == "Hyprland"
+
+
+# Tests for sherpa_decode_mode
+
+
+def test_sherpa_decode_mode_default():
+    cfg = Config()
+    assert cfg.sherpa_decode_mode == "auto"
+
+
+def test_sherpa_decode_mode_validation_invalid():
+    with pytest.raises(ValueError, match="sherpa_decode_mode"):
+        Config(sherpa_decode_mode="invalid")
+
+
+def test_sherpa_decode_mode_validation_valid_values():
+    # All valid values should be accepted
+    cfg_auto = Config(sherpa_decode_mode="auto")
+    assert cfg_auto.sherpa_decode_mode == "auto"
+
+    cfg_streaming = Config(sherpa_decode_mode="streaming")
+    assert cfg_streaming.sherpa_decode_mode == "streaming"
+
+    cfg_offline = Config(sherpa_decode_mode="offline_instant")
+    assert cfg_offline.sherpa_decode_mode == "offline_instant"
+
+
+def test_sherpa_decode_mode_normalized():
+    # Case insensitive and whitespace stripped
+    cfg = Config(sherpa_decode_mode="  STREAMING  ")
+    assert cfg.sherpa_decode_mode == "streaming"
+
+
+def test_resolved_sherpa_decode_mode_non_sherpa_backend():
+    # When backend is not sherpa, resolved mode should be None
+    cfg_nemo = Config(asr_backend="nemo")
+    assert cfg_nemo.resolved_sherpa_decode_mode is None
+
+    cfg_moonshine = Config(asr_backend="moonshine")
+    assert cfg_moonshine.resolved_sherpa_decode_mode is None
+
+
+def test_resolved_sherpa_decode_mode_explicit_streaming():
+    # Explicit streaming mode always returns streaming
+    cfg = Config(
+        asr_backend="sherpa",
+        sherpa_decode_mode="streaming",
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+        instant_mode=True,
+    )
+    assert cfg.resolved_sherpa_decode_mode == "streaming"
+
+
+def test_resolved_sherpa_decode_mode_explicit_offline_instant():
+    # Explicit offline_instant mode always returns offline_instant
+    cfg = Config(
+        asr_backend="sherpa",
+        sherpa_decode_mode="offline_instant",
+        sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
+        instant_mode=False,
+    )
+    assert cfg.resolved_sherpa_decode_mode == "offline_instant"
+
+
+def test_resolved_sherpa_decode_mode_auto_parakeet_with_instant():
+    # Auto mode + Parakeet model + instant_mode=True -> offline_instant
+    cfg = Config(
+        asr_backend="sherpa",
+        sherpa_decode_mode="auto",
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+        instant_mode=True,
+    )
+    assert cfg.resolved_sherpa_decode_mode == "offline_instant"
+
+
+def test_resolved_sherpa_decode_mode_auto_parakeet_without_instant():
+    # Auto mode + Parakeet model + instant_mode=False -> streaming
+    cfg = Config(
+        asr_backend="sherpa",
+        sherpa_decode_mode="auto",
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+        instant_mode=False,
+    )
+    assert cfg.resolved_sherpa_decode_mode == "streaming"
+
+
+def test_resolved_sherpa_decode_mode_auto_non_parakeet_with_instant():
+    # Auto mode + non-Parakeet model + instant_mode=True -> streaming
+    cfg = Config(
+        asr_backend="sherpa",
+        sherpa_decode_mode="auto",
+        sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
+        instant_mode=True,
+    )
+    assert cfg.resolved_sherpa_decode_mode == "streaming"
+
+
+def test_resolved_sherpa_decode_mode_auto_non_parakeet_without_instant():
+    # Auto mode + non-Parakeet model + instant_mode=False -> streaming
+    cfg = Config(
+        asr_backend="sherpa",
+        sherpa_decode_mode="auto",
+        sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
+        instant_mode=False,
+    )
+    assert cfg.resolved_sherpa_decode_mode == "streaming"
+
+
+def test_instant_mode_sherpa_streaming_caps_chunk_ms():
+    # instant_mode with streaming mode caps chunk_ms
+    cfg = Config(
+        asr_backend="sherpa",
+        sherpa_decode_mode="streaming",
+        sherpa_chunk_ms=120,
+        instant_mode=True,
+    )
+    assert cfg.sherpa_chunk_ms == 80
+
+
+def test_instant_mode_sherpa_offline_instant_no_chunk_cap():
+    # instant_mode with offline_instant mode does NOT cap chunk_ms
+    # (since chunks are not used for streaming)
+    cfg = Config(
+        asr_backend="sherpa",
+        sherpa_decode_mode="offline_instant",
+        sherpa_chunk_ms=120,
+        instant_mode=True,
+    )
+    assert cfg.sherpa_chunk_ms == 120
+
+
+def test_instant_mode_sherpa_auto_parakeet_no_chunk_cap():
+    # Auto mode + Parakeet + instant_mode resolves to offline_instant
+    # and does NOT cap chunk_ms
+    cfg = Config(
+        asr_backend="sherpa",
+        sherpa_decode_mode="auto",
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+        sherpa_chunk_ms=120,
+        instant_mode=True,
+    )
+    assert cfg.resolved_sherpa_decode_mode == "offline_instant"
+    assert cfg.sherpa_chunk_ms == 120
+
+
+def test_parakeet_model_detection_case_insensitive():
+    # Parakeet detection should be case-insensitive
+    cfg = Config(
+        asr_backend="sherpa",
+        sherpa_decode_mode="auto",
+        sherpa_model_name="SHERPA-ONNX-NEMO-PARAKEET-TDT-0.6B-V3-INT8",
+        instant_mode=True,
+    )
+    assert cfg.resolved_sherpa_decode_mode == "offline_instant"
