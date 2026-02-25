@@ -105,3 +105,36 @@ def test_on_finish_writes_config_releases_window_and_quits():
     wizard._release_input_and_destroy_window.assert_called_once()
     wizard.quit.assert_called_once()
     assert wizard.completed is True
+
+
+def test_complete_finish_shows_launch_button_and_waits_for_click():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard.__new__(WelcomeWizard)
+    wizard._asr_backend = "sherpa"
+    wizard._keybind = "insert"
+    wizard._download_pulse_source_id = None
+    wizard._finish_in_progress = True
+    wizard.completed = False
+    wizard._launch_button = MagicMock()
+    wizard._set_cancel_download_visible = MagicMock()
+    wizard._set_download_note_visible = MagicMock()
+    wizard._apply_download_progress = MagicMock()
+    wizard._show_finish_status = MagicMock()
+    wizard._set_launch_button_visible = MagicMock()
+    wizard._finalize_and_quit = MagicMock()
+
+    with patch("shuvoice.wizard.write_marker") as write_marker:
+        WelcomeWizard._complete_finish(
+            wizard,
+            keybind_status="added",
+            sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
+            model_status="downloaded",
+            model_message="done",
+        )
+
+    write_marker.assert_called_once()
+    wizard._set_launch_button_visible.assert_called_once_with(True)
+    wizard._finalize_and_quit.assert_not_called()
+    assert wizard.completed is False
+    assert wizard._finish_in_progress is False

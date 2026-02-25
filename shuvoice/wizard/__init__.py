@@ -311,7 +311,8 @@ class WelcomeWizard(Gtk.Application):
 
         tip = Gtk.Label(
             label="Edit ~/.config/shuvoice/config.toml to adjust ASR and overlay settings.\n"
-            "If enabled, wizard will try to add your push-to-talk keybind in ~/.config/hypr/hyprland.conf."
+            "If enabled, wizard will try to add your push-to-talk keybind in ~/.config/hypr/hyprland.conf.\n"
+            "Model setup starts automatically on this screen."
         )
         tip.add_css_class("wizard-desc")
         tip.set_halign(Gtk.Align.CENTER)
@@ -338,6 +339,19 @@ class WelcomeWizard(Gtk.Application):
         self._download_progress.set_margin_end(16)
         page.append(self._download_progress)
 
+        self._download_note_label = Gtk.Label(
+            label=(
+                "Note: extraction can pause for 10–60s on slower disks. "
+                "Please keep this window open."
+            )
+        )
+        self._download_note_label.add_css_class("wizard-desc")
+        self._download_note_label.set_halign(Gtk.Align.CENTER)
+        self._download_note_label.set_justify(Gtk.Justification.CENTER)
+        self._download_note_label.set_margin_top(6)
+        self._download_note_label.set_visible(False)
+        page.append(self._download_note_label)
+
         self._cancel_download_button = self._make_button("Cancel download")
         self._cancel_download_button.set_visible(False)
         self._cancel_download_button.set_halign(Gtk.Align.CENTER)
@@ -345,11 +359,12 @@ class WelcomeWizard(Gtk.Application):
         self._cancel_download_button.connect("clicked", self._on_cancel_download_clicked)
         page.append(self._cancel_download_button)
 
-        btn = self._make_button("Launch ShuVoice", primary=True)
-        btn.connect("clicked", self._on_finish)
-        btn.set_halign(Gtk.Align.CENTER)
-        btn.set_margin_top(20)
-        page.append(btn)
+        self._launch_button = self._make_button("Launch ShuVoice", primary=True)
+        self._launch_button.connect("clicked", self._on_launch_clicked)
+        self._launch_button.set_halign(Gtk.Align.CENTER)
+        self._launch_button.set_margin_top(20)
+        self._launch_button.set_visible(False)
+        page.append(self._launch_button)
 
         return page
 
@@ -483,6 +498,8 @@ class WelcomeWizard(Gtk.Application):
             return
         self._finish_in_progress = True
 
+        self._set_launch_button_visible(False)
+
         if button is not None:
             try:
                 button.set_sensitive(False)
@@ -518,6 +535,7 @@ class WelcomeWizard(Gtk.Application):
         if hasattr(self, "_download_progress") and self._download_progress is not None:
             self._show_finish_status(self._finish_status_text(keybind_status))
             self._set_download_progress_visible(True)
+            self._set_download_note_visible(self._asr_backend == "sherpa")
             self._set_cancel_download_visible(True)
             self._apply_download_progress(0.0, "Preparing model download…")
 
@@ -578,6 +596,10 @@ class WelcomeWizard(Gtk.Application):
 
         self._apply_download_progress(None, "Cancelling model download…")
 
+    def _on_launch_clicked(self, _button):
+        self.completed = True
+        self._finalize_and_quit()
+
     def _set_download_progress_visible(self, visible: bool) -> None:
         progress = getattr(self, "_download_progress", None)
         if progress is None:
@@ -592,6 +614,19 @@ class WelcomeWizard(Gtk.Application):
         btn.set_sensitive(visible)
         if visible:
             btn.set_label("Cancel download")
+
+    def _set_download_note_visible(self, visible: bool) -> None:
+        note = getattr(self, "_download_note_label", None)
+        if note is None:
+            return
+        note.set_visible(visible)
+
+    def _set_launch_button_visible(self, visible: bool) -> None:
+        launch = getattr(self, "_launch_button", None)
+        if launch is None:
+            return
+        launch.set_visible(visible)
+        launch.set_sensitive(visible)
 
     def _apply_download_progress(self, fraction: float | None, message: str):
         progress = getattr(self, "_download_progress", None)
@@ -649,15 +684,15 @@ class WelcomeWizard(Gtk.Application):
             self._download_pulse_source_id = None
 
         self._set_cancel_download_visible(False)
+        self._set_download_note_visible(False)
         if model_status == "cancelled":
             self._apply_download_progress(0.0, "Model download cancelled")
         else:
             self._apply_download_progress(1.0, "Model setup finished")
 
         write_marker()
-        self.completed = True
         log.info(
-            "Wizard completed: asr_backend=%s sherpa_model=%s keybind=%s keybind_setup=%s model_setup=%s",
+            "Wizard setup ready: asr_backend=%s sherpa_model=%s keybind=%s keybind_setup=%s model_setup=%s",
             self._asr_backend,
             sherpa_model_name,
             self._keybind,
@@ -671,10 +706,14 @@ class WelcomeWizard(Gtk.Application):
             status_text = f"{status_text}\n{model_status_text}"
 
         self._show_finish_status(status_text)
-        if hasattr(self, "_finish_status_label") and self._finish_status_label is not None:
-            GLib.timeout_add(950, self._finalize_and_quit)
+        self._finish_in_progress = False
+
+        if hasattr(self, "_launch_button") and self._launch_button is not None:
+            self._set_launch_button_visible(True)
             return False
 
+        # Headless/tests fallback path.
+        self.completed = True
         self._finalize_and_quit()
         return False
 
@@ -717,6 +756,8 @@ class WelcomeWizard(Gtk.Application):
         if hasattr(self, "_download_cancel_event"):
             self._download_cancel_event.clear()
         self._set_cancel_download_visible(False)
+        self._set_download_note_visible(False)
+        self._set_launch_button_visible(False)
         self._finish_in_progress = False
         self._release_input_and_destroy_window()
         self.quit()
@@ -773,6 +814,14 @@ class WelcomeWizard(Gtk.Application):
             def _go_next(_btn, page=next_page):
                 if page == "done":
                     self._update_summary()
+                    self._set_launch_button_visible(False)
+                    self._set_cancel_download_visible(False)
+                    self._set_download_note_visible(False)
+                    self._set_download_progress_visible(False)
+                    self._show_finish_status("Applying settings…")
+                    self._stack.set_visible_child_name(page)
+                    GLib.idle_add(self._on_finish, None)
+                    return
                 self._stack.set_visible_child_name(page)
 
             nxt.connect("clicked", _go_next)

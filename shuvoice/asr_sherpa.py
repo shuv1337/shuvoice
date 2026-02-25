@@ -187,7 +187,10 @@ class SherpaBackend(ASRBackend):
                     ) from e
 
                 _check_cancel()
-                _emit_progress(0.93, "Extracting model archive…")
+                _emit_progress(
+                    0.93,
+                    "Extracting model archive… this can take 10–60s on slower disks",
+                )
                 cls._safe_extract_tar(archive_path, extracted_dir)
                 _check_cancel()
                 source_dir = cls._find_extracted_model_dir(extracted_dir)
@@ -197,7 +200,7 @@ class SherpaBackend(ASRBackend):
                         "(tokens.txt + encoder/decoder/joiner ONNX files)."
                     )
 
-                _emit_progress(0.97, "Finalizing model files…")
+                _emit_progress(0.97, "Finalizing model files… almost done")
                 _check_cancel()
                 if target_dir.exists():
                     shutil.rmtree(target_dir)
