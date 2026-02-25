@@ -14,6 +14,7 @@ before this module is imported. See __main__.py.
 from __future__ import annotations
 
 import logging
+import threading
 
 import gi
 
@@ -23,8 +24,13 @@ gi.require_version("Gtk4LayerShell", "1.0")
 from gi.repository import GLib, Gtk
 from gi.repository import Gtk4LayerShell as LayerShell
 
-from ..wizard_state import ASR_BACKENDS, KEYBIND_PRESETS
-from .actions import needs_wizard, write_config, write_marker
+from ..wizard_state import (
+    ASR_BACKENDS,
+    KEYBIND_PRESETS,
+    DEFAULT_SHERPA_MODEL_NAME,
+    PARAKEET_TDT_V3_INT8_MODEL_NAME,
+)
+from .actions import maybe_download_model, needs_wizard, write_config, write_marker
 from .flow import summary_text
 from .hyprland import (
     KeybindSetupStatus,
@@ -57,8 +63,11 @@ class WelcomeWizard(Gtk.Application):
         self.completed = False
         self._force_reconfigure = force_reconfigure
         self._asr_backend = "sherpa"
+        self._sherpa_model_name = DEFAULT_SHERPA_MODEL_NAME
         self._keybind = "insert"
         self._finish_in_progress = False
+        self._download_pulse_source_id: int | None = None
+        self._download_cancel_event = threading.Event()
         self._win: Gtk.Window | None = None
         self._stack: Gtk.Stack | None = None
 
@@ -175,6 +184,25 @@ class WelcomeWizard(Gtk.Application):
             desc_label.add_css_class("wizard-radio-desc")
             desc_label.set_halign(Gtk.Align.START)
             page.append(desc_label)
+
+        self._sherpa_parakeet_toggle = Gtk.CheckButton(
+            label="For Sherpa: use Parakeet TDT v3 (int8) model"
+        )
+        self._sherpa_parakeet_toggle.add_css_class("wizard-radio")
+        self._sherpa_parakeet_toggle.set_active(False)
+        self._sherpa_parakeet_toggle.connect("toggled", self._on_sherpa_model_toggled)
+        page.append(self._sherpa_parakeet_toggle)
+
+        self._sherpa_parakeet_desc = Gtk.Label(
+            label=(
+                "Uses sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8. "
+                "Wizard will attempt to auto-download the selected model on finish."
+            )
+        )
+        self._sherpa_parakeet_desc.add_css_class("wizard-radio-desc")
+        self._sherpa_parakeet_desc.set_halign(Gtk.Align.START)
+        page.append(self._sherpa_parakeet_desc)
+        self._sync_sherpa_model_controls()
 
         nav = self._make_nav_row(
             back_page="welcome",
@@ -299,6 +327,24 @@ class WelcomeWizard(Gtk.Application):
         self._finish_status_label.set_margin_top(8)
         page.append(self._finish_status_label)
 
+        self._download_progress = Gtk.ProgressBar()
+        self._download_progress.set_show_text(True)
+        self._download_progress.set_text("Preparing model download…")
+        self._download_progress.set_fraction(0.0)
+        self._download_progress.set_hexpand(True)
+        self._download_progress.set_visible(False)
+        self._download_progress.set_margin_top(6)
+        self._download_progress.set_margin_start(16)
+        self._download_progress.set_margin_end(16)
+        page.append(self._download_progress)
+
+        self._cancel_download_button = self._make_button("Cancel download")
+        self._cancel_download_button.set_visible(False)
+        self._cancel_download_button.set_halign(Gtk.Align.CENTER)
+        self._cancel_download_button.set_margin_top(6)
+        self._cancel_download_button.connect("clicked", self._on_cancel_download_clicked)
+        page.append(self._cancel_download_button)
+
         btn = self._make_button("Launch ShuVoice", primary=True)
         btn.connect("clicked", self._on_finish)
         btn.set_halign(Gtk.Align.CENTER)
@@ -312,6 +358,31 @@ class WelcomeWizard(Gtk.Application):
     def _on_asr_toggled(self, button: Gtk.CheckButton, backend_id: str):
         if button.get_active():
             self._asr_backend = backend_id
+            self._sync_sherpa_model_controls()
+
+    def _on_sherpa_model_toggled(self, button: Gtk.CheckButton):
+        self._sherpa_model_name = (
+            PARAKEET_TDT_V3_INT8_MODEL_NAME if button.get_active() else DEFAULT_SHERPA_MODEL_NAME
+        )
+
+    def _sync_sherpa_model_controls(self):
+        toggle = getattr(self, "_sherpa_parakeet_toggle", None)
+        desc = getattr(self, "_sherpa_parakeet_desc", None)
+        if toggle is None or desc is None:
+            return
+
+        is_sherpa = self._asr_backend == "sherpa"
+        toggle.set_sensitive(is_sherpa)
+        toggle.set_visible(is_sherpa)
+        desc.set_visible(is_sherpa)
+
+        if not is_sherpa:
+            self._sherpa_model_name = DEFAULT_SHERPA_MODEL_NAME
+            return
+
+        self._sherpa_model_name = (
+            PARAKEET_TDT_V3_INT8_MODEL_NAME if toggle.get_active() else DEFAULT_SHERPA_MODEL_NAME
+        )
 
     def _on_keybind_toggled(self, button: Gtk.CheckButton, kb_id: str):
         if button.get_active():
@@ -405,6 +476,9 @@ class WelcomeWizard(Gtk.Application):
         Gtk.Application.do_shutdown(self)
 
     def _on_finish(self, button):
+        if not hasattr(self, "_download_pulse_source_id"):
+            self._download_pulse_source_id = None
+
         if getattr(self, "_finish_in_progress", False):
             return
         self._finish_in_progress = True
@@ -415,9 +489,12 @@ class WelcomeWizard(Gtk.Application):
             except Exception:
                 log.debug("Failed to disable finish button", exc_info=True)
 
+        sherpa_model_name = getattr(self, "_sherpa_model_name", DEFAULT_SHERPA_MODEL_NAME)
+
         write_config(
             self._asr_backend,
             overwrite_existing=getattr(self, "_force_reconfigure", False),
+            sherpa_model_name=sherpa_model_name,
         )
 
         keybind_status = KeybindSetupStatus.NOT_ATTEMPTED.value
@@ -433,20 +510,173 @@ class WelcomeWizard(Gtk.Application):
         elif keybind_status != KeybindSetupStatus.NOT_ATTEMPTED.value:
             log.warning("Wizard keybind setup: %s", keybind_message)
 
+        if hasattr(self, "_download_cancel_event"):
+            self._download_cancel_event.clear()
+
+        # If UI widgets are present, run model download in a worker thread so
+        # progress can be rendered live in the done screen.
+        if hasattr(self, "_download_progress") and self._download_progress is not None:
+            self._show_finish_status(self._finish_status_text(keybind_status))
+            self._set_download_progress_visible(True)
+            self._set_cancel_download_visible(True)
+            self._apply_download_progress(0.0, "Preparing model download…")
+
+            threading.Thread(
+                target=self._download_model_async,
+                args=(keybind_status, sherpa_model_name),
+                name="wizard-model-download",
+                daemon=True,
+            ).start()
+            return
+
+        # Fallback path used by tests/headless invocation without full UI.
+        model_status, model_message = maybe_download_model(
+            self._asr_backend,
+            sherpa_model_name=sherpa_model_name,
+            progress_callback=None,
+        )
+        self._complete_finish(
+            keybind_status,
+            sherpa_model_name,
+            model_status,
+            model_message,
+        )
+
+    def _download_model_async(self, keybind_status: str, sherpa_model_name: str) -> None:
+        def _progress(fraction: float | None, message: str) -> None:
+            GLib.idle_add(self._apply_download_progress, fraction, message)
+
+        model_status, model_message = maybe_download_model(
+            self._asr_backend,
+            sherpa_model_name=sherpa_model_name,
+            progress_callback=_progress,
+            cancel_requested=self._is_download_cancelled,
+        )
+
+        GLib.idle_add(
+            self._complete_finish,
+            keybind_status,
+            sherpa_model_name,
+            model_status,
+            model_message,
+        )
+
+    def _is_download_cancelled(self) -> bool:
+        event = getattr(self, "_download_cancel_event", None)
+        return bool(event is not None and event.is_set())
+
+    def _on_cancel_download_clicked(self, _button):
+        if not hasattr(self, "_download_cancel_event"):
+            self._download_cancel_event = threading.Event()
+
+        self._download_cancel_event.set()
+
+        btn = getattr(self, "_cancel_download_button", None)
+        if btn is not None:
+            btn.set_sensitive(False)
+            btn.set_label("Canceling…")
+
+        self._apply_download_progress(None, "Cancelling model download…")
+
+    def _set_download_progress_visible(self, visible: bool) -> None:
+        progress = getattr(self, "_download_progress", None)
+        if progress is None:
+            return
+        progress.set_visible(visible)
+
+    def _set_cancel_download_visible(self, visible: bool) -> None:
+        btn = getattr(self, "_cancel_download_button", None)
+        if btn is None:
+            return
+        btn.set_visible(visible)
+        btn.set_sensitive(visible)
+        if visible:
+            btn.set_label("Cancel download")
+
+    def _apply_download_progress(self, fraction: float | None, message: str):
+        progress = getattr(self, "_download_progress", None)
+        if progress is None:
+            return False
+
+        self._set_download_progress_visible(True)
+
+        if message:
+            progress.set_text(message)
+
+        if fraction is None:
+            if self._download_pulse_source_id is None:
+                self._download_pulse_source_id = GLib.timeout_add(
+                    120, self._pulse_download_progress
+                )
+        else:
+            if self._download_pulse_source_id is not None:
+                GLib.source_remove(self._download_pulse_source_id)
+                self._download_pulse_source_id = None
+            bounded = max(0.0, min(1.0, float(fraction)))
+            progress.set_fraction(bounded)
+
+        return False
+
+    def _pulse_download_progress(self):
+        progress = getattr(self, "_download_progress", None)
+        if (
+            progress is None
+            or not progress.get_visible()
+            or not getattr(self, "_finish_in_progress", False)
+        ):
+            self._download_pulse_source_id = None
+            return False
+
+        progress.pulse()
+        return True
+
+    def _complete_finish(
+        self,
+        keybind_status: str,
+        sherpa_model_name: str,
+        model_status: str,
+        model_message: str,
+    ):
+        if model_status == "downloaded":
+            log.info("Wizard model setup: %s", model_message)
+        elif model_status == "cancelled":
+            log.info("Wizard model setup cancelled by user")
+        elif model_status not in {"skipped", "skipped_missing_deps"}:
+            log.warning("Wizard model setup: %s", model_message)
+
+        if self._download_pulse_source_id is not None:
+            GLib.source_remove(self._download_pulse_source_id)
+            self._download_pulse_source_id = None
+
+        self._set_cancel_download_visible(False)
+        if model_status == "cancelled":
+            self._apply_download_progress(0.0, "Model download cancelled")
+        else:
+            self._apply_download_progress(1.0, "Model setup finished")
+
         write_marker()
         self.completed = True
         log.info(
-            "Wizard completed: asr_backend=%s keybind=%s keybind_setup=%s",
+            "Wizard completed: asr_backend=%s sherpa_model=%s keybind=%s keybind_setup=%s model_setup=%s",
             self._asr_backend,
+            sherpa_model_name,
             self._keybind,
             keybind_status,
+            model_status,
         )
 
-        self._show_finish_status(self._finish_status_text(keybind_status))
+        status_text = self._finish_status_text(keybind_status)
+        model_status_text = self._model_download_status_text(model_status)
+        if model_status_text:
+            status_text = f"{status_text}\n{model_status_text}"
+
+        self._show_finish_status(status_text)
         if hasattr(self, "_finish_status_label") and self._finish_status_label is not None:
             GLib.timeout_add(950, self._finalize_and_quit)
-            return
+            return False
+
         self._finalize_and_quit()
+        return False
 
     def _show_finish_status(self, text: str):
         label = getattr(self, "_finish_status_label", None)
@@ -468,7 +698,26 @@ class WelcomeWizard(Gtk.Application):
         }
         return messages.get(keybind_status, "⚠ Keybind setup status unknown; check logs.")
 
+    @staticmethod
+    def _model_download_status_text(model_status: str) -> str:
+        messages = {
+            "downloaded": "✓ Model downloaded and ready.",
+            "skipped": "ℹ Model download skipped (backend downloads lazily).",
+            "skipped_missing_deps": "⚠ Model not downloaded (missing dependencies). Run `shuvoice setup`.",
+            "cancelled": "ℹ Model download cancelled. You can run `shuvoice model download` later.",
+            "error": "⚠ Model download failed. You can run `shuvoice model download` later.",
+        }
+        return messages.get(model_status, "")
+
     def _finalize_and_quit(self):
+        if self._download_pulse_source_id is not None:
+            GLib.source_remove(self._download_pulse_source_id)
+            self._download_pulse_source_id = None
+
+        if hasattr(self, "_download_cancel_event"):
+            self._download_cancel_event.clear()
+        self._set_cancel_download_visible(False)
+        self._finish_in_progress = False
         self._release_input_and_destroy_window()
         self.quit()
         return False
@@ -484,6 +733,7 @@ class WelcomeWizard(Gtk.Application):
                 self._asr_backend,
                 self._keybind,
                 auto_add_keybind=self._auto_add_enabled(),
+                sherpa_model_name=getattr(self, "_sherpa_model_name", DEFAULT_SHERPA_MODEL_NAME),
             )
         )
 

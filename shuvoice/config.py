@@ -39,10 +39,12 @@ CONFIG_SECTION_FIELDS: dict[str, tuple[str, ...]] = {
     ),
     "asr": (
         "asr_backend",
+        "instant_mode",
         "model_name",
         "right_context",
         "device",
         "use_cuda_graph_decoder",
+        "sherpa_model_name",
         "sherpa_model_dir",
         "sherpa_provider",
         "sherpa_num_threads",
@@ -162,6 +164,7 @@ class Config:
 
     # ASR
     asr_backend: str = "sherpa"  # sherpa | nemo | moonshine
+    instant_mode: bool = False  # low-latency profile with backend-specific tuning
     model_name: str = "nvidia/nemotron-speech-streaming-en-0.6b"
     # 13 gives the highest streaming accuracy (at the cost of latency).
     # Lower values are snappier but significantly reduce recognition quality.
@@ -170,6 +173,7 @@ class Config:
     use_cuda_graph_decoder: bool = False
 
     # Sherpa (when asr_backend = "sherpa")
+    sherpa_model_name: str = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
     sherpa_model_dir: str | None = None
     sherpa_provider: str = "cpu"  # cpu | cuda
     sherpa_num_threads: int = 2
@@ -241,6 +245,13 @@ class Config:
         self.asr_backend = str(self.asr_backend).strip().lower()
         if self.asr_backend not in {"nemo", "sherpa", "moonshine"}:
             raise ValueError("asr_backend must be one of: nemo, sherpa, moonshine")
+
+        if not isinstance(self.instant_mode, bool):
+            raise ValueError("instant_mode must be true or false")
+
+        self.sherpa_model_name = str(self.sherpa_model_name).strip()
+        if not self.sherpa_model_name:
+            raise ValueError("sherpa_model_name must not be empty")
 
         self.sherpa_provider = str(self.sherpa_provider).strip().lower()
         if self.sherpa_provider not in {"cpu", "cuda"}:
@@ -358,9 +369,62 @@ class Config:
             normalized_replacements[key_text] = value.strip()
         self.text_replacements = normalized_replacements
 
+        self._apply_instant_mode_profile()
+
         from .postprocess import compile_text_replacements
 
         self._compiled_text_replacements = compile_text_replacements(self.text_replacements)
+
+    def _apply_instant_mode_profile(self) -> None:
+        """Apply low-latency backend tuning when ``instant_mode`` is enabled."""
+        if not self.instant_mode:
+            return
+
+        if self.asr_backend == "nemo":
+            if int(self.right_context) != 0:
+                log.info(
+                    "instant_mode enabled: forcing NeMo right_context=0 (was %s)",
+                    self.right_context,
+                )
+            self.right_context = 0
+            return
+
+        if self.asr_backend == "sherpa":
+            tuned_chunk_ms = min(int(self.sherpa_chunk_ms), 80)
+            if tuned_chunk_ms != int(self.sherpa_chunk_ms):
+                log.info(
+                    "instant_mode enabled: lowering sherpa_chunk_ms to %dms (was %s)",
+                    tuned_chunk_ms,
+                    self.sherpa_chunk_ms,
+                )
+            self.sherpa_chunk_ms = tuned_chunk_ms
+            return
+
+        if self.asr_backend == "moonshine":
+            if self.moonshine_model_name != "moonshine/tiny":
+                log.info(
+                    "instant_mode enabled: forcing moonshine_model_name='moonshine/tiny' (was %s)",
+                    self.moonshine_model_name,
+                )
+                self.moonshine_model_name = "moonshine/tiny"
+
+            tuned_window = min(float(self.moonshine_max_window_sec), 3.0)
+            if tuned_window != float(self.moonshine_max_window_sec):
+                log.info(
+                    "instant_mode enabled: capping moonshine_max_window_sec to %.1fs (was %.1fs)",
+                    tuned_window,
+                    float(self.moonshine_max_window_sec),
+                )
+                self.moonshine_max_window_sec = tuned_window
+
+            tuned_tokens = min(int(self.moonshine_max_tokens), 48)
+            if tuned_tokens != int(self.moonshine_max_tokens):
+                log.info(
+                    "instant_mode enabled: capping moonshine_max_tokens to %d (was %s)",
+                    tuned_tokens,
+                    self.moonshine_max_tokens,
+                )
+                self.moonshine_max_tokens = tuned_tokens
 
     @property
     def compiled_text_replacements(self) -> tuple[tuple[re.Pattern[str], str], ...]:

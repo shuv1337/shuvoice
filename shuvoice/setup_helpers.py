@@ -25,14 +25,14 @@ class BackendSetupReport:
     model_status: str
 
 
-def _sherpa_model_default_dir() -> Path:
+def _sherpa_model_default_dir(model_name: str | None = None) -> Path:
     backend_cls = get_backend_class("sherpa")
-    default_name = getattr(
+    default_name = model_name or getattr(
         backend_cls,
         "_DEFAULT_MODEL_NAME",
         "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
     )
-    return Config.data_dir() / "models" / "sherpa" / str(default_name)
+    return Config.data_dir() / "models" / "sherpa" / str(default_name).strip()
 
 
 def _is_complete_sherpa_model_dir(model_dir: Path) -> bool:
@@ -55,13 +55,14 @@ def model_status_for_backend(config: Config) -> str:
     if backend == "sherpa":
         model_dir = Path(config.sherpa_model_dir).expanduser() if config.sherpa_model_dir else None
         if model_dir is None:
-            model_dir = _sherpa_model_default_dir()
+            model_dir = _sherpa_model_default_dir(config.sherpa_model_name)
 
         if _is_complete_sherpa_model_dir(model_dir):
             return f"present ({model_dir})"
 
         return (
-            f"missing ({model_dir}); will auto-download on first successful startup "
+            f"missing ({model_dir}); will auto-download model "
+            f"'{config.sherpa_model_name}' on first successful startup "
             "after dependencies are installed"
         )
 
@@ -85,14 +86,10 @@ def install_hints_for_backend(backend: str) -> tuple[str, ...]:
     if backend == "sherpa":
         if shutil.which("yay"):
             hints.append("Arch (AUR, recommended): yay -S --needed python-sherpa-onnx-bin")
-            hints.append(
-                "Arch (AUR, alternate provider): yay -S --needed python-sherpa-onnx"
-            )
+            hints.append("Arch (AUR, alternate provider): yay -S --needed python-sherpa-onnx")
         elif shutil.which("paru"):
             hints.append("Arch (AUR, recommended): paru -S --needed python-sherpa-onnx-bin")
-            hints.append(
-                "Arch (AUR, alternate provider): paru -S --needed python-sherpa-onnx"
-            )
+            hints.append("Arch (AUR, alternate provider): paru -S --needed python-sherpa-onnx")
 
         hints.extend(
             [

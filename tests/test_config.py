@@ -25,6 +25,8 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     assert cfg.streaming_stall_guard is True
     assert cfg.streaming_stall_chunks == 4
     assert cfg.asr_backend == "sherpa"
+    assert cfg.instant_mode is False
+    assert cfg.sherpa_model_name == "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
     assert cfg.sherpa_provider == "cpu"
     assert cfg.sherpa_num_threads == 2
     assert cfg.sherpa_chunk_ms == 100
@@ -61,6 +63,7 @@ unknown_audio_key = 999
 
 [asr]
 asr_backend = "sherpa"
+sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 model_name = "nvidia/nemotron-speech-streaming-en-0.6b"
 right_context = 13
 device = "cuda"
@@ -121,6 +124,7 @@ foo = "bar"
     assert cfg.auto_gain_max == 7.5
     assert cfg.auto_gain_settle_chunks == 3
     assert cfg.asr_backend == "sherpa"
+    assert cfg.sherpa_model_name == "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
     assert cfg.sherpa_model_dir == "/tmp/sherpa-model"
     assert cfg.sherpa_provider == "cuda"
     assert cfg.sherpa_num_threads == 4
@@ -171,9 +175,19 @@ def test_asr_backend_validation():
         Config(asr_backend="bad-backend")
 
 
+def test_instant_mode_validation():
+    with pytest.raises(ValueError, match="instant_mode"):
+        Config(instant_mode="yes")
+
+
 def test_sherpa_provider_validation():
     with pytest.raises(ValueError, match="sherpa_provider"):
         Config(sherpa_provider="rocm")
+
+
+def test_sherpa_model_name_validation():
+    with pytest.raises(ValueError, match="sherpa_model_name"):
+        Config(sherpa_model_name="   ")
 
 
 def test_sherpa_chunk_ms_validation():
@@ -209,6 +223,30 @@ def test_moonshine_model_name_validation():
 def test_moonshine_model_precision_validation():
     with pytest.raises(ValueError, match="moonshine_model_precision"):
         Config(moonshine_model_precision="   ")
+
+
+def test_instant_mode_nemo_profile_sets_lowest_right_context():
+    cfg = Config(asr_backend="nemo", right_context=13, instant_mode=True)
+    assert cfg.right_context == 0
+
+
+def test_instant_mode_sherpa_profile_caps_chunk_ms():
+    cfg = Config(asr_backend="sherpa", sherpa_chunk_ms=120, instant_mode=True)
+    assert cfg.sherpa_chunk_ms == 80
+
+
+def test_instant_mode_moonshine_profile_forces_tiny_and_caps_window():
+    cfg = Config(
+        asr_backend="moonshine",
+        instant_mode=True,
+        moonshine_model_name="moonshine/base",
+        moonshine_max_window_sec=5.0,
+        moonshine_max_tokens=64,
+    )
+
+    assert cfg.moonshine_model_name == "moonshine/tiny"
+    assert cfg.moonshine_max_window_sec == 3.0
+    assert cfg.moonshine_max_tokens == 48
 
 
 def test_audio_queue_max_size_validation():

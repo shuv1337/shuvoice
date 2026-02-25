@@ -210,6 +210,38 @@ def test_sherpa_auto_downloads_default_model_when_model_dir_missing(
     assert backend._model_files["tokens"] == auto_dir / "tokens.txt"
 
 
+def test_sherpa_auto_download_uses_configured_model_name(monkeypatch, tmp_path: Path):
+    model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+    cfg = Config(asr_backend="sherpa", sherpa_model_name=model_name, sherpa_model_dir=None)
+    backend = create_backend("sherpa", cfg)
+
+    sherpa_cls = get_backend_class("sherpa")
+    auto_dir = tmp_path / model_name
+
+    monkeypatch.setattr(
+        sherpa_cls,
+        "_default_model_dir",
+        classmethod(lambda cls, model_name=None: tmp_path / str(model_name)),
+    )
+
+    captured: dict[str, str | None] = {"model_name": None}
+
+    def fake_download_model(cls, model_name=None, model_dir=None, **_):
+        captured["model_name"] = model_name
+        target = Path(model_dir).expanduser() if model_dir else auto_dir
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "tokens.txt").write_text("<blk>\na\n")
+        for name in ("encoder.onnx", "decoder.onnx", "joiner.onnx"):
+            (target / name).write_bytes(b"onnx")
+
+    monkeypatch.setattr(sherpa_cls, "download_model", classmethod(fake_download_model))
+
+    backend._validate_runtime_config()
+
+    assert captured["model_name"] == model_name
+    assert cfg.sherpa_model_dir == str(auto_dir)
+
+
 def test_sherpa_load_requires_transducer_artifacts(tmp_path: Path):
     (tmp_path / "tokens.txt").write_text("<blk>\na\n")
 

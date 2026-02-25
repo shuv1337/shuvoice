@@ -36,6 +36,14 @@ def _add_runtime_overrides(parser: argparse.ArgumentParser) -> None:
         help="Sherpa model directory containing tokens.txt + encoder/decoder/joiner ONNX files",
     )
     parser.add_argument(
+        "--sherpa-model-name",
+        default=None,
+        help=(
+            "Sherpa model archive name for auto-download when sherpa_model_dir is unset "
+            "(default: from config)"
+        ),
+    )
+    parser.add_argument(
         "--sherpa-provider",
         choices=["cpu", "cuda"],
         default=None,
@@ -262,6 +270,8 @@ def apply_cli_overrides(args: argparse.Namespace, config: Config) -> None:
         config.right_context = int(args.right_context)
     if args.sherpa_model_dir is not None:
         config.sherpa_model_dir = args.sherpa_model_dir
+    if args.sherpa_model_name is not None:
+        config.sherpa_model_name = args.sherpa_model_name
     if args.sherpa_provider:
         config.sherpa_provider = args.sherpa_provider
     if args.sherpa_num_threads is not None:

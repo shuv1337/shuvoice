@@ -19,6 +19,8 @@ def config_info_lines(config: Config) -> list[str]:
     }
 
     lines = [f"Backend:  {backend_labels.get(backend, backend)}"]
+    if config.instant_mode:
+        lines.append("Profile:  Instant")
 
     # Model name (shortened for readability)
     if backend == "nemo":
@@ -30,7 +32,7 @@ def config_info_lines(config: Config) -> list[str]:
         if config.sherpa_model_dir:
             model = Path(config.sherpa_model_dir).name
         else:
-            model = "default (auto-download)"
+            model = f"{config.sherpa_model_name} (auto-download)"
         lines.append(f"Model:    {model}")
     elif backend == "moonshine":
         lines.append(f"Model:    {config.moonshine_model_name}")

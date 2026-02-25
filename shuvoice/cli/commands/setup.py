@@ -27,6 +27,7 @@ def _download_model_for_backend(config: Config) -> None:
     if config.asr_backend == "nemo":
         kwargs["model_name"] = config.model_name
     elif config.asr_backend == "sherpa":
+        kwargs["model_name"] = config.sherpa_model_name
         kwargs["model_dir"] = config.sherpa_model_dir
 
     backend_cls.download_model(**kwargs)

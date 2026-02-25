@@ -14,6 +14,8 @@ min_speech_ms = 80
 
 [asr]
 asr_backend = "moonshine"
+# Optional low-latency profile (forces tiny + tighter Moonshine decode caps).
+# instant_mode = true
 moonshine_model_name = "moonshine/tiny"
 moonshine_model_precision = "float"
 moonshine_chunk_ms = 100

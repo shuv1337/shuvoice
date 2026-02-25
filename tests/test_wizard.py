@@ -6,7 +6,9 @@ from unittest.mock import patch
 
 from shuvoice.wizard_state import (
     ASR_BACKENDS,
+    DEFAULT_SHERPA_MODEL_NAME,
     KEYBIND_PRESETS,
+    PARAKEET_TDT_V3_INT8_MODEL_NAME,
     auto_add_hyprland_keybind,
     format_hyprland_bind,
     format_hyprland_bind_for_keybind,
@@ -70,6 +72,7 @@ def test_write_config_creates_toml_with_cuda(tmp_path):
 
         content = config_file.read_text()
         assert 'asr_backend = "sherpa"' in content
+        assert f'sherpa_model_name = "{DEFAULT_SHERPA_MODEL_NAME}"' in content
         assert 'sherpa_provider = "cuda"' in content
 
 
@@ -85,7 +88,21 @@ def test_write_config_creates_toml_without_cuda(tmp_path):
         config_file = tmp_path / "config.toml"
         content = config_file.read_text()
         assert 'asr_backend = "sherpa"' in content
+        assert f'sherpa_model_name = "{DEFAULT_SHERPA_MODEL_NAME}"' in content
         assert 'sherpa_provider = "cpu"' in content
+
+
+def test_write_config_sherpa_custom_model_name(tmp_path):
+    """write_config persists selected Sherpa model name."""
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        write_config("sherpa", sherpa_model_name=PARAKEET_TDT_V3_INT8_MODEL_NAME)
+
+        content = (tmp_path / "config.toml").read_text()
+        assert f'sherpa_model_name = "{PARAKEET_TDT_V3_INT8_MODEL_NAME}"' in content
 
 
 def test_write_config_nemo_sets_device(tmp_path):
@@ -178,6 +195,11 @@ def test_format_summary_contains_backend_and_keybind():
     assert "Sherpa-ONNX" in result
     assert "Insert" in result
     assert "hyprland.conf" in result
+
+
+def test_format_summary_sherpa_parakeet_model_label():
+    result = format_summary("sherpa", sherpa_model_name=PARAKEET_TDT_V3_INT8_MODEL_NAME)
+    assert "Sherpa model:   Parakeet TDT v3 (int8)" in result
 
 
 def test_format_summary_includes_hyprland_bind_lines_for_preset():

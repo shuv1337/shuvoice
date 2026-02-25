@@ -8,6 +8,7 @@ import tarfile
 import tempfile
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -108,6 +109,8 @@ class SherpaBackend(ASRBackend):
         cls,
         model_name: str | None = None,
         model_dir: str | None = None,
+        progress_callback: Callable[[float | None, str], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
         **_: Any,
     ) -> None:
         """Download a Sherpa streaming transducer model archive and extract it."""
@@ -118,8 +121,24 @@ class SherpaBackend(ASRBackend):
             else cls._default_model_dir(model_name=resolved_model_name)
         )
 
+        def _emit_progress(fraction: float | None, message: str) -> None:
+            if progress_callback is None:
+                return
+            try:
+                progress_callback(fraction, message)
+            except Exception:  # noqa: BLE001
+                log.debug("Sherpa progress callback failed", exc_info=True)
+
+        def _check_cancel() -> None:
+            if cancel_check is not None and cancel_check():
+                _emit_progress(None, "Model download cancelled")
+                raise RuntimeError("Model download cancelled")
+
+        _check_cancel()
+
         if cls._is_model_dir_complete(target_dir):
             log.info("Sherpa model already available: %s", target_dir)
+            _emit_progress(1.0, "Sherpa model already available")
             return
 
         if target_dir.exists() and not target_dir.is_dir():
@@ -132,39 +151,78 @@ class SherpaBackend(ASRBackend):
         log.info("Source: %s", archive_url)
         log.info("Destination: %s", target_dir)
 
-        with tempfile.TemporaryDirectory(prefix="shuvoice-sherpa-") as tmp:
-            tmp_dir = Path(tmp)
-            archive_path = tmp_dir / f"{resolved_model_name}.tar.bz2"
-            extracted_dir = tmp_dir / "extracted"
-            extracted_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            with tempfile.TemporaryDirectory(prefix="shuvoice-sherpa-") as tmp:
+                tmp_dir = Path(tmp)
+                archive_path = tmp_dir / f"{resolved_model_name}.tar.bz2"
+                extracted_dir = tmp_dir / "extracted"
+                extracted_dir.mkdir(parents=True, exist_ok=True)
 
-            try:
-                urllib.request.urlretrieve(archive_url, archive_path)
-            except (urllib.error.URLError, TimeoutError) as e:
-                raise RuntimeError(
-                    f"Failed to download Sherpa model archive. URL: {archive_url}. Error: {e}"
-                ) from e
+                _emit_progress(0.0, f"Downloading {resolved_model_name}")
+                last_fraction = -1.0
 
-            cls._safe_extract_tar(archive_path, extracted_dir)
-            source_dir = cls._find_extracted_model_dir(extracted_dir)
-            if source_dir is None:
+                def _reporthook(block_count: int, block_size: int, total_size: int) -> None:
+                    nonlocal last_fraction
+                    _check_cancel()
+                    if total_size <= 0:
+                        if last_fraction < 0.0:
+                            _emit_progress(None, "Downloading model archive…")
+                            last_fraction = 0.0
+                        return
+
+                    downloaded = min(block_count * block_size, total_size)
+                    archive_fraction = downloaded / total_size
+                    ui_fraction = min(0.9, archive_fraction * 0.9)
+
+                    if ui_fraction >= 0.9 or ui_fraction - last_fraction >= 0.01:
+                        last_fraction = ui_fraction
+                        percent = int(archive_fraction * 100)
+                        _emit_progress(ui_fraction, f"Downloading model archive… {percent}%")
+
+                try:
+                    urllib.request.urlretrieve(archive_url, archive_path, reporthook=_reporthook)
+                except (urllib.error.URLError, TimeoutError) as e:
+                    raise RuntimeError(
+                        f"Failed to download Sherpa model archive. URL: {archive_url}. Error: {e}"
+                    ) from e
+
+                _check_cancel()
+                _emit_progress(0.93, "Extracting model archive…")
+                cls._safe_extract_tar(archive_path, extracted_dir)
+                _check_cancel()
+                source_dir = cls._find_extracted_model_dir(extracted_dir)
+                if source_dir is None:
+                    raise RuntimeError(
+                        "Downloaded Sherpa archive did not contain required artifacts "
+                        "(tokens.txt + encoder/decoder/joiner ONNX files)."
+                    )
+
+                _emit_progress(0.97, "Finalizing model files…")
+                _check_cancel()
+                if target_dir.exists():
+                    shutil.rmtree(target_dir)
+                shutil.copytree(source_dir, target_dir)
+                _check_cancel()
+
+            if not cls._is_model_dir_complete(target_dir):
                 raise RuntimeError(
-                    "Downloaded Sherpa archive did not contain required artifacts "
-                    "(tokens.txt + encoder/decoder/joiner ONNX files)."
+                    f"Sherpa model download completed but artifacts are incomplete: {target_dir}"
                 )
+        except RuntimeError as exc:
+            if "cancelled" in str(exc).lower() and target_dir.exists():
+                try:
+                    if not cls._is_model_dir_complete(target_dir):
+                        shutil.rmtree(target_dir)
+                except Exception:  # noqa: BLE001
+                    log.debug("Failed to clean partial Sherpa model directory", exc_info=True)
+            raise
 
-            if target_dir.exists():
-                shutil.rmtree(target_dir)
-            shutil.copytree(source_dir, target_dir)
-
-        if not cls._is_model_dir_complete(target_dir):
-            raise RuntimeError(
-                f"Sherpa model download completed but artifacts are incomplete: {target_dir}"
-            )
-
+        _emit_progress(1.0, "Sherpa model ready")
         log.info("Sherpa model ready: %s", target_dir)
 
     def _resolve_model_dir(self) -> Path:
+        model_name = str(self.config.sherpa_model_name).strip() or self._DEFAULT_MODEL_NAME
+
         configured = self.config.sherpa_model_dir
         if configured:
             model_dir = Path(configured).expanduser()
@@ -179,11 +237,11 @@ class SherpaBackend(ASRBackend):
                 )
 
             log.info(
-                "Configured sherpa_model_dir does not exist. "
-                "Downloading default Sherpa model to %s",
+                "Configured sherpa_model_dir does not exist. Downloading Sherpa model %s to %s",
+                model_name,
                 model_dir,
             )
-            self.download_model(model_dir=str(model_dir))
+            self.download_model(model_name=model_name, model_dir=str(model_dir))
             if not self._is_model_dir_complete(model_dir):
                 raise RuntimeError(
                     f"Sherpa auto-download failed to populate model directory: {model_dir}"
@@ -192,13 +250,14 @@ class SherpaBackend(ASRBackend):
             self.config.sherpa_model_dir = str(model_dir)
             return model_dir
 
-        default_dir = self._default_model_dir()
+        default_dir = self._default_model_dir(model_name=model_name)
         if not self._is_model_dir_complete(default_dir):
             log.info(
-                "sherpa_model_dir is not set. Downloading default Sherpa model to %s",
+                "sherpa_model_dir is not set. Downloading Sherpa model %s to %s",
+                model_name,
                 default_dir,
             )
-            self.download_model(model_dir=str(default_dir))
+            self.download_model(model_name=model_name, model_dir=str(default_dir))
 
         if not self._is_model_dir_complete(default_dir):
             raise RuntimeError(

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from shuvoice.cli.commands import setup as setup_cmd
-from shuvoice.setup_helpers import install_hints_for_backend
+from shuvoice.config import Config
+from shuvoice.setup_helpers import install_hints_for_backend, model_status_for_backend
 
 
 def test_install_hints_for_sherpa_prefer_bin_provider(monkeypatch):
@@ -23,3 +24,18 @@ def test_auto_install_commands_prefers_bin_provider(monkeypatch):
 
     assert commands[0][-1] == "python-sherpa-onnx-bin"
     assert commands[1][-1] == "python-sherpa-onnx"
+
+
+def test_model_status_mentions_configured_sherpa_model_name_when_missing(monkeypatch):
+    cfg = Config(
+        asr_backend="sherpa", sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+    )
+
+    monkeypatch.setattr(
+        "shuvoice.setup_helpers._is_complete_sherpa_model_dir",
+        lambda _path: False,
+    )
+
+    status = model_status_for_backend(cfg)
+
+    assert "parakeet-tdt-0.6b-v3-int8" in status

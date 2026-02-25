@@ -122,6 +122,13 @@ Nested table: `[typing.text_replacements]` for custom phrase corrections.
 Set `[asr].asr_backend` and restart service/application.
 Only keys for the active backend need to be present.
 
+Optional low-latency profile: set `[asr].instant_mode = true`.
+This applies backend-specific tuning at runtime:
+- NeMo: forces `right_context = 0`
+- Sherpa: caps `sherpa_chunk_ms` to `80`
+- Moonshine: forces `moonshine_model_name = "moonshine/tiny"`, caps
+  `moonshine_max_window_sec` to `3.0`, caps `moonshine_max_tokens` to `48`
+
 ### Audio gain tuning (app-side)
 
 Applied only for backends that do **not** request raw audio.
@@ -212,6 +219,7 @@ uv sync --extra asr-nemo
 ```toml
 [asr]
 asr_backend = "sherpa"
+sherpa_model_name = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
 sherpa_model_dir = "/path/to/sherpa-model-dir"
 sherpa_provider = "cpu"
 sherpa_num_threads = 2
@@ -223,6 +231,7 @@ sherpa_chunk_ms = 100
 ```toml
 [asr]
 asr_backend = "sherpa"
+sherpa_model_name = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
 sherpa_model_dir = "/path/to/sherpa-model-dir"
 sherpa_provider = "cuda"
 sherpa_num_threads = 2
@@ -233,10 +242,19 @@ sherpa_chunk_ms = 100
 
 | Key | Default | Notes |
 |---|---:|---|
-| `sherpa_model_dir` | *none* | If unset, ShuVoice auto-downloads default model to `~/.local/share/shuvoice/models/sherpa/` |
+| `sherpa_model_name` | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` | Archive/model name used for auto-download when `sherpa_model_dir` is unset |
+| `sherpa_model_dir` | *none* | If unset, ShuVoice auto-downloads `sherpa_model_name` to `~/.local/share/shuvoice/models/sherpa/<sherpa_model_name>/` |
 | `sherpa_provider` | `cpu` | `cpu` or `cuda` |
 | `sherpa_num_threads` | `2` | CPU threads |
 | `sherpa_chunk_ms` | `100` | Chunk duration |
+
+Parakeet TDT v3 option (Sherpa runtime):
+
+```toml
+[asr]
+asr_backend = "sherpa"
+sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+```
 
 #### Model directory structure
 
@@ -349,7 +367,7 @@ uv sync --extra asr-moonshine
 | Backend | Model | Location |
 |---|---|---|
 | NeMo | `nvidia/nemotron-speech-streaming-en-0.6b` | Hugging Face cache (`~/.cache/huggingface/...`) |
-| Sherpa | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` | `build/asr-models/...` or auto-download cache |
+| Sherpa | `sherpa_model_name` (default `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06`, optional `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8`) | `~/.local/share/shuvoice/models/sherpa/<sherpa_model_name>/` or custom `sherpa_model_dir` |
 | Moonshine | `UsefulSensors/moonshine` | Hugging Face cache (`~/.cache/huggingface/...`) |
 
 ---

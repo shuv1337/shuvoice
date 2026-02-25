@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -49,6 +50,28 @@ def test_finish_status_text_maps_known_states():
     assert "already bound" in WelcomeWizard._finish_status_text("conflict")
 
 
+def test_model_status_text_maps_cancelled_state():
+    from shuvoice.wizard import WelcomeWizard
+
+    assert "cancelled" in WelcomeWizard._model_download_status_text("cancelled").lower()
+
+
+def test_cancel_download_sets_event_and_updates_button():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard.__new__(WelcomeWizard)
+    wizard._download_cancel_event = threading.Event()
+    wizard._cancel_download_button = MagicMock()
+    wizard._apply_download_progress = MagicMock()
+
+    WelcomeWizard._on_cancel_download_clicked(wizard, None)
+
+    assert wizard._download_cancel_event.is_set() is True
+    wizard._cancel_download_button.set_sensitive.assert_called_once_with(False)
+    wizard._cancel_download_button.set_label.assert_called_once_with("Canceling…")
+    wizard._apply_download_progress.assert_called_once()
+
+
 def test_on_finish_writes_config_releases_window_and_quits():
     from shuvoice.wizard import WelcomeWizard
 
@@ -61,11 +84,23 @@ def test_on_finish_writes_config_releases_window_and_quits():
 
     with (
         patch("shuvoice.wizard.write_config") as write_config,
+        patch(
+            "shuvoice.wizard.maybe_download_model", return_value=("skipped", "noop")
+        ) as maybe_download,
         patch("shuvoice.wizard.write_marker") as write_marker,
     ):
         WelcomeWizard._on_finish(wizard, None)
 
-    write_config.assert_called_once_with("moonshine", overwrite_existing=False)
+    write_config.assert_called_once_with(
+        "moonshine",
+        overwrite_existing=False,
+        sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
+    )
+    maybe_download.assert_called_once_with(
+        "moonshine",
+        sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
+        progress_callback=None,
+    )
     write_marker.assert_called_once()
     wizard._release_input_and_destroy_window.assert_called_once()
     wizard.quit.assert_called_once()

@@ -31,13 +31,13 @@ Core pipeline + production hardening are implemented:
 | Backend (`asr_backend`) | Current model(s) | Provider setting | Supported providers |
 |---|---|---|---|
 | `nemo` | `nvidia/nemotron-speech-streaming-en-0.6b` | `device` | `cuda` (default), `cpu` |
-| `sherpa` | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` (auto-downloaded by default) | `sherpa_provider` | `cpu` (default), `cuda` |
+| `sherpa` | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` (default) or `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8` | `sherpa_provider` | `cpu` (default), `cuda` |
 | `moonshine` | `moonshine/tiny` (default, also `moonshine/base`) | `moonshine_provider` | `cpu` (default), `cuda` |
 
 Model locations in this repo/runtime:
 
 - NeMo model ID: `nvidia/nemotron-speech-streaming-en-0.6b` (downloaded to Hugging Face cache)
-- Sherpa model dir: auto-download default `~/.local/share/shuvoice/models/sherpa/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06/` (or custom `sherpa_model_dir`)
+- Sherpa model dir: auto-download selected `sherpa_model_name` to `~/.local/share/shuvoice/models/sherpa/<sherpa_model_name>/` (or custom `sherpa_model_dir`)
 - Moonshine models: Hugging Face `UsefulSensors/moonshine` (`base`/`tiny`)
 
 > Note: Sherpa CUDA requires a source-built `sherpa-onnx` GPU wheel plus CUDA 12 compatibility libs on this host stack.
@@ -191,6 +191,7 @@ python -m shuvoice --help
 python -m shuvoice setup
 python -m shuvoice run --asr-backend nemo --right-context 13
 python -m shuvoice run --asr-backend sherpa --sherpa-model-dir /path/to/model
+python -m shuvoice run --asr-backend sherpa --sherpa-model-name sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8
 python -m shuvoice run --asr-backend moonshine --moonshine-model-name moonshine/tiny
 python -m shuvoice run --asr-backend moonshine --moonshine-provider cuda
 python -m shuvoice run --output-mode streaming_partial
@@ -362,6 +363,11 @@ The wizard can optionally auto-add Hyprland push-to-talk binds when the
 selected key is not already used (default presets include **Insert** and
 **Right Control**).
 
+When Sherpa is selected, the wizard also lets you choose the model variant
+(default Zipformer or Parakeet TDT v3 int8), shows download progress in the
+finish screen (with a cancel button), and attempts to auto-download the
+selected model at finish.
+
 Wizard screens:
 
 <p align="center">
@@ -397,9 +403,24 @@ Example config:
 
 Backend selection is controlled by `asr_backend`:
 
-- `asr_backend = "sherpa"` (default): uses `sherpa_*` settings; if `sherpa_model_dir` is unset, ShuVoice auto-downloads the default streaming model
+- `asr_backend = "sherpa"` (default): uses `sherpa_*` settings; if `sherpa_model_dir` is unset, ShuVoice auto-downloads `sherpa_model_name` (default: `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06`)
 - `asr_backend = "nemo"`: uses `model_name`, `right_context`, `device`
 - `asr_backend = "moonshine"`: uses `moonshine_*` settings (16k sample rate expected)
+
+Parakeet TDT v3 option (Sherpa runtime):
+
+```toml
+[asr]
+asr_backend = "sherpa"
+sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+```
+
+Optional: set `instant_mode = true` under `[asr]` for a low-latency profile.
+This applies backend-specific tuning:
+
+- NeMo: forces `right_context = 0`
+- Sherpa: caps `sherpa_chunk_ms` at `80`
+- Moonshine: forces `moonshine_model_name = "moonshine/tiny"`, caps `moonshine_max_window_sec` to `3.0`, and caps `moonshine_max_tokens` to `48`
 
 `right_context` applies to NeMo only.
 
@@ -521,7 +542,7 @@ ShuVoice is released under the MIT License. See `LICENSE`.
 - `sherpa_model_dir` exists but is missing `encoder/decoder/joiner` artifacts
   - Point `sherpa_model_dir` to a streaming transducer model directory containing
     `tokens.txt` and ONNX files for encoder/decoder/joiner.
-  - If `sherpa_model_dir` is unset, ShuVoice will auto-download the default model.
+  - If `sherpa_model_dir` is unset, ShuVoice will auto-download `sherpa_model_name`.
 - `moonshine_model_dir` missing `encoder_model.onnx` / `decoder_model_merged.onnx`
   - Point `moonshine_model_dir` to a valid local Moonshine ONNX export, or unset it
     and let useful-moonshine-onnx fetch weights from Hugging Face.

@@ -1,0 +1,162 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from shuvoice.config import Config
+from shuvoice.wizard.actions import maybe_download_model
+
+
+class _DownloadCapableBackend:
+    capabilities = SimpleNamespace(supports_model_download=True)
+    _last_kwargs: dict[str, object] | None = None
+
+    @staticmethod
+    def dependency_errors() -> list[str]:
+        return []
+
+    @classmethod
+    def download_model(cls, **kwargs):
+        cls._last_kwargs = kwargs
+
+
+class _MissingDepsBackend:
+    capabilities = SimpleNamespace(supports_model_download=True)
+
+    @staticmethod
+    def dependency_errors() -> list[str]:
+        return ["missing backend dependency"]
+
+    @staticmethod
+    def download_model(**_kwargs):
+        raise AssertionError("download_model should not run when dependencies are missing")
+
+
+class _LazyBackend:
+    capabilities = SimpleNamespace(supports_model_download=False)
+
+    @staticmethod
+    def dependency_errors() -> list[str]:
+        return []
+
+
+class _ProgressBackend:
+    capabilities = SimpleNamespace(supports_model_download=True)
+
+    @staticmethod
+    def dependency_errors() -> list[str]:
+        return []
+
+    @staticmethod
+    def download_model(**kwargs):
+        callback = kwargs.get("progress_callback")
+        if callable(callback):
+            callback(0.5, "halfway")
+
+
+class _CancelableBackend:
+    capabilities = SimpleNamespace(supports_model_download=True)
+
+    @staticmethod
+    def dependency_errors() -> list[str]:
+        return []
+
+    @staticmethod
+    def download_model(**kwargs):
+        cancel_check = kwargs.get("cancel_check")
+        if callable(cancel_check) and cancel_check():
+            raise RuntimeError("Model download cancelled")
+
+
+def test_maybe_download_model_sherpa_uses_selected_model_name(monkeypatch):
+    monkeypatch.setattr("shuvoice.wizard.actions.Config.load", classmethod(lambda cls: Config()))
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions.get_backend_class", lambda _name: _DownloadCapableBackend
+    )
+
+    status, _message = maybe_download_model(
+        "sherpa",
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+    )
+
+    assert status == "downloaded"
+    assert _DownloadCapableBackend._last_kwargs is not None
+    assert (
+        _DownloadCapableBackend._last_kwargs["model_name"]
+        == "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+    )
+    assert "progress_callback" in _DownloadCapableBackend._last_kwargs
+    assert _DownloadCapableBackend._last_kwargs["progress_callback"] is None
+    assert "cancel_check" in _DownloadCapableBackend._last_kwargs
+    assert _DownloadCapableBackend._last_kwargs["cancel_check"] is None
+
+
+def test_maybe_download_model_skips_when_deps_missing(monkeypatch):
+    monkeypatch.setattr("shuvoice.wizard.actions.Config.load", classmethod(lambda cls: Config()))
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions.get_backend_class", lambda _name: _MissingDepsBackend
+    )
+
+    status, message = maybe_download_model("sherpa")
+
+    assert status == "skipped_missing_deps"
+    assert "missing" in message
+
+
+def test_maybe_download_model_skips_for_lazy_backends(monkeypatch):
+    monkeypatch.setattr("shuvoice.wizard.actions.Config.load", classmethod(lambda cls: Config()))
+    monkeypatch.setattr("shuvoice.wizard.actions.get_backend_class", lambda _name: _LazyBackend)
+
+    status, message = maybe_download_model("moonshine")
+
+    assert status == "skipped"
+    assert "lazily" in message
+
+
+def test_maybe_download_model_reports_progress(monkeypatch):
+    monkeypatch.setattr("shuvoice.wizard.actions.Config.load", classmethod(lambda cls: Config()))
+    monkeypatch.setattr("shuvoice.wizard.actions.get_backend_class", lambda _name: _ProgressBackend)
+
+    events: list[tuple[float | None, str]] = []
+
+    status, _message = maybe_download_model(
+        "sherpa",
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+        progress_callback=lambda fraction, text: events.append((fraction, text)),
+    )
+
+    assert status == "downloaded"
+    assert any("Preparing" in text for _, text in events)
+    assert any(text == "halfway" for _, text in events)
+    assert any("completed" in text.lower() for _, text in events)
+
+
+def test_maybe_download_model_cancelled_before_start(monkeypatch):
+    monkeypatch.setattr("shuvoice.wizard.actions.Config.load", classmethod(lambda cls: Config()))
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions.get_backend_class", lambda _name: _DownloadCapableBackend
+    )
+
+    status, message = maybe_download_model(
+        "sherpa",
+        cancel_requested=lambda: True,
+    )
+
+    assert status == "cancelled"
+    assert "cancelled" in message.lower()
+
+
+def test_maybe_download_model_cancelled_during_download(monkeypatch):
+    monkeypatch.setattr("shuvoice.wizard.actions.Config.load", classmethod(lambda cls: Config()))
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions.get_backend_class", lambda _name: _CancelableBackend
+    )
+
+    checks = iter([False, False, False, True])
+
+    status, message = maybe_download_model(
+        "sherpa",
+        cancel_requested=lambda: next(checks, True),
+    )
+
+    assert status == "cancelled"
+    assert "cancelled" in message.lower()

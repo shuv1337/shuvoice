@@ -17,6 +17,10 @@ auto_gain_settle_chunks = 2
 
 [asr]
 asr_backend = "sherpa"
+# Default model:
+# sherpa_model_name = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
+# Parakeet TDT v3 option:
+# sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 # Set this to your local model directory. See README.md for Sherpa model setup.
 sherpa_model_dir = "/path/to/sherpa-model-dir"
 sherpa_provider = "cpu"

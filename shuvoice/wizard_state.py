@@ -40,6 +40,9 @@ ASR_BACKENDS = [
     ),
 ]
 
+DEFAULT_SHERPA_MODEL_NAME = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
+PARAKEET_TDT_V3_INT8_MODEL_NAME = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+
 # Keybind presets for push-to-talk setup.
 # (id, display_label, hyprland_bind_key_spec, description)
 # hyprland_bind_key_spec is the "MODS, KEY" portion for bind/bindr lines.
@@ -462,11 +465,19 @@ _BACKEND_PROVIDER_KEY: dict[str, str] = {
 }
 
 
-def write_config(asr_backend: str, *, overwrite_existing: bool = False):
+def write_config(
+    asr_backend: str,
+    *,
+    overwrite_existing: bool = False,
+    sherpa_model_name: str | None = None,
+):
     """Write wizard selections to config.toml.
 
     By default, preserves existing config files. When ``overwrite_existing`` is
     true, ``[asr].asr_backend`` and the provider/device key are updated.
+
+    For Sherpa, optionally persists ``sherpa_model_name`` so the runtime can
+    auto-download the selected model variant on first launch.
 
     Writes use the config I/O durability path (atomic write + backup).
     Automatically sets CUDA as the provider when a GPU is detected.
@@ -494,6 +505,10 @@ def write_config(asr_backend: str, *, overwrite_existing: bool = False):
     if provider_key:
         asr_table[provider_key] = provider
 
+    if asr_backend == "sherpa":
+        chosen_model = (sherpa_model_name or DEFAULT_SHERPA_MODEL_NAME).strip()
+        asr_table["sherpa_model_name"] = chosen_model
+
     migrated["config_version"] = CURRENT_CONFIG_VERSION
 
     backup = write_atomic(config_file, migrated)
@@ -508,6 +523,7 @@ def format_summary(
     keybind_id: str = "insert",
     *,
     auto_add_keybind: bool = True,
+    sherpa_model_name: str | None = None,
 ) -> str:
     """Build a human-readable summary of wizard selections."""
     asr_name = next(
@@ -523,6 +539,16 @@ def format_summary(
         f"ASR backend:    {asr_name}",
         f"Push-to-talk:   {keybind_label}",
     ]
+
+    if asr_backend == "sherpa":
+        chosen_model = (sherpa_model_name or DEFAULT_SHERPA_MODEL_NAME).strip()
+        if chosen_model == PARAKEET_TDT_V3_INT8_MODEL_NAME:
+            model_label = "Parakeet TDT v3 (int8)"
+        elif chosen_model == DEFAULT_SHERPA_MODEL_NAME:
+            model_label = "Zipformer Kroko (default)"
+        else:
+            model_label = chosen_model
+        lines.insert(1, f"Sherpa model:   {model_label}")
 
     if hypr_key:
         bind_lines = format_hyprland_bind_for_keybind(

@@ -15,6 +15,7 @@ def _args(**overrides) -> Namespace:
         "device": None,
         "right_context": None,
         "sherpa_model_dir": None,
+        "sherpa_model_name": None,
         "sherpa_provider": None,
         "sherpa_num_threads": None,
         "sherpa_chunk_ms": None,
@@ -59,6 +60,21 @@ def test_apply_cli_overrides_moonshine_provider_and_threads() -> None:
     assert config.moonshine_provider == "cuda"
     assert config.moonshine_onnx_threads == 4
     assert config.audio_device == 2
+
+
+def test_apply_cli_overrides_sherpa_model_name() -> None:
+    config = Config()
+
+    _apply_cli_overrides(
+        _args(
+            asr_backend="sherpa",
+            sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+        ),
+        config,
+    )
+
+    assert config.asr_backend == "sherpa"
+    assert config.sherpa_model_name == "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 
 
 def test_default_route_is_run():
