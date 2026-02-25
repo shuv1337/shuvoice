@@ -11,12 +11,15 @@ provides=('shuvoice')
 conflicts=('shuvoice')
 
 # NOTE:
-# - ASR backends are optional and can be installed via distro packages or pip/uv.
+# - Default Sherpa backend runtime is included via python-sherpa-onnx
+#   (typically provided by python-sherpa-onnx-bin on AUR).
+# - NeMo/Moonshine backends are optional and can be installed via distro packages or pip/uv.
 # - python-pytorch-cuda enables GPU acceleration for NeMo/Sherpa CUDA backends.
 depends=(
   'python'
   'python-numpy'
   'python-sounddevice'
+  'python-sherpa-onnx'
   'gtk4'
   'gtk4-layer-shell'
   'python-gobject'
@@ -31,7 +34,7 @@ optdepends=(
   'python-pytorch-cuda: GPU acceleration for NeMo and Sherpa CUDA backends'
   'python-tomli: TOML parsing for Python < 3.11'
   'python-nemo-toolkit: NeMo ASR backend (if packaged for your Arch setup)'
-  'python-pip: install backend wheels (nemo-toolkit[asr], sherpa-onnx, useful-moonshine-onnx)'
+  'python-pip: install optional backend wheels (nemo-toolkit[asr], useful-moonshine-onnx)'
   'ydotool: alternative text injection utility'
   'espeak-ng: TTS engine for scripts/tts_roundtrip.py'
 )

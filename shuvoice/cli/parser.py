@@ -202,6 +202,28 @@ def create_parser() -> argparse.ArgumentParser:
 
     preflight_parser = subparsers.add_parser("preflight", help="Run dependency and runtime checks")
     _add_runtime_overrides(preflight_parser)
+
+    setup_parser = subparsers.add_parser(
+        "setup",
+        help="Bootstrap backend dependencies, model artifacts, and preflight checks",
+    )
+    _add_runtime_overrides(setup_parser)
+    setup_parser.add_argument(
+        "--install-missing",
+        action="store_true",
+        help="Attempt to install missing backend dependencies automatically",
+    )
+    setup_parser.add_argument(
+        "--skip-model-download",
+        action="store_true",
+        help="Skip model download step during setup",
+    )
+    setup_parser.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        help="Skip final preflight checks",
+    )
+
     subparsers.add_parser("wizard", help="Launch the setup wizard")
 
     config_parser = subparsers.add_parser("config", help="Inspect and validate config")
@@ -287,6 +309,8 @@ def resolve_command(
         return "control", warnings
     if command == "preflight":
         return "preflight", warnings
+    if command == "setup":
+        return "setup", warnings
     if command == "wizard":
         return "wizard", warnings
     if command == "run":

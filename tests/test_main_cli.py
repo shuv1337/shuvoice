@@ -112,6 +112,11 @@ def test_subcommand_diagnostics_route():
     assert route == "diagnostics"
 
 
+def test_subcommand_setup_route():
+    _parser, _args, route, _warnings = _parse(["setup"])
+    assert route == "setup"
+
+
 def test_legacy_flags_are_mutually_exclusive():
     parser = create_parser()
     args = parser.parse_args(["--preflight", "--wizard"])

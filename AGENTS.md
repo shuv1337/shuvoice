@@ -96,6 +96,7 @@ Type=simple
 ExecStart=/usr/bin/shuvoice
 Restart=on-failure
 RestartSec=2
+RestartPreventExitStatus=78
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
@@ -249,8 +250,13 @@ joiner.onnx   (or joiner*.onnx)
 #### Dependencies
 
 ```bash
+# Repo/venv workflows
 uv sync --extra asr-sherpa
 # or: uv add sherpa-onnx
+
+# Arch/AUR packaged runtime (recommended provider)
+yay -S --needed python-sherpa-onnx-bin
+# provides=('python-sherpa-onnx') for shuvoice-git dependency resolution
 ```
 
 #### Sherpa GPU (CUDA) support
@@ -398,6 +404,7 @@ uv sync --dev --extra asr-nemo --extra asr-sherpa --extra asr-moonshine
 | [#7](https://github.com/shuv1337/shuvoice/issues/7) | Sherpa may drop trailing words on early key release | Open |
 | [#12](https://github.com/shuv1337/shuvoice/issues/12) | Moonshine repetition guard misses some token/long-clause loops | Fixed |
 | [#13](https://github.com/shuv1337/shuvoice/issues/13) | Moonshine throughput slower than NeMo/Sherpa | Mitigated (safer defaults, ONNX tuning, GPU provider) |
+| — | `sherpa-onnx` source AUR builds may fail on GCC 15 due format-security warning flag interaction | Mitigation available (`python-sherpa-onnx-bin`, upstream patch staged) |
 | — | Prebuilt Sherpa CUDA wheels may be incompatible with newer CUDA stacks | Ongoing |
 
 ---

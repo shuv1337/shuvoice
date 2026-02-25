@@ -6,8 +6,25 @@ import sys
 from ctypes import CDLL
 
 from ...config import Config
+from ...setup_helpers import (
+    DEPENDENCY_EXIT_CODE,
+    build_backend_setup_report,
+    format_missing_dependency_report,
+)
 from ..parser import apply_cli_overrides
 from .wizard import run_welcome_wizard
+
+
+def _check_backend_dependencies(config: Config) -> bool:
+    report = build_backend_setup_report(config)
+    if not report.missing_dependencies:
+        return True
+
+    print(
+        "ERROR: backend dependency check failed.\n" + format_missing_dependency_report(report),
+        file=sys.stderr,
+    )
+    return False
 
 
 def run_app(args) -> int:
@@ -43,6 +60,9 @@ def run_app(args) -> int:
         except ValueError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
+
+    if not _check_backend_dependencies(config):
+        return DEPENDENCY_EXIT_CODE
 
     try:
         from ...app import ShuVoiceApp

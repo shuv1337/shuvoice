@@ -22,21 +22,12 @@ gi.require_version("Gtk4LayerShell", "1.0")
 from gi.repository import Gdk, GLib, Gtk
 from gi.repository import Gtk4LayerShell as LayerShell
 
+from .branding import logo_candidates
+
 log = logging.getLogger(__name__)
 
-# Try to locate branding logo relative to the project root.
-_LOGO_CANDIDATES = [
-    Path(__file__).resolve().parent.parent
-    / "docs"
-    / "assets"
-    / "branding"
-    / "shuvoice-variant-dark-lockup.png",
-    Path(__file__).resolve().parent.parent
-    / "docs"
-    / "assets"
-    / "branding"
-    / "shuvoice-variant-dark-badge.png",
-]
+# Keep this as a module variable so tests can patch deterministic candidates.
+_LOGO_CANDIDATES = logo_candidates()
 
 
 def _find_logo() -> Path | None:

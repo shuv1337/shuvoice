@@ -1,0 +1,30 @@
+diff --git a/PKGBUILD b/PKGBUILD
+index 7d8dc73..f4a2829 100644
+--- a/PKGBUILD
++++ b/PKGBUILD
+@@ -54,6 +54,11 @@ build() {
+         -DCMAKE_BUILD_TYPE=Release
+         -DSHERPA_ONNX_USE_PRE_INSTALLED_ONNXRUNTIME_IF_AVAILABLE=ON
+     )
++    # GCC 15 can surface espeak-ng format-security warnings in third-party
++    # subbuilds where upstream passes -Wno-format. Keep hardening flags, but
++    # make this class non-fatal for this package build only.
++    local relaxed_cflags="${CFLAGS} -Wno-error=format-security"
++    local relaxed_cxxflags="${CXXFLAGS} -Wno-error=format-security"
+ 
+     cd "${pkgbase}-${pkgver}"
+     cmake "${base_args[@]}" \
+@@ -61,9 +66,13 @@ build() {
+         -DBUILD_SHARED_LIBS=ON \
+         -DCMAKE_INSTALL_PREFIX=/usr \
+         -DSHERPA_ONNX_ENABLE_BINARY=ON \
+-        -DSHERPA_ONNX_ENABLE_PYTHON=OFF
++        -DSHERPA_ONNX_ENABLE_PYTHON=OFF \
++        -DCMAKE_C_FLAGS="${relaxed_cflags}" \
++        -DCMAKE_CXX_FLAGS="${relaxed_cxxflags}"
+     cmake --build build_bin
+ 
+-    SHERPA_ONNX_CMAKE_ARGS="${base_args[@]} -DSHERPA_ONNX_ENABLE_BINARY=OFF" python -m build --wheel --no-isolation
++    SHERPA_ONNX_CMAKE_ARGS="${base_args[*]} -DSHERPA_ONNX_ENABLE_BINARY=OFF -DCMAKE_C_FLAGS='${relaxed_cflags}' -DCMAKE_CXX_FLAGS='${relaxed_cxxflags}'" \
++        python -m build --wheel --no-isolation
+ }

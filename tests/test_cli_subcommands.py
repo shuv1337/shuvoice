@@ -50,6 +50,29 @@ def test_cli_main_dispatches_preflight(monkeypatch):
     assert cli_main(["preflight"]) == 0
 
 
+def test_cli_main_dispatches_setup(monkeypatch):
+    monkeypatch.setattr("shuvoice.cli._load_config_or_exit", lambda _args: Config())
+
+    called: dict[str, bool] = {}
+
+    def fake_setup(
+        _cfg: Config, *, install_missing: bool, skip_model_download: bool, skip_preflight: bool
+    ) -> int:
+        called["install_missing"] = install_missing
+        called["skip_model_download"] = skip_model_download
+        called["skip_preflight"] = skip_preflight
+        return 0
+
+    monkeypatch.setattr("shuvoice.cli.run_setup", fake_setup)
+
+    assert cli_main(["setup", "--skip-model-download"]) == 0
+    assert called == {
+        "install_missing": False,
+        "skip_model_download": True,
+        "skip_preflight": False,
+    }
+
+
 def test_cli_main_legacy_control_logs_warning_and_dispatches(monkeypatch, caplog):
     monkeypatch.setattr("shuvoice.cli._load_config_or_exit", lambda _args: Config())
 

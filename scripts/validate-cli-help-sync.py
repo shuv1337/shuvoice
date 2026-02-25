@@ -10,6 +10,7 @@ REQUIRED_HELP_TOKENS = [
     "run",
     "control",
     "preflight",
+    "setup",
     "wizard",
     "config",
     "model",

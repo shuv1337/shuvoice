@@ -10,18 +10,9 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, Gtk
 
-_LOGO_CANDIDATES = [
-    Path(__file__).resolve().parent.parent.parent
-    / "docs"
-    / "assets"
-    / "branding"
-    / "shuvoice-variant-dark-lockup.png",
-    Path(__file__).resolve().parent.parent.parent
-    / "docs"
-    / "assets"
-    / "branding"
-    / "shuvoice-variant-dark-badge.png",
-]
+from ..branding import logo_candidates
+
+_LOGO_CANDIDATES = logo_candidates()
 
 
 def find_logo() -> Path | None:

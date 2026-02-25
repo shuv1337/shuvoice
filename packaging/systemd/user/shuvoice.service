@@ -13,6 +13,8 @@ Type=simple
 ExecStart=/usr/bin/shuvoice
 Restart=on-failure
 RestartSec=2
+# Do not restart-loop when backend dependencies are missing.
+RestartPreventExitStatus=78
 Environment=PYTHONUNBUFFERED=1
 
 [Install]

@@ -15,6 +15,7 @@ from .commands.diagnostics import diagnostics
 from .commands.model import download_model
 from .commands.preflight import run_preflight
 from .commands.run import run_app, run_wizard_command
+from .commands.setup import run_setup
 from .parser import apply_cli_overrides, create_parser, resolve_command
 
 __all__ = ["apply_cli_overrides", "main"]
@@ -77,6 +78,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if resolved == "preflight":
         return 0 if run_preflight(config) else 1
+
+    if resolved == "setup":
+        return run_setup(
+            config,
+            install_missing=bool(getattr(args, "install_missing", False)),
+            skip_model_download=bool(getattr(args, "skip_model_download", False)),
+            skip_preflight=bool(getattr(args, "skip_preflight", False)),
+        )
 
     if resolved == "control":
         return run_control(args.control_action, config, wait_sec=float(args.control_wait_sec))

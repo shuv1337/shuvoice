@@ -7,6 +7,7 @@ This directory contains Arch Linux packaging files for ShuVoice.
 - `PKGBUILD` — AUR package recipe (`shuvoice-git`)
 - `.SRCINFO` — generated metadata required by AUR (must match `PKGBUILD`)
 - `systemd/user/shuvoice.service` — installed user service unit
+- `aur/` — staging files for related AUR packages and upstream patches
 
 ## Update checklist
 
@@ -35,8 +36,54 @@ This directory contains Arch Linux packaging files for ShuVoice.
    git push origin master
    ```
 
+## Packaged runtime validation (post-install)
+
+```bash
+# Install with preferred Sherpa runtime provider
+yay -S --needed python-sherpa-onnx-bin shuvoice-git
+
+systemctl --user daemon-reload
+systemctl --user enable --now shuvoice.service
+systemctl --user status shuvoice.service --no-pager
+shuvoice control status
+
+shuvoice setup --skip-model-download --skip-preflight
+shuvoice preflight
+```
+
+Dependency failure behavior (no restart storm):
+
+```bash
+sudo pacman -Rns --noconfirm python-sherpa-onnx-bin
+systemctl --user restart shuvoice.service
+systemctl --user show -p ExecMainStatus -p NRestarts shuvoice.service
+# Expect ExecMainStatus=78 and restarts blocked by RestartPreventExitStatus=78
+
+# Recover
+yay -S --needed python-sherpa-onnx-bin
+systemctl --user restart shuvoice.service
+```
+
+Branding path check in packaged context:
+
+```bash
+cd /tmp
+/usr/bin/python - <<'PY'
+from shuvoice.splash import _find_logo
+from shuvoice.wizard.ui import find_logo
+print(_find_logo())
+print(find_logo())
+PY
+```
+
 ## Notes
 
 - `shuvoice-git` intentionally tracks the latest git commit (VCS package).
-- ASR backends are optional runtime dependencies. Base package installs the app,
-  service unit, docs, and CLI entry points.
+- `shuvoice-git` keeps a hard runtime dependency on `python-sherpa-onnx`.
+  - Preferred provider for end users: `python-sherpa-onnx-bin`
+    (`provides=('python-sherpa-onnx')`).
+  - Source provider (`python-sherpa-onnx` from split `sherpa-onnx`) remains
+    compatible once upstream GCC 15 fixes are merged.
+- AUR staging files for the binary provider live in:
+  `packaging/aur/python-sherpa-onnx-bin/`.
+- NeMo and Moonshine remain optional runtime backend stacks.

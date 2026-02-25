@@ -95,8 +95,17 @@ After installation, enable the user service:
 systemctl --user enable --now shuvoice.service
 ```
 
-ASR backends are optional dependencies. Install your preferred backend package(s)
-or wheel(s) after install.
+`shuvoice-git` includes Sherpa runtime support via dependency
+`python-sherpa-onnx`.
+
+If your AUR helper asks which provider to use, pick
+`python-sherpa-onnx-bin` (recommended fast path):
+
+```bash
+yay -S --needed python-sherpa-onnx-bin shuvoice-git
+```
+
+NeMo and Moonshine remain optional.
 
 ### Python packages
 
@@ -150,6 +159,25 @@ Checks include:
 - `libgtk4-layer-shell.so`
 - output mode validity
 
+## Setup (recommended)
+
+Run the setup workflow once after install to verify backend deps, ensure model
+artifacts are ready, and run preflight checks:
+
+```bash
+shuvoice setup
+```
+
+Useful setup flags:
+
+```bash
+# Try to install missing backend deps automatically (when supported)
+shuvoice setup --install-missing
+
+# Skip model download and preflight (quick dependency check only)
+shuvoice setup --skip-model-download --skip-preflight
+```
+
 ## Run
 
 ```bash
@@ -160,6 +188,7 @@ Useful commands:
 
 ```bash
 python -m shuvoice --help
+python -m shuvoice setup
 python -m shuvoice run --asr-backend nemo --right-context 13
 python -m shuvoice run --asr-backend sherpa --sherpa-model-dir /path/to/model
 python -m shuvoice run --asr-backend moonshine --moonshine-model-name moonshine/tiny
@@ -199,6 +228,9 @@ systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_RUNTIME_DIR HYPR
 systemctl --user enable --now shuvoice.service
 systemctl --user status shuvoice.service
 ```
+
+Packaged unit files include `RestartPreventExitStatus=78` so missing backend
+dependencies do not cause endless restart loops.
 
 ## Control socket commands (IPC backend)
 
@@ -482,7 +514,8 @@ ShuVoice is released under the MIT License. See `LICENSE`.
 - `No module named 'torch'` or `No module named 'nemo'`
   - Install NeMo ASR deps (`uv sync --extra asr-nemo` or `--extra asr`) or Arch CUDA torch package.
 - `No module named 'sherpa_onnx'`
-  - Install Sherpa deps (`uv sync --extra asr-sherpa`).
+  - AUR: `yay -S --needed python-sherpa-onnx-bin` (or another provider for `python-sherpa-onnx`).
+  - venv: `uv sync --extra asr-sherpa`.
 - `No module named 'moonshine_onnx'`
   - Install Moonshine deps (`uv sync --extra asr-moonshine`).
 - `sherpa_model_dir` exists but is missing `encoder/decoder/joiner` artifacts

@@ -1,0 +1,127 @@
+# Maintainer: ShuVoice Maintainers <maintainers@shuvoice.dev>
+
+pkgname=python-sherpa-onnx-bin
+_pkgname=sherpa_onnx
+_core_pkgname=sherpa_onnx_core
+pkgver=1.12.26
+pkgrel=1
+pkgdesc="Prebuilt Python wheel runtime for sherpa-onnx (AUR binary variant)"
+arch=('x86_64' 'aarch64')
+url='https://github.com/k2-fsa/sherpa-onnx'
+license=('Apache-2.0')
+depends=('python')
+makedepends=('python-installer')
+options=('!debug')
+provides=('python-sherpa-onnx')
+conflicts=('python-sherpa-onnx')
+
+_wrapper_wheel_x86_64_cp312="${_pkgname}-${pkgver}-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+_wrapper_wheel_x86_64_cp313="${_pkgname}-${pkgver}-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+_wrapper_wheel_x86_64_cp314="${_pkgname}-${pkgver}-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+_wrapper_wheel_aarch64_cp312="${_pkgname}-${pkgver}-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl"
+_wrapper_wheel_aarch64_cp313="${_pkgname}-${pkgver}-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.whl"
+_wrapper_wheel_aarch64_cp314="${_pkgname}-${pkgver}-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.whl"
+_core_wheel_x86_64="${_core_pkgname}-${pkgver}-py3-none-manylinux2014_x86_64.whl"
+_core_wheel_aarch64="${_core_pkgname}-${pkgver}-py3-none-manylinux2014_aarch64.whl"
+
+source_x86_64=(
+  "${_wrapper_wheel_x86_64_cp312}::https://files.pythonhosted.org/packages/36/3f/a09bcdec9d97f23f8058fc6e61407359b319acdffeff36f2060ef4b13a77/${_wrapper_wheel_x86_64_cp312}"
+  "${_wrapper_wheel_x86_64_cp313}::https://files.pythonhosted.org/packages/b9/e6/2d23aa60a8c4a4bfe5940a31cc92ba92aa78e51b978ee962b206ab1314e8/${_wrapper_wheel_x86_64_cp313}"
+  "${_wrapper_wheel_x86_64_cp314}::https://files.pythonhosted.org/packages/d5/1c/da15615551152bee24f61b3496b54650c50b8710af3e981812e701ead7ae/${_wrapper_wheel_x86_64_cp314}"
+  "${_core_wheel_x86_64}::https://files.pythonhosted.org/packages/54/b2/53450a58ff2fecd76d8942002f1a1d4415018b373430341e82c481002643/${_core_wheel_x86_64}"
+)
+source_aarch64=(
+  "${_wrapper_wheel_aarch64_cp312}::https://files.pythonhosted.org/packages/34/3e/d41f8d500880852ef5ba4605fb24dbfc2afe93b39ce65087331eda2faa94/${_wrapper_wheel_aarch64_cp312}"
+  "${_wrapper_wheel_aarch64_cp313}::https://files.pythonhosted.org/packages/cd/2f/431974fa0d502f92c678f83cdee63eaecbee8b8daf11eed5d314458396a1/${_wrapper_wheel_aarch64_cp313}"
+  "${_wrapper_wheel_aarch64_cp314}::https://files.pythonhosted.org/packages/a4/17/1bdf2e5f56ddca0234d580e791d06d1e877cfa8291f7f27058a9c208e71f/${_wrapper_wheel_aarch64_cp314}"
+  "${_core_wheel_aarch64}::https://files.pythonhosted.org/packages/be/82/a7a3c85adacb278a4c6cd4545e2ab6d7ee7caf01a450f680fa074576d285/${_core_wheel_aarch64}"
+)
+sha256sums_x86_64=(
+  'becef26a846da675b96ce78dbfcd9904b93604f0077c496facc206228a19ef94'
+  'f8c1df613f69037373453c40edcf4733ffd00670c896c960f9bca2c05fa180c8'
+  '5a935a891495dc838f80b34ee2fe5a37d316b66cab6a8b21f679ac1aebb47621'
+  '7b11f1f7db36d489bb698b57207f0389512a739a69741a821d0067548c1e5624'
+)
+sha256sums_aarch64=(
+  'a9f64e3c700551a3c7df930bd00358983e4f25d9269fa2c0382c00f18776048a'
+  'ca2e41a657464a5fe62aa9a690cf465eb5aa16a798d3405871386926cf9e2aa4'
+  '76f6a5bc1e87a1d1880a059b134e1b24aa3d555e8dcca8bb2542f5bdeea62d62'
+  '69f5f299359c6db8b53bc61c5eefbdf457164ce6aa434ba522f7c31a0ebf67bf'
+)
+noextract=(
+  "${_wrapper_wheel_x86_64_cp312}"
+  "${_wrapper_wheel_x86_64_cp313}"
+  "${_wrapper_wheel_x86_64_cp314}"
+  "${_wrapper_wheel_aarch64_cp312}"
+  "${_wrapper_wheel_aarch64_cp313}"
+  "${_wrapper_wheel_aarch64_cp314}"
+  "${_core_wheel_x86_64}"
+  "${_core_wheel_aarch64}"
+)
+
+package() {
+  cd "${srcdir}"
+
+  local py_tag
+  py_tag="$(python - <<'PY'
+import sys
+print(f"cp{sys.version_info.major}{sys.version_info.minor}")
+PY
+)"
+
+  local wrapper_wheel=''
+  case "${CARCH}:${py_tag}" in
+    x86_64:cp312)
+      wrapper_wheel="${_wrapper_wheel_x86_64_cp312}"
+      ;;
+    x86_64:cp313)
+      wrapper_wheel="${_wrapper_wheel_x86_64_cp313}"
+      ;;
+    x86_64:cp314)
+      wrapper_wheel="${_wrapper_wheel_x86_64_cp314}"
+      ;;
+    aarch64:cp312)
+      wrapper_wheel="${_wrapper_wheel_aarch64_cp312}"
+      ;;
+    aarch64:cp313)
+      wrapper_wheel="${_wrapper_wheel_aarch64_cp313}"
+      ;;
+    aarch64:cp314)
+      wrapper_wheel="${_wrapper_wheel_aarch64_cp314}"
+      ;;
+    *)
+      echo "Unsupported python ABI '${py_tag}' for CARCH='${CARCH}'." >&2
+      echo "Supported combinations: x86_64|aarch64 with cp312/cp313/cp314." >&2
+      return 1
+      ;;
+  esac
+
+  local core_wheel=''
+  case "${CARCH}" in
+    x86_64)
+      core_wheel="${_core_wheel_x86_64}"
+      ;;
+    aarch64)
+      core_wheel="${_core_wheel_aarch64}"
+      ;;
+    *)
+      echo "Unsupported CARCH='${CARCH}'." >&2
+      return 1
+      ;;
+  esac
+
+  # Install core wheel first (ships libonnxruntime + sherpa shared libs), then
+  # python wrapper wheel.
+  python -m installer --destdir="${pkgdir}" "${core_wheel}"
+  python -m installer --destdir="${pkgdir}" "${wrapper_wheel}"
+
+  install -Dm644 /dev/stdin "${pkgdir}/usr/share/doc/${pkgname}/README.AUR" <<'EOF'
+This package installs upstream prebuilt wheels for:
+
+- sherpa-onnx-core
+- sherpa-onnx
+
+Together they provide the runtime required by packages depending on
+`python-sherpa-onnx`.
+EOF
+}
