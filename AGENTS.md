@@ -258,13 +258,16 @@ sherpa_chunk_ms = 100
 | `sherpa_num_threads` | `2` | CPU threads |
 | `sherpa_chunk_ms` | `100` | Chunk duration |
 
-Parakeet TDT v3 option (Sherpa runtime):
+Parakeet TDT v3 note (Sherpa runtime):
 
 ```toml
 [asr]
 asr_backend = "sherpa"
 sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 ```
+
+This model is currently blocked by startup guards because ShuVoice's Sherpa
+path is streaming-only. A dedicated offline/instant Sherpa path is planned.
 
 #### Model directory structure
 
@@ -377,7 +380,7 @@ uv sync --extra asr-moonshine
 | Backend | Model | Location |
 |---|---|---|
 | NeMo | `nvidia/nemotron-speech-streaming-en-0.6b` | Hugging Face cache (`~/.cache/huggingface/...`) |
-| Sherpa | `sherpa_model_name` (default `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06`, optional `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8`) | `~/.local/share/shuvoice/models/sherpa/<sherpa_model_name>/` or custom `sherpa_model_dir` |
+| Sherpa | `sherpa_model_name` (default `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06`) | `~/.local/share/shuvoice/models/sherpa/<sherpa_model_name>/` or custom `sherpa_model_dir` |
 | Moonshine | `UsefulSensors/moonshine` | Hugging Face cache (`~/.cache/huggingface/...`) |
 
 ---

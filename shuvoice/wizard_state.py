@@ -13,6 +13,7 @@ import shutil
 import sys
 from pathlib import Path
 
+from .asr import get_backend_class
 from .config import CURRENT_CONFIG_VERSION, Config
 from .config_io import load_raw, write_atomic
 from .config_migrations import migrate_to_latest
@@ -457,6 +458,19 @@ def _detect_cuda() -> bool:
     return shutil.which("nvidia-smi") is not None
 
 
+def _detect_sherpa_cuda_provider() -> bool:
+    """Return True when installed sherpa-onnx runtime exposes CUDA provider."""
+    try:
+        sherpa_cls = get_backend_class("sherpa")
+        checker = getattr(sherpa_cls, "_cuda_provider_available", None)
+        if callable(checker):
+            ok, _detail = checker()
+            return bool(ok)
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
 # Maps backend id -> config key for the provider/device setting.
 _BACKEND_PROVIDER_KEY: dict[str, str] = {
     "sherpa": "sherpa_provider",
@@ -480,9 +494,14 @@ def write_config(
     auto-download the selected model variant on first launch.
 
     Writes use the config I/O durability path (atomic write + backup).
-    Automatically sets CUDA as the provider when a GPU is detected.
+    For Sherpa, CUDA is selected only when the installed sherpa-onnx runtime
+    exposes a CUDA provider; otherwise it defaults to CPU.
     """
-    provider = "cuda" if _detect_cuda() else "cpu"
+    if asr_backend == "sherpa":
+        provider = "cuda" if _detect_sherpa_cuda_provider() else "cpu"
+    else:
+        provider = "cuda" if _detect_cuda() else "cpu"
+
     provider_key = _BACKEND_PROVIDER_KEY.get(asr_backend)
 
     config_file = Config.config_dir() / "config.toml"

@@ -45,6 +45,11 @@ class SherpaBackend(ASRBackend):
     def native_chunk_samples(self) -> int:
         return int(self.config.sample_rate) * int(self.config.sherpa_chunk_ms) // 1000
 
+    _PARAKEET_MODEL_MARKERS = (
+        "parakeet-tdt",
+        "nemo-parakeet",
+    )
+
     @staticmethod
     def dependency_errors() -> list[str]:
         errors: list[str] = []
@@ -57,6 +62,88 @@ class SherpaBackend(ASRBackend):
             )
 
         return errors
+
+    @classmethod
+    def startup_errors(cls, config: Config) -> list[str]:
+        errors: list[str] = []
+
+        if cls._looks_like_parakeet_model(config):
+            message = (
+                "Configured Sherpa model appears to be Parakeet TDT, but ShuVoice currently "
+                "uses Sherpa's online streaming transducer path only. "
+                "Parakeet requires an offline/non-streaming decode path in ShuVoice, which is "
+                "not implemented yet. "
+                "This model is incompatible with the current path and can crash during "
+                "recognizer initialization (missing encoder metadata such as 'window_size'). "
+                "Use a streaming Sherpa model like "
+                "'sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06' for now."
+            )
+            if bool(getattr(config, "instant_mode", False)):
+                message += (
+                    " Note: [asr].instant_mode currently tunes streaming latency settings only; "
+                    "it does not switch Sherpa to an offline/non-streaming Parakeet decode path yet."
+                )
+            errors.append(message)
+
+        return errors
+
+    @classmethod
+    def startup_warnings(cls, config: Config, *, apply_fixes: bool = False) -> list[str]:
+        warnings: list[str] = []
+
+        provider = str(getattr(config, "sherpa_provider", "cpu")).strip().lower()
+        if provider != "cuda":
+            return warnings
+
+        cuda_ok, detail = cls._cuda_provider_available()
+        if cuda_ok:
+            return warnings
+
+        warning = (
+            "sherpa_provider='cuda' requested, but installed sherpa-onnx runtime does not "
+            f"expose CUDAExecutionProvider ({detail})."
+        )
+        if apply_fixes:
+            config.sherpa_provider = "cpu"
+            warning += " Falling back to sherpa_provider='cpu' for this run."
+        else:
+            warning += ""
+        warning += (
+            " Install a CUDA-enabled sherpa-onnx build (for example, a GPU-enabled wheel "
+            "or local source build) to restore GPU inference."
+        )
+        warnings.append(warning)
+
+        return warnings
+
+    @classmethod
+    def _looks_like_parakeet_model(cls, config: Config) -> bool:
+        model_name = str(getattr(config, "sherpa_model_name", "")).strip().lower()
+        model_dir = str(getattr(config, "sherpa_model_dir", "") or "").strip().lower()
+        candidates = [model_name, model_dir]
+        return any(marker in candidate for candidate in candidates for marker in cls._PARAKEET_MODEL_MARKERS)
+
+    @staticmethod
+    def _cuda_provider_available() -> tuple[bool, str]:
+        try:
+            import sherpa_onnx
+        except Exception as exc:  # noqa: BLE001
+            return False, f"failed to import sherpa_onnx ({exc})"
+
+        lib_dir = Path(sherpa_onnx.__file__).resolve().parent / "lib"
+        if not lib_dir.is_dir():
+            return False, f"runtime lib directory not found at {lib_dir}"
+
+        cuda_candidates = (
+            "libonnxruntime_providers_cuda.so*",
+            "onnxruntime_providers_cuda.dll",
+            "libonnxruntime_providers_cuda.dylib",
+        )
+        found = [path for pattern in cuda_candidates for path in lib_dir.glob(pattern)]
+        if found:
+            return True, f"found CUDA provider libraries under {lib_dir}"
+
+        return False, f"missing CUDA provider library under {lib_dir}"
 
     @classmethod
     def _model_archive_url(cls, model_name: str) -> str:

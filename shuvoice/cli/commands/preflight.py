@@ -72,14 +72,24 @@ def run_preflight(config: Config) -> bool:
         errors = backend_cls.dependency_errors()
         if errors:
             raise RuntimeError("; ".join(errors))
+
+        startup_errors = backend_cls.startup_errors(config)
+        if startup_errors:
+            raise RuntimeError("; ".join(startup_errors))
+
+        startup_warnings = backend_cls.startup_warnings(config, apply_fixes=False)
+
         caps = backend_cls.capabilities
         chunking = caps.expected_chunking
         gpu_support = "yes" if caps.supports_gpu else "no"
-        return (
+        detail = (
             f"{config.asr_backend} deps OK "
             f"(supports_gpu={gpu_support}, expected_chunking={chunking}, "
             f"wants_raw_audio={caps.wants_raw_audio})"
         )
+        if startup_warnings:
+            detail += " | warnings: " + " | ".join(startup_warnings)
+        return detail
 
     add_check("Python version", check_python)
     add_check("Import numpy", check_import("numpy"))

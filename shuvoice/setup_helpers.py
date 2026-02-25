@@ -10,10 +10,10 @@ from .asr import get_backend_class
 from .config import Config
 
 DEPENDENCY_EXIT_CODE = 78
-"""Exit code used when required backend dependencies are missing.
+"""Exit code used for startup-blocking backend/config/runtime errors.
 
 Used by the packaged systemd unit via ``RestartPreventExitStatus`` so
-service startup does not loop forever on missing optional backend stacks.
+service startup does not loop forever on unrecoverable setup issues.
 """
 
 
@@ -53,17 +53,24 @@ def model_status_for_backend(config: Config) -> str:
     backend = config.asr_backend
 
     if backend == "sherpa":
+        model_name = str(config.sherpa_model_name).strip()
+        blocked_parakeet_note = ""
+        if "parakeet" in model_name.lower():
+            blocked_parakeet_note = (
+                "; guarded in current builds (requires upcoming offline/instant Sherpa path)"
+            )
+
         model_dir = Path(config.sherpa_model_dir).expanduser() if config.sherpa_model_dir else None
         if model_dir is None:
             model_dir = _sherpa_model_default_dir(config.sherpa_model_name)
 
         if _is_complete_sherpa_model_dir(model_dir):
-            return f"present ({model_dir})"
+            return f"present ({model_dir}){blocked_parakeet_note}"
 
         return (
             f"missing ({model_dir}); will auto-download model "
             f"'{config.sherpa_model_name}' on first successful startup "
-            "after dependencies are installed"
+            f"after dependencies are installed{blocked_parakeet_note}"
         )
 
     if backend == "nemo":

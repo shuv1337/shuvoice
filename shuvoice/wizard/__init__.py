@@ -196,7 +196,8 @@ class WelcomeWizard(Gtk.Application):
         self._sherpa_parakeet_desc = Gtk.Label(
             label=(
                 "Uses sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8. "
-                "Wizard will attempt to auto-download the selected model on finish."
+                "Current ShuVoice builds guard this model in startup because the "
+                "Sherpa path is streaming-only today (offline/instant mode planned)."
             )
         )
         self._sherpa_parakeet_desc.add_css_class("wizard-radio-desc")

@@ -112,6 +112,22 @@ def run_setup(
 
     print("\n[PASS] Backend dependencies")
 
+    backend_cls = get_backend_class(config.asr_backend)
+
+    startup_warnings = backend_cls.startup_warnings(config, apply_fixes=False)
+    if startup_warnings:
+        for warning in startup_warnings:
+            print(f"[WARN] {warning}")
+
+    startup_errors = backend_cls.startup_errors(config)
+    if startup_errors:
+        print("\n[FAIL] Backend runtime compatibility")
+        for error in startup_errors:
+            print(f"  - {error}")
+        return DEPENDENCY_EXIT_CODE
+
+    print("[PASS] Backend runtime compatibility")
+
     if not skip_model_download:
         try:
             _download_model_for_backend(config)

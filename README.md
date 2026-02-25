@@ -31,7 +31,7 @@ Core pipeline + production hardening are implemented:
 | Backend (`asr_backend`) | Current model(s) | Provider setting | Supported providers |
 |---|---|---|---|
 | `nemo` | `nvidia/nemotron-speech-streaming-en-0.6b` | `device` | `cuda` (default), `cpu` |
-| `sherpa` | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` (default) or `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8` | `sherpa_provider` | `cpu` (default), `cuda` |
+| `sherpa` | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` (default) | `sherpa_provider` | `cpu` (default), `cuda` |
 | `moonshine` | `moonshine/tiny` (default, also `moonshine/base`) | `moonshine_provider` | `cpu` (default), `cuda` |
 
 Model locations in this repo/runtime:
@@ -41,6 +41,8 @@ Model locations in this repo/runtime:
 - Moonshine models: Hugging Face `UsefulSensors/moonshine` (`base`/`tiny`)
 
 > Note: Sherpa CUDA requires a source-built `sherpa-onnx` GPU wheel plus CUDA 12 compatibility libs on this host stack.
+>
+> Note: `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8` is currently guarded in ShuVoice startup because the app's Sherpa path is streaming-only today. A dedicated offline/instant Sherpa path is planned.
 
 ## Backend accuracy/performance snapshot (manual regression suite)
 
@@ -191,7 +193,8 @@ python -m shuvoice --help
 python -m shuvoice setup
 python -m shuvoice run --asr-backend nemo --right-context 13
 python -m shuvoice run --asr-backend sherpa --sherpa-model-dir /path/to/model
-python -m shuvoice run --asr-backend sherpa --sherpa-model-name sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8
+# parakeet model is currently blocked in startup guards until offline/instant sherpa mode lands
+# python -m shuvoice run --asr-backend sherpa --sherpa-model-name sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8
 python -m shuvoice run --asr-backend moonshine --moonshine-model-name moonshine/tiny
 python -m shuvoice run --asr-backend moonshine --moonshine-provider cuda
 python -m shuvoice run --output-mode streaming_partial
@@ -407,13 +410,17 @@ Backend selection is controlled by `asr_backend`:
 - `asr_backend = "nemo"`: uses `model_name`, `right_context`, `device`
 - `asr_backend = "moonshine"`: uses `moonshine_*` settings (16k sample rate expected)
 
-Parakeet TDT v3 option (Sherpa runtime):
+Parakeet TDT v3 model note (Sherpa runtime):
 
 ```toml
 [asr]
 asr_backend = "sherpa"
 sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 ```
+
+This model is currently blocked by startup guards because ShuVoice's current
+Sherpa integration is streaming-only. It requires a dedicated offline/instant
+Sherpa path (planned) and will otherwise crash during recognizer init.
 
 Optional: set `instant_mode = true` under `[asr]` for a low-latency profile.
 This applies backend-specific tuning:

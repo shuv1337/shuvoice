@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .config import Config
 
 import numpy as np
 
@@ -63,6 +66,23 @@ class ASRBackend(ABC):
             "errors": errors,
             "capabilities": asdict(cls.capabilities),
         }
+
+    @classmethod
+    def startup_errors(cls, _config: Config) -> list[str]:
+        """Return startup-blocking compatibility errors for a config.
+
+        This runs before backend load() and should avoid heavy operations.
+        """
+        return []
+
+    @classmethod
+    def startup_warnings(cls, _config: Config, *, apply_fixes: bool = False) -> list[str]:
+        """Return non-blocking startup warnings for a config.
+
+        If ``apply_fixes`` is true, implementations may apply safe runtime-only
+        fallbacks (for example, downgrading a provider selection).
+        """
+        return []
 
     @classmethod
     def download_model(cls, **kwargs) -> None:

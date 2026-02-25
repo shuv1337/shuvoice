@@ -242,6 +242,35 @@ def test_sherpa_auto_download_uses_configured_model_name(monkeypatch, tmp_path: 
     assert cfg.sherpa_model_dir == str(auto_dir)
 
 
+def test_sherpa_startup_errors_block_parakeet_until_offline_mode_exists():
+    cfg = Config(asr_backend="sherpa", sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8")
+
+    sherpa_cls = get_backend_class("sherpa")
+    errors = sherpa_cls.startup_errors(cfg)
+
+    assert errors
+    assert any("Parakeet" in error for error in errors)
+    assert any("offline/non-streaming" in error for error in errors)
+
+
+def test_sherpa_startup_warnings_downgrade_cuda_when_runtime_is_cpu_only(monkeypatch):
+    cfg = Config(asr_backend="sherpa", sherpa_provider="cuda")
+
+    sherpa_cls = get_backend_class("sherpa")
+    monkeypatch.setattr(
+        sherpa_cls,
+        "_cuda_provider_available",
+        staticmethod(lambda: (False, "missing CUDA provider library")),
+    )
+
+    warnings = sherpa_cls.startup_warnings(cfg, apply_fixes=True)
+
+    assert warnings
+    assert cfg.sherpa_provider == "cpu"
+    assert any("sherpa_provider='cuda'" in warning for warning in warnings)
+    assert any("Falling back to sherpa_provider='cpu'" in warning for warning in warnings)
+
+
 def test_sherpa_load_requires_transducer_artifacts(tmp_path: Path):
     (tmp_path / "tokens.txt").write_text("<blk>\na\n")
 

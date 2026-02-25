@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from ctypes import CDLL
 
+from ...asr import get_backend_class
 from ...config import Config
 from ...setup_helpers import (
     DEPENDENCY_EXIT_CODE,
@@ -27,6 +28,27 @@ def _check_backend_dependencies(config: Config) -> bool:
     return False
 
 
+def _check_backend_startup_guards(config: Config) -> bool:
+    """Validate backend/runtime compatibility before GTK startup.
+
+    This catches known fatal combinations (for example incompatible model/runtime
+    pairs) early and emits actionable user-facing messages.
+    """
+    backend_cls = get_backend_class(config.asr_backend)
+
+    for warning in backend_cls.startup_warnings(config, apply_fixes=True):
+        print(f"WARNING: {warning}", file=sys.stderr)
+
+    errors = backend_cls.startup_errors(config)
+    if not errors:
+        return True
+
+    print("ERROR: backend startup guard failed:", file=sys.stderr)
+    for error in errors:
+        print(f"  - {error}", file=sys.stderr)
+    return False
+
+
 def run_app(args) -> int:
     config = Config.load()
     apply_cli_overrides(args, config)
@@ -35,7 +57,7 @@ def run_app(args) -> int:
         config.__post_init__()
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
-        return 1
+        return DEPENDENCY_EXIT_CODE
 
     # Load libgtk4-layer-shell BEFORE any gi imports (required by overlay/app)
     try:
@@ -59,9 +81,12 @@ def run_app(args) -> int:
             config.__post_init__()
         except ValueError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
-            return 1
+            return DEPENDENCY_EXIT_CODE
 
     if not _check_backend_dependencies(config):
+        return DEPENDENCY_EXIT_CODE
+
+    if not _check_backend_startup_guards(config):
         return DEPENDENCY_EXIT_CODE
 
     try:
@@ -81,12 +106,12 @@ def run_app(args) -> int:
         app = ShuVoiceApp(config)
     except (RuntimeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
-        return 1
+        return DEPENDENCY_EXIT_CODE
 
     # Model loading happens asynchronously in do_activate() with a splash screen.
     ret = app.run(None)
     if app._model_load_failed:
-        return 1
+        return DEPENDENCY_EXIT_CODE
     return int(ret)
 
 

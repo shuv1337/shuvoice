@@ -59,10 +59,10 @@ def test_write_marker_creates_file(tmp_path):
 
 
 def test_write_config_creates_toml_with_cuda(tmp_path):
-    """write_config writes config.toml with CUDA provider when GPU detected."""
+    """write_config writes config.toml with CUDA provider when Sherpa CUDA is available."""
     with (
         patch("shuvoice.wizard_state.Config") as mock_config,
-        patch("shuvoice.wizard_state._detect_cuda", return_value=True),
+        patch("shuvoice.wizard_state._detect_sherpa_cuda_provider", return_value=True),
     ):
         mock_config.config_dir.return_value = tmp_path
         write_config("sherpa")
@@ -77,10 +77,10 @@ def test_write_config_creates_toml_with_cuda(tmp_path):
 
 
 def test_write_config_creates_toml_without_cuda(tmp_path):
-    """write_config writes config.toml with CPU provider when no GPU."""
+    """write_config writes config.toml with CPU provider when Sherpa CUDA is unavailable."""
     with (
         patch("shuvoice.wizard_state.Config") as mock_config,
-        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+        patch("shuvoice.wizard_state._detect_sherpa_cuda_provider", return_value=False),
     ):
         mock_config.config_dir.return_value = tmp_path
         write_config("sherpa")
@@ -96,7 +96,7 @@ def test_write_config_sherpa_custom_model_name(tmp_path):
     """write_config persists selected Sherpa model name."""
     with (
         patch("shuvoice.wizard_state.Config") as mock_config,
-        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+        patch("shuvoice.wizard_state._detect_sherpa_cuda_provider", return_value=False),
     ):
         mock_config.config_dir.return_value = tmp_path
         write_config("sherpa", sherpa_model_name=PARAKEET_TDT_V3_INT8_MODEL_NAME)
