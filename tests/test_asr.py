@@ -250,7 +250,7 @@ def test_sherpa_startup_errors_block_parakeet_until_offline_mode_exists():
 
     assert errors
     assert any("Parakeet" in error for error in errors)
-    assert any("offline/non-streaming" in error for error in errors)
+    assert any("offline instant mode" in error for error in errors)
 
 
 def test_sherpa_startup_warnings_downgrade_cuda_when_runtime_is_cpu_only(monkeypatch):

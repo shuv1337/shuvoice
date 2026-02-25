@@ -1,4 +1,4 @@
-"""Sherpa ONNX streaming ASR backend."""
+"""Sherpa ONNX ASR backend with streaming and offline modes."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 
 class SherpaBackend(ASRBackend):
-    """Sherpa ONNX streaming transducer backend (v1 contract)."""
+    """Sherpa ONNX transducer backend with streaming and offline modes."""
 
     capabilities = ASRCapabilities(
         supports_gpu=True,
@@ -37,13 +37,20 @@ class SherpaBackend(ASRBackend):
 
     def __init__(self, config: Config):
         self.config = config
-        self._recognizer: Any = None
+        self._recognizer: Any = None  # OnlineRecognizer for streaming mode
+        self._offline_recognizer: Any = None  # OfflineRecognizer for offline mode
         self._stream: Any = None
         self._model_files: dict[str, Path] | None = None
 
     @property
     def native_chunk_samples(self) -> int:
         return int(self.config.sample_rate) * int(self.config.sherpa_chunk_ms) // 1000
+
+    @property
+    def _is_offline_mode(self) -> bool:
+        """Check if backend is configured for offline instant mode."""
+        resolved = self.config.resolved_sherpa_decode_mode
+        return resolved == "offline_instant"
 
     _PARAKEET_MODEL_MARKERS = (
         "parakeet-tdt",
@@ -68,21 +75,22 @@ class SherpaBackend(ASRBackend):
         errors: list[str] = []
 
         if cls._looks_like_parakeet_model(config):
+            # Check if offline mode is enabled - Parakeet is allowed in offline mode
+            resolved_mode = config.resolved_sherpa_decode_mode
+            if resolved_mode == "offline_instant":
+                # Parakeet is allowed in offline instant mode
+                return errors
+
             message = (
-                "Configured Sherpa model appears to be Parakeet TDT, but ShuVoice currently "
-                "uses Sherpa's online streaming transducer path only. "
-                "Parakeet requires an offline/non-streaming decode path in ShuVoice, which is "
-                "not implemented yet. "
-                "This model is incompatible with the current path and can crash during "
+                "Configured Sherpa model appears to be Parakeet TDT, but ShuVoice is "
+                "configured for streaming mode. Parakeet requires offline instant mode. "
+                "Enable instant_mode=true with sherpa_decode_mode='auto' or set "
+                "sherpa_decode_mode='offline_instant' explicitly. "
+                "This model is incompatible with the streaming path and can crash during "
                 "recognizer initialization (missing encoder metadata such as 'window_size'). "
                 "Use a streaming Sherpa model like "
-                "'sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06' for now."
+                "'sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06' for streaming mode."
             )
-            if bool(getattr(config, "instant_mode", False)):
-                message += (
-                    " Note: [asr].instant_mode currently tunes streaming latency settings only; "
-                    "it does not switch Sherpa to an offline/non-streaming Parakeet decode path yet."
-                )
             errors.append(message)
 
         return errors
@@ -401,6 +409,89 @@ class SherpaBackend(ASRBackend):
 
         return matches[0]
 
+    def _load_online_recognizer(self) -> None:
+        """Load OnlineRecognizer for streaming mode."""
+        import sherpa_onnx
+
+        model_files = self._model_files
+        assert model_files is not None
+
+        recognizer_cls = sherpa_onnx.OnlineRecognizer
+        if hasattr(recognizer_cls, "from_transducer"):
+            self._recognizer = recognizer_cls.from_transducer(
+                encoder=str(model_files["encoder"]),
+                decoder=str(model_files["decoder"]),
+                joiner=str(model_files["joiner"]),
+                tokens=str(model_files["tokens"]),
+                num_threads=int(self.config.sherpa_num_threads),
+                provider=self.config.sherpa_provider,
+                sample_rate=int(self.config.sample_rate),
+                feature_dim=80,
+            )
+        else:
+            feat_config = sherpa_onnx.FeatureConfig(
+                sample_rate=int(self.config.sample_rate),
+                feature_dim=80,
+            )
+            transducer_config = sherpa_onnx.OnlineTransducerModelConfig(
+                encoder=str(model_files["encoder"]),
+                decoder=str(model_files["decoder"]),
+                joiner=str(model_files["joiner"]),
+            )
+            model_config = sherpa_onnx.OnlineModelConfig(
+                transducer=transducer_config,
+                tokens=str(model_files["tokens"]),
+                num_threads=int(self.config.sherpa_num_threads),
+                provider=self.config.sherpa_provider,
+            )
+            recognizer_config = sherpa_onnx.OnlineRecognizerConfig(
+                feat_config=feat_config,
+                model_config=model_config,
+                decoding_method="greedy_search",
+            )
+            self._recognizer = recognizer_cls(recognizer_config)
+
+    def _load_offline_recognizer(self) -> None:
+        """Load OfflineRecognizer for offline instant mode (Parakeet support)."""
+        import sherpa_onnx
+
+        model_files = self._model_files
+        assert model_files is not None
+
+        recognizer_cls = sherpa_onnx.OfflineRecognizer
+        if hasattr(recognizer_cls, "from_transducer"):
+            # Use from_transducer with model_type="nemo_transducer" for Parakeet
+            self._offline_recognizer = recognizer_cls.from_transducer(
+                encoder=str(model_files["encoder"]),
+                decoder=str(model_files["decoder"]),
+                joiner=str(model_files["joiner"]),
+                tokens=str(model_files["tokens"]),
+                num_threads=int(self.config.sherpa_num_threads),
+                provider=self.config.sherpa_provider,
+                sample_rate=int(self.config.sample_rate),
+                feature_dim=80,
+                model_type="nemo_transducer",
+            )
+        else:
+            # Fallback for older sherpa-onnx versions
+            transducer_config = sherpa_onnx.OfflineTransducerModelConfig(
+                encoder=str(model_files["encoder"]),
+                decoder=str(model_files["decoder"]),
+                joiner=str(model_files["joiner"]),
+            )
+            model_config = sherpa_onnx.OfflineModelConfig(
+                transducer=transducer_config,
+                tokens=str(model_files["tokens"]),
+                num_threads=int(self.config.sherpa_num_threads),
+                provider=self.config.sherpa_provider,
+                model_type="nemo_transducer",
+            )
+            recognizer_config = sherpa_onnx.OfflineRecognizerConfig(
+                model_config=model_config,
+                decoding_method="greedy_search",
+            )
+            self._offline_recognizer = recognizer_cls(recognizer_config)
+
     def load(self) -> None:
         self._validate_runtime_config()
 
@@ -411,60 +502,51 @@ class SherpaBackend(ASRBackend):
         if self._model_files is None:
             raise RuntimeError("Sherpa model validation failed unexpectedly")
 
-        import sherpa_onnx
+        decode_mode = self.config.resolved_sherpa_decode_mode
+        provider = self.config.sherpa_provider
 
-        model_files = self._model_files
+        log.info(
+            "Loading Sherpa backend: decode_mode=%s, provider=%s, model=%s",
+            decode_mode,
+            provider,
+            self.config.sherpa_model_name,
+        )
 
         try:
-            recognizer_cls = sherpa_onnx.OnlineRecognizer
-            if hasattr(recognizer_cls, "from_transducer"):
-                self._recognizer = recognizer_cls.from_transducer(
-                    encoder=str(model_files["encoder"]),
-                    decoder=str(model_files["decoder"]),
-                    joiner=str(model_files["joiner"]),
-                    tokens=str(model_files["tokens"]),
-                    num_threads=int(self.config.sherpa_num_threads),
-                    provider=self.config.sherpa_provider,
-                    sample_rate=int(self.config.sample_rate),
-                    feature_dim=80,
-                )
+            if self._is_offline_mode:
+                self._load_offline_recognizer()
+                log.info("Sherpa OfflineRecognizer loaded successfully (offline_instant mode)")
             else:
-                feat_config = sherpa_onnx.FeatureConfig(
-                    sample_rate=int(self.config.sample_rate),
-                    feature_dim=80,
-                )
-                transducer_config = sherpa_onnx.OnlineTransducerModelConfig(
-                    encoder=str(model_files["encoder"]),
-                    decoder=str(model_files["decoder"]),
-                    joiner=str(model_files["joiner"]),
-                )
-                model_config = sherpa_onnx.OnlineModelConfig(
-                    transducer=transducer_config,
-                    tokens=str(model_files["tokens"]),
-                    num_threads=int(self.config.sherpa_num_threads),
-                    provider=self.config.sherpa_provider,
-                )
-                recognizer_config = sherpa_onnx.OnlineRecognizerConfig(
-                    feat_config=feat_config,
-                    model_config=model_config,
-                    decoding_method="greedy_search",
-                )
-                self._recognizer = recognizer_cls(recognizer_config)
+                self._load_online_recognizer()
+                log.info("Sherpa OnlineRecognizer loaded successfully (streaming mode)")
         except Exception as e:
+            mode_desc = "offline" if self._is_offline_mode else "streaming"
             raise RuntimeError(
-                "Failed to initialize Sherpa streaming recognizer. "
-                "Ensure sherpa_model_dir points to a supported streaming transducer model."
+                f"Failed to initialize Sherpa {mode_desc} recognizer. "
+                "Ensure sherpa_model_dir points to a supported transducer model."
             ) from e
 
         self.reset()
 
     def reset(self) -> None:
+        if self._is_offline_mode:
+            if self._offline_recognizer is None:
+                raise RuntimeError("ASR backend is not loaded. Call load() first.")
+            # Offline mode doesn't use streams; nothing to reset
+            return
+
         if self._recognizer is None:
             raise RuntimeError("ASR backend is not loaded. Call load() first.")
 
         self._stream = self._recognizer.create_stream()
 
     def process_chunk(self, audio_chunk: np.ndarray) -> str:
+        if self._is_offline_mode:
+            raise RuntimeError(
+                "process_chunk() is not supported in offline instant mode. "
+                "Use process_utterance() instead."
+            )
+
         if self._recognizer is None or self._stream is None:
             raise RuntimeError("ASR backend is not loaded. Call load() first.")
 
@@ -492,5 +574,44 @@ class SherpaBackend(ASRBackend):
         text = getattr(result, "text", None)
         if isinstance(text, str):
             return text.strip()
+
+        return str(result).strip()
+
+    def process_utterance(self, audio: np.ndarray) -> str:
+        """Process a complete utterance in offline mode.
+
+        Args:
+            audio: Complete utterance audio as float32 samples at 16kHz.
+
+        Returns:
+            Transcribed text for the utterance.
+
+        Raises:
+            RuntimeError: If not in offline mode or backend not loaded.
+        """
+        if not self._is_offline_mode:
+            raise RuntimeError(
+                "process_utterance() is only supported in offline instant mode. "
+                "Use process_chunk() for streaming mode."
+            )
+
+        if self._offline_recognizer is None:
+            raise RuntimeError("ASR backend is not loaded. Call load() first.")
+
+        waveform = np.asarray(audio, dtype=np.float32)
+        if waveform.ndim != 1:
+            waveform = waveform.reshape(-1)
+
+        # Create a stream for this utterance
+        stream = self._offline_recognizer.create_stream()
+        stream.accept_waveform(int(self.config.sample_rate), waveform)
+
+        # Decode the complete utterance
+        self._offline_recognizer.decode_stream(stream)
+
+        # Extract result
+        result = stream.result
+        if hasattr(result, "text"):
+            return result.text.strip()
 
         return str(result).strip()
