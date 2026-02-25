@@ -5,9 +5,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+# Order matters: runtime UI (splash/wizard) should prefer badge-style artwork
+# without a full rectangular backdrop, then fall back to lockups.
 _LOGO_FILENAMES = (
-    "shuvoice-variant-dark-lockup.png",
     "shuvoice-variant-dark-badge.png",
+    "shuvoice_variant_dark_lockup_alt.png",
+    "shuvoice-variant-dark-lockup.png",
+    "shuvoice-variant-light-lockup.png",
 )
 
 
