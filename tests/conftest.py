@@ -36,6 +36,9 @@ except (ImportError, ValueError):
     # Setup Gtk/GLib/Gdk/LayerShell mocks
     mock_gtk = MagicMock()
     mock_glib = MagicMock()
+    # Define constants used in return values
+    mock_glib.SOURCE_REMOVE = 0
+    mock_glib.SOURCE_CONTINUE = 1
     mock_gdk = MagicMock()
     mock_layershell = MagicMock()
 
