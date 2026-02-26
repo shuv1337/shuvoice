@@ -451,10 +451,22 @@ fresh models, clean service restart).
 
 > ⚠️ **Destructive**: this removes local model caches and recreates `.venv/`.
 
-### 1) Stop service
+### 1) Stop services (ShuVoice + optional Waybar helper)
 
 ```bash
+# Core ShuVoice service
 systemctl --user stop shuvoice.service
+
+# Optional: if you run a dedicated shuvoice-waybar user service, stop it too
+systemctl --user stop shuvoice-waybar.service 2>/dev/null || true
+```
+
+If you want a fully clean slate for unit files too, disable/remove it:
+
+```bash
+systemctl --user disable --now shuvoice-waybar.service 2>/dev/null || true
+rm -f ~/.config/systemd/user/shuvoice-waybar.service
+systemctl --user daemon-reload
 ```
 
 ### 2) Remove local model caches (ShuVoice + relevant HF repos)
