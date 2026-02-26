@@ -34,15 +34,18 @@ def test_find_logo_returns_first_existing(tmp_path):
 
 
 def test_splash_overlay_dismiss_clears_window():
-    """dismiss() nulls out window and status references."""
+    """dismiss() nulls out window and splash widget references."""
     splash = object.__new__(SplashOverlay)
     splash._window = MagicMock()
     splash._status = MagicMock()
+    splash._progress = MagicMock()
+    splash._pulse_source_id = None
 
     splash._do_dismiss()
 
     assert splash._window is None
     assert splash._status is None
+    assert splash._progress is None
 
 
 def test_splash_overlay_set_status_updates_label():
@@ -64,14 +67,59 @@ def test_splash_overlay_set_status_no_crash_when_dismissed():
     splash._do_set_status("anything")  # Should not raise
 
 
+def test_splash_overlay_set_progress_updates_bar_and_status():
+    splash = object.__new__(SplashOverlay)
+    splash._status = MagicMock()
+    splash._progress = MagicMock()
+    splash._pulse_source_id = None
+
+    splash._do_set_progress(0.42, "Downloading model archive… 42%")
+
+    splash._status.set_text.assert_called_once_with("Downloading model archive… 42%")
+    splash._progress.set_fraction.assert_called_once_with(0.42)
+    splash._progress.set_show_text.assert_called_once_with(True)
+    splash._progress.set_text.assert_called_once_with("Downloading model archive… 42%")
+
+
+def test_splash_overlay_set_progress_indeterminate_starts_pulsing():
+    splash = object.__new__(SplashOverlay)
+    splash._status = MagicMock()
+    splash._progress = MagicMock()
+    splash._pulse_source_id = None
+
+    with patch("shuvoice.splash.GLib.timeout_add", return_value=123) as timeout_add:
+        splash._do_set_progress(None, "Extracting model archive…")
+
+    timeout_add.assert_called_once()
+    assert splash._pulse_source_id == 123
+    splash._progress.set_show_text.assert_called_once_with(True)
+    splash._progress.set_text.assert_called_once_with("Extracting model archive…")
+
+
 def test_splash_overlay_dismiss_is_idempotent():
     """Calling _do_dismiss twice does not raise."""
     splash = object.__new__(SplashOverlay)
     splash._window = MagicMock()
     splash._status = MagicMock()
+    splash._progress = MagicMock()
+    splash._pulse_source_id = None
 
     splash._do_dismiss()
     splash._do_dismiss()  # Should not raise
+
+
+def test_splash_overlay_dismiss_stops_progress_pulse():
+    splash = object.__new__(SplashOverlay)
+    splash._window = MagicMock()
+    splash._status = MagicMock()
+    splash._progress = MagicMock()
+    splash._pulse_source_id = 999
+
+    with patch("shuvoice.splash.GLib.source_remove") as source_remove:
+        splash._do_dismiss()
+
+    source_remove.assert_called_once_with(999)
+    assert splash._pulse_source_id is None
 
 
 def test_splash_overlay_on_realize_sets_shown_timestamp(monkeypatch):

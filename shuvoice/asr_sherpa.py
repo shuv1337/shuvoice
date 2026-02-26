@@ -318,7 +318,11 @@ class SherpaBackend(ASRBackend):
         _emit_progress(1.0, "Sherpa model ready")
         log.info("Sherpa model ready: %s", target_dir)
 
-    def _resolve_model_dir(self) -> Path:
+    def _resolve_model_dir(
+        self,
+        *,
+        progress_callback: Callable[[float | None, str], None] | None = None,
+    ) -> Path:
         model_name = str(self.config.sherpa_model_name).strip() or self._DEFAULT_MODEL_NAME
 
         configured = self.config.sherpa_model_dir
@@ -339,7 +343,11 @@ class SherpaBackend(ASRBackend):
                 model_name,
                 model_dir,
             )
-            self.download_model(model_name=model_name, model_dir=str(model_dir))
+            self.download_model(
+                model_name=model_name,
+                model_dir=str(model_dir),
+                progress_callback=progress_callback,
+            )
             if not self._is_model_dir_complete(model_dir):
                 raise RuntimeError(
                     f"Sherpa auto-download failed to populate model directory: {model_dir}"
@@ -355,7 +363,11 @@ class SherpaBackend(ASRBackend):
                 model_name,
                 default_dir,
             )
-            self.download_model(model_name=model_name, model_dir=str(default_dir))
+            self.download_model(
+                model_name=model_name,
+                model_dir=str(default_dir),
+                progress_callback=progress_callback,
+            )
 
         if not self._is_model_dir_complete(default_dir):
             raise RuntimeError(
@@ -367,14 +379,18 @@ class SherpaBackend(ASRBackend):
         self.config.sherpa_model_dir = str(default_dir)
         return default_dir
 
-    def _validate_runtime_config(self) -> None:
+    def _validate_runtime_config(
+        self,
+        *,
+        progress_callback: Callable[[float | None, str], None] | None = None,
+    ) -> None:
         if int(self.config.sample_rate) != self._EXPECTED_SAMPLE_RATE:
             raise ValueError(
                 "Sherpa backend currently requires sample_rate=16000 "
                 f"(got {self.config.sample_rate})."
             )
 
-        model_dir = self._resolve_model_dir()
+        model_dir = self._resolve_model_dir(progress_callback=progress_callback)
 
         tokens = model_dir / "tokens.txt"
         if not tokens.is_file():
@@ -492,8 +508,17 @@ class SherpaBackend(ASRBackend):
             )
             self._offline_recognizer = recognizer_cls(recognizer_config)
 
-    def load(self) -> None:
-        self._validate_runtime_config()
+    def load(self, progress_callback: Callable[[float | None, str], None] | None = None) -> None:
+        def _emit_progress(fraction: float | None, message: str) -> None:
+            if progress_callback is None:
+                return
+            try:
+                progress_callback(fraction, message)
+            except Exception:  # noqa: BLE001
+                log.debug("Sherpa load progress callback failed", exc_info=True)
+
+        _emit_progress(None, "Validating Sherpa model…")
+        self._validate_runtime_config(progress_callback=progress_callback)
 
         errors = self.dependency_errors()
         if errors:
@@ -511,6 +536,7 @@ class SherpaBackend(ASRBackend):
             provider,
             self.config.sherpa_model_name,
         )
+        _emit_progress(0.98, "Initializing Sherpa recognizer…")
 
         try:
             if self._is_offline_mode:
@@ -527,6 +553,7 @@ class SherpaBackend(ASRBackend):
             ) from e
 
         self.reset()
+        _emit_progress(1.0, "Sherpa model ready")
 
     def reset(self) -> None:
         if self._is_offline_mode:

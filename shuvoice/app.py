@@ -181,10 +181,33 @@ class ShuVoiceApp(Gtk.Application):
         self._finish_activation()
         return GLib.SOURCE_REMOVE
 
+    def _report_model_progress(self, fraction: float | None, message: str):
+        splash = getattr(self, "_splash", None)
+        if splash is None:
+            return
+
+        set_progress = getattr(splash, "set_progress", None)
+        if callable(set_progress):
+            set_progress(fraction, message)
+            return
+
+        set_status = getattr(splash, "set_status", None)
+        if callable(set_status):
+            set_status(message)
+
     def _load_model_async(self):
         """Background thread: load the ASR model, then signal the main thread."""
         try:
-            self.asr.load()
+            self._report_model_progress(None, "Loading model runtime…")
+            try:
+                self.asr.load(progress_callback=self._report_model_progress)
+            except TypeError as exc:
+                # Backward-compatible fallback for backends that don't accept
+                # progress_callback in load().
+                if "progress_callback" not in str(exc):
+                    raise
+                self.asr.load()
+
             GLib.idle_add(self._on_model_loaded)
         except Exception as exc:
             error_msg = str(exc)
@@ -196,6 +219,7 @@ class ShuVoiceApp(Gtk.Application):
         splash = getattr(self, "_splash", None)
         shown_at_monotonic = None
         if splash is not None:
+            ShuVoiceApp._report_model_progress(self, 1.0, "Model ready. Starting ShuVoice…")
             shown_at_monotonic = getattr(splash, "shown_monotonic", None)
 
         remaining_visible_ms = ShuVoiceApp._remaining_splash_ms(
