@@ -495,7 +495,42 @@ Then verify:
 .venv/bin/python -c "import sherpa_onnx; print('sherpa_onnx OK')"
 ```
 
-### 5) Download all backend models fresh
+### 5) Trigger model downloads via ShuVoice (end-user path)
+
+This is the recommended QA flow for validating real user experience.
+Do **not** pre-download models manually.
+
+- **Wizard path (best for UX testing):**
+
+```bash
+uv run shuvoice wizard
+```
+
+Finish the wizard and keep model download enabled in the finish screen to
+observe progress/cancel behavior.
+
+- **Service path (lazy runtime download):**
+
+```bash
+systemctl --user start shuvoice.service
+journalctl --user -u shuvoice.service -f
+```
+
+ShuVoice will download backend models lazily on first load when needed.
+
+### 6) Restart + verify service
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart shuvoice.service
+systemctl --user status shuvoice.service --no-pager
+uv run shuvoice preflight
+journalctl --user -u shuvoice.service -n 80 --no-pager
+```
+
+### 7) Optional (CI/dev only): pre-warm model caches programmatically
+
+Use this only when testing non-interactive setup speed, **not** end-user UX.
 
 ```bash
 . .venv/bin/activate
@@ -511,7 +546,6 @@ from shuvoice.wizard_state import DEFAULT_SHERPA_MODEL_NAME, PARAKEET_TDT_V3_INT
 model_root = Path.home() / '.local' / 'share' / 'shuvoice' / 'models'
 model_root.mkdir(parents=True, exist_ok=True)
 
-# Sherpa: default streaming + Parakeet
 sherpa_cls = get_backend_class('sherpa')
 for name in [DEFAULT_SHERPA_MODEL_NAME, PARAKEET_TDT_V3_INT8_MODEL_NAME]:
     target = model_root / 'sherpa' / name
@@ -519,27 +553,15 @@ for name in [DEFAULT_SHERPA_MODEL_NAME, PARAKEET_TDT_V3_INT8_MODEL_NAME]:
         shutil.rmtree(target)
     sherpa_cls.download_model(model_name=name, model_dir=str(target))
 
-# NeMo default
 get_backend_class('nemo').download_model('nvidia/nemotron-speech-streaming-en-0.6b')
 
-# Moonshine lazy-download warmup
 for moon_model in ['moonshine/tiny', 'moonshine/base']:
     cfg = Config(asr_backend='moonshine', moonshine_model_name=moon_model, moonshine_provider='cpu')
     MoonshineBackend(cfg).load()
 PY
 ```
 
-### 6) Restart + verify service
-
-```bash
-systemctl --user daemon-reload
-systemctl --user restart shuvoice.service
-systemctl --user status shuvoice.service --no-pager
-uv run shuvoice preflight
-journalctl --user -u shuvoice.service -n 80 --no-pager
-```
-
-### 7) Optional: reset wizard onboarding state too
+### 8) Optional: reset wizard onboarding state too
 
 Use this only when testing first-run UX:
 
