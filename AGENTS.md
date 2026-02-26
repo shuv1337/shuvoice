@@ -22,6 +22,7 @@
 - [Model Locations](#model-locations)
 - [Build Artifacts](#build-artifacts)
 - [System Prerequisites](#system-prerequisites)
+- [Complete Fresh Install (Clean Slate Test Workflow)](#complete-fresh-install-clean-slate-test-workflow)
 - [Known Issues](#known-issues)
 - [Maintaining This File](#maintaining-this-file)
 
@@ -442,6 +443,111 @@ uv sync --dev --extra asr-nemo --extra asr-sherpa --extra asr-moonshine
 | `pytest` | Tests | managed by uv (`uv sync --dev`) |
 
 ---
+
+## Complete Fresh Install (Clean Slate Test Workflow)
+
+Use this when you want a reproducible “from-scratch” test state (fresh venv,
+fresh models, clean service restart).
+
+> ⚠️ **Destructive**: this removes local model caches and recreates `.venv/`.
+
+### 1) Stop service
+
+```bash
+systemctl --user stop shuvoice.service
+```
+
+### 2) Remove local model caches (ShuVoice + relevant HF repos)
+
+```bash
+rm -rf ~/.local/share/shuvoice/models
+rm -rf ~/.cache/huggingface/hub/models--nvidia--nemotron-speech-streaming-en-0.6b*
+rm -rf ~/.cache/huggingface/hub/models--UsefulSensors--moonshine*
+rm -rf ~/.cache/huggingface/hub/models--moonshine*
+rm -rf ~/.cache/huggingface/hub/.locks/models--nvidia--nemotron-speech-streaming-en-0.6b*
+rm -rf ~/.cache/huggingface/hub/.locks/models--UsefulSensors--moonshine*
+```
+
+### 3) Recreate venv + reinstall deps
+
+Use Python 3.12 for best compatibility with current ASR wheels.
+
+```bash
+cd /path/to/shuvoice
+rm -rf .venv
+uv sync --python 3.12 --dev --extra asr-nemo --extra asr-sherpa --extra asr-moonshine
+```
+
+### 4) Sherpa runtime compatibility check/fix (if needed)
+
+If `sherpa_onnx` import fails with errors like
+`libonnxruntime.so: version 'VERS_1.23.2' not found`, copy a compatible
+`libonnxruntime.so` into the venv Sherpa lib dir:
+
+```bash
+cp /usr/lib/python3.14/site-packages/sherpa_onnx/lib/libonnxruntime.so \
+  .venv/lib/python3.12/site-packages/sherpa_onnx/lib/
+```
+
+Then verify:
+
+```bash
+.venv/bin/python -c "import sherpa_onnx; print('sherpa_onnx OK')"
+```
+
+### 5) Download all backend models fresh
+
+```bash
+. .venv/bin/activate
+python - <<'PY'
+from pathlib import Path
+import shutil
+
+from shuvoice.asr import get_backend_class
+from shuvoice.asr_moonshine import MoonshineBackend
+from shuvoice.config import Config
+from shuvoice.wizard_state import DEFAULT_SHERPA_MODEL_NAME, PARAKEET_TDT_V3_INT8_MODEL_NAME
+
+model_root = Path.home() / '.local' / 'share' / 'shuvoice' / 'models'
+model_root.mkdir(parents=True, exist_ok=True)
+
+# Sherpa: default streaming + Parakeet
+sherpa_cls = get_backend_class('sherpa')
+for name in [DEFAULT_SHERPA_MODEL_NAME, PARAKEET_TDT_V3_INT8_MODEL_NAME]:
+    target = model_root / 'sherpa' / name
+    if target.exists():
+        shutil.rmtree(target)
+    sherpa_cls.download_model(model_name=name, model_dir=str(target))
+
+# NeMo default
+get_backend_class('nemo').download_model('nvidia/nemotron-speech-streaming-en-0.6b')
+
+# Moonshine lazy-download warmup
+for moon_model in ['moonshine/tiny', 'moonshine/base']:
+    cfg = Config(asr_backend='moonshine', moonshine_model_name=moon_model, moonshine_provider='cpu')
+    MoonshineBackend(cfg).load()
+PY
+```
+
+### 6) Restart + verify service
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart shuvoice.service
+systemctl --user status shuvoice.service --no-pager
+uv run shuvoice preflight
+journalctl --user -u shuvoice.service -n 80 --no-pager
+```
+
+### 7) Optional: reset wizard onboarding state too
+
+Use this only when testing first-run UX:
+
+```bash
+rm -f ~/.config/shuvoice/config.toml
+rm -f ~/.local/share/shuvoice/.wizard-done
+uv run shuvoice wizard
+```
 
 ## Known Issues
 
