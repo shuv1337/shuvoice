@@ -145,6 +145,11 @@ def test_run_setup_allows_parakeet_streaming_when_enabled(capsys, monkeypatch):
 
     sherpa_cls = get_backend_class("sherpa")
     monkeypatch.setattr(setup_cmd, "get_backend_class", lambda _name: sherpa_cls)
+    monkeypatch.setattr(
+        sherpa_cls,
+        "_parakeet_streaming_model_compatible",
+        classmethod(lambda cls, _cfg: (True, "compatible")),
+    )
 
     cfg = Config(
         asr_backend="sherpa",
@@ -164,6 +169,42 @@ def test_run_setup_allows_parakeet_streaming_when_enabled(capsys, monkeypatch):
     out = capsys.readouterr().out
     assert "[INFO] Sherpa decode mode: streaming" in out
     assert "[PASS] Backend runtime compatibility" in out
+
+
+def test_run_setup_blocks_parakeet_streaming_when_runtime_incompatible(capsys, monkeypatch):
+    report = BackendSetupReport(
+        backend="sherpa",
+        missing_dependencies=(),
+        install_hints=(),
+        model_status="present (/tmp/model)",
+    )
+    monkeypatch.setattr(setup_cmd, "build_backend_setup_report", lambda _cfg: report)
+
+    sherpa_cls = get_backend_class("sherpa")
+    monkeypatch.setattr(setup_cmd, "get_backend_class", lambda _name: sherpa_cls)
+    monkeypatch.setattr(
+        sherpa_cls,
+        "_parakeet_streaming_model_compatible",
+        classmethod(lambda cls, _cfg: (False, "missing window_size")),
+    )
+
+    cfg = Config(
+        asr_backend="sherpa",
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+        sherpa_decode_mode="streaming",
+        sherpa_enable_parakeet_streaming=True,
+    )
+
+    code = setup_cmd.run_setup(
+        cfg,
+        install_missing=False,
+        skip_model_download=True,
+        skip_preflight=True,
+    )
+
+    assert code == DEPENDENCY_EXIT_CODE
+    out = capsys.readouterr().out
+    assert "missing window_size" in out
 
 
 def test_preflight_reports_sherpa_decode_mode_status(capsys, monkeypatch):

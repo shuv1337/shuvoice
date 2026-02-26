@@ -25,3 +25,20 @@ def test_service_action_raises_with_detail(monkeypatch):
 
     with pytest.raises(RuntimeError, match="boom"):
         service_action("shuvoice.service", "restart")
+
+
+def test_service_action_restart_stops_failed_service(monkeypatch):
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(*args, **_kwargs):
+        calls.append(tuple(args))
+        return SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    monkeypatch.setattr("shuvoice.waybar.systemd.run_systemctl_user", fake_run)
+    monkeypatch.setattr("shuvoice.waybar.systemd.service_active_state", lambda _svc: "failed")
+
+    with pytest.raises(RuntimeError, match="restart loop"):
+        service_action("shuvoice.service", "restart")
+
+    assert ("restart", "shuvoice.service") in calls
+    assert ("stop", "shuvoice.service") in calls

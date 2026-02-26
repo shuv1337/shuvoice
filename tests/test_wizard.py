@@ -78,6 +78,7 @@ def test_write_config_creates_toml_with_cuda(tmp_path):
         assert 'sherpa_decode_mode = "auto"' in content
         assert "instant_mode = false" in content
         assert "sherpa_enable_parakeet_streaming = false" in content
+        assert 'output_mode = "streaming_partial"' in content
 
 
 def test_write_config_creates_toml_without_cuda(tmp_path):
@@ -98,6 +99,7 @@ def test_write_config_creates_toml_without_cuda(tmp_path):
         assert 'sherpa_decode_mode = "auto"' in content
         assert "instant_mode = false" in content
         assert "sherpa_enable_parakeet_streaming = false" in content
+        assert 'output_mode = "streaming_partial"' in content
 
 
 def test_write_config_sherpa_custom_model_name(tmp_path):
@@ -114,6 +116,7 @@ def test_write_config_sherpa_custom_model_name(tmp_path):
         assert "instant_mode = true" in content
         assert 'sherpa_decode_mode = "offline_instant"' in content
         assert "sherpa_enable_parakeet_streaming = false" in content
+        assert 'output_mode = "final_only"' in content
 
 
 def test_write_config_sherpa_parakeet_streaming_override(tmp_path):
@@ -134,6 +137,7 @@ def test_write_config_sherpa_parakeet_streaming_override(tmp_path):
         assert 'sherpa_decode_mode = "streaming"' in content
         assert "instant_mode = false" in content
         assert "sherpa_enable_parakeet_streaming = true" in content
+        assert 'output_mode = "streaming_partial"' in content
 
 
 def test_write_config_nemo_sets_device(tmp_path):
@@ -234,6 +238,7 @@ def test_format_summary_sherpa_default_model_shows_streaming_mode():
     assert "Sherpa profile: Streaming" in result
     assert "Sherpa model:   Zipformer Kroko (default)" in result
     assert "Sherpa decode:  Streaming (auto)" in result
+    assert "Output mode:    streaming_partial" in result
 
 
 def test_format_summary_sherpa_parakeet_model_label():
@@ -241,6 +246,7 @@ def test_format_summary_sherpa_parakeet_model_label():
     assert "Sherpa profile: Instant (Parakeet)" in result
     assert "Sherpa model:   Parakeet TDT v3 (int8)" in result
     assert "Sherpa decode:  Offline instant (auto-enabled)" in result
+    assert "Output mode:    final_only" in result
 
 
 def test_format_summary_sherpa_parakeet_streaming_profile_label():
@@ -252,6 +258,7 @@ def test_format_summary_sherpa_parakeet_streaming_profile_label():
     assert "Sherpa profile: Streaming (Parakeet)" in result
     assert "Sherpa model:   Parakeet TDT v3 (int8)" in result
     assert "Sherpa decode:  Streaming (explicit override)" in result
+    assert "Output mode:    streaming_partial" in result
 
 
 def test_format_summary_includes_hyprland_bind_lines_for_preset():
@@ -259,8 +266,8 @@ def test_format_summary_includes_hyprland_bind_lines_for_preset():
     result = format_summary("nemo", "super_v")
     assert "NeMo" in result
     assert "Super + V" in result
-    assert "bind = SUPER, V, exec, shuvoice --control start" in result
-    assert "bindr = SUPER, V, exec, shuvoice --control stop" in result
+    assert "bind = SUPER, V, exec, shuvoice control start --control-wait-sec 0" in result
+    assert "bindr = SUPER, V, exec, shuvoice control stop --control-wait-sec 0" in result
 
 
 def test_format_summary_manual_mode_shows_manual_copy_hint():
@@ -270,7 +277,7 @@ def test_format_summary_manual_mode_shows_manual_copy_hint():
 
 def test_format_summary_right_ctrl_includes_extra_release_line():
     result = format_summary("sherpa", "right_ctrl")
-    assert "bindr = CTRL, Control_R, exec, shuvoice --control stop" in result
+    assert "bindr = CTRL, Control_R, exec, shuvoice control stop --control-wait-sec 0" in result
 
 
 def test_format_summary_custom_keybind_shows_readme_hint():
@@ -293,23 +300,24 @@ def test_format_summary_with_moonshine():
 def test_format_hyprland_bind_no_modifier():
     result = format_hyprland_bind(", F9")
     assert result == (
-        "bind = , F9, exec, shuvoice --control start\nbindr = , F9, exec, shuvoice --control stop"
+        "bind = , F9, exec, shuvoice control start --control-wait-sec 0\n"
+        "bindr = , F9, exec, shuvoice control stop --control-wait-sec 0"
     )
 
 
 def test_format_hyprland_bind_with_modifier():
     result = format_hyprland_bind("SUPER, V")
     assert result == (
-        "bind = SUPER, V, exec, shuvoice --control start\n"
-        "bindr = SUPER, V, exec, shuvoice --control stop"
+        "bind = SUPER, V, exec, shuvoice control start --control-wait-sec 0\n"
+        "bindr = SUPER, V, exec, shuvoice control stop --control-wait-sec 0"
     )
 
 
 def test_format_hyprland_bind_for_right_ctrl_includes_extra_release_line():
     result = format_hyprland_bind_for_keybind("right_ctrl", ", Control_R")
-    assert "bind = , Control_R, exec, shuvoice --control start" in result
-    assert "bindr = , Control_R, exec, shuvoice --control stop" in result
-    assert "bindr = CTRL, Control_R, exec, shuvoice --control stop" in result
+    assert "bind = , Control_R, exec, shuvoice control start --control-wait-sec 0" in result
+    assert "bindr = , Control_R, exec, shuvoice control stop --control-wait-sec 0" in result
+    assert "bindr = CTRL, Control_R, exec, shuvoice control stop --control-wait-sec 0" in result
 
 
 # -- auto_add_hyprland_keybind ------------------------------------------------
@@ -330,8 +338,8 @@ def test_auto_add_hyprland_keybind_adds_lines_when_key_unused(tmp_path):
     content = hypr_conf.read_text()
     assert "bind = , Insert, exec," in content
     assert "bindr = , Insert, exec," in content
-    assert "--control start" in content
-    assert "--control stop" in content
+    assert "control start --control-wait-sec 0" in content
+    assert "control stop --control-wait-sec 0" in content
 
 
 def test_auto_add_hyprland_keybind_uses_resolved_binary(tmp_path):
@@ -352,8 +360,8 @@ def test_auto_add_hyprland_keybind_uses_resolved_binary(tmp_path):
 
     assert status == "added"
     content = hypr_conf.read_text()
-    assert "/opt/shuvoice/bin/shuvoice --control start" in content
-    assert "/opt/shuvoice/bin/shuvoice --control stop" in content
+    assert "/opt/shuvoice/bin/shuvoice control start --control-wait-sec 0" in content
+    assert "/opt/shuvoice/bin/shuvoice control stop --control-wait-sec 0" in content
 
 
 def test_auto_add_hyprland_keybind_reports_conflict(tmp_path):
@@ -369,7 +377,7 @@ def test_auto_add_hyprland_keybind_reports_conflict(tmp_path):
     assert status == "conflict"
     assert "not adding ShuVoice binds" in message
     content = hypr_conf.read_text()
-    assert "shuvoice --control" not in content
+    assert "shuvoice control" not in content
 
 
 def test_auto_add_hyprland_keybind_detects_existing_bind(tmp_path):
@@ -377,8 +385,8 @@ def test_auto_add_hyprland_keybind_detects_existing_bind(tmp_path):
     hypr_dir.mkdir(parents=True)
     hypr_conf = hypr_dir / "hyprland.conf"
     hypr_conf.write_text(
-        "bind = , Insert, exec, shuvoice --control start\n"
-        "bindr = , Insert, exec, shuvoice --control stop\n"
+        "bind = , Insert, exec, shuvoice control start --control-wait-sec 0\n"
+        "bindr = , Insert, exec, shuvoice control stop --control-wait-sec 0\n"
     )
 
     with patch("shuvoice.wizard_state.Config") as mock_config:
@@ -400,8 +408,8 @@ def test_auto_add_hyprland_keybind_updates_existing_shuvoice_bindings_conf(tmp_p
     hyprland_conf = hypr_dir / "hyprland.conf"
 
     bindings_conf.write_text(
-        "bind = , Insert, exec, /venv/bin/shuvoice --control start\n"
-        "bindr = , Insert, exec, /venv/bin/shuvoice --control stop\n"
+        "bind = , Insert, exec, /venv/bin/shuvoice control start --control-wait-sec 0\n"
+        "bindr = , Insert, exec, /venv/bin/shuvoice control stop --control-wait-sec 0\n"
     )
     hyprland_conf.write_text("source = ~/.config/hypr/bindings.conf\n")
 
@@ -417,13 +425,16 @@ def test_auto_add_hyprland_keybind_updates_existing_shuvoice_bindings_conf(tmp_p
     bindings_text = bindings_conf.read_text()
     assert "Insert" not in bindings_text
     assert "Control_R" in bindings_text
-    assert "/venv/bin/shuvoice --control start" in bindings_text
-    assert "/venv/bin/shuvoice --control stop" in bindings_text
-    assert "bindr = CTRL, Control_R, exec, /venv/bin/shuvoice --control stop" in bindings_text
+    assert "/venv/bin/shuvoice control start --control-wait-sec 0" in bindings_text
+    assert "/venv/bin/shuvoice control stop --control-wait-sec 0" in bindings_text
+    assert (
+        "bindr = CTRL, Control_R, exec, /venv/bin/shuvoice control stop --control-wait-sec 0"
+        in bindings_text
+    )
 
     hyprland_text = hyprland_conf.read_text()
-    assert "--control start" not in hyprland_text
-    assert "--control stop" not in hyprland_text
+    assert "control start --control-wait-sec 0" not in hyprland_text
+    assert "control stop --control-wait-sec 0" not in hyprland_text
 
 
 # -- KEYBIND_PRESETS ----------------------------------------------------------

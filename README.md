@@ -379,6 +379,10 @@ When Sherpa is selected, the wizard lets you choose between:
 - Streaming (Parakeet, explicit override)
 - Instant (Parakeet)
 
+Wizard now also maps typing/output behavior automatically:
+- Streaming profiles -> `output_mode = "streaming_partial"`
+- Instant profile -> `output_mode = "final_only"`
+
 It also shows download progress in the finish screen (with a cancel button),
 and attempts to auto-download the selected model at finish.
 
@@ -608,6 +612,11 @@ ShuVoice is released under the MIT License. See `LICENSE`.
     `instant_mode = true` with `sherpa_decode_mode = "auto"`.
   - Streaming override: set both `sherpa_decode_mode = "streaming"` and
     `sherpa_enable_parakeet_streaming = true`.
+- `window_size does not exist in the metadata` when using Parakeet streaming
+  - Your Parakeet model is incompatible with Sherpa online decoder metadata
+    requirements on this runtime.
+  - Use `sherpa_decode_mode = "offline_instant"` for that model, or switch to
+    a streaming-native model (Zipformer).
 - `sherpa_provider='cuda' requested, but runtime does not expose CUDAExecutionProvider`
   - Install a CUDA-enabled sherpa-onnx runtime, or run with `sherpa_provider = "cpu"`.
   - `setup`/`preflight` now report requested vs effective provider and decode mode.

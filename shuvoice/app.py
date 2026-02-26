@@ -126,6 +126,7 @@ class ShuVoiceApp(Gtk.Application):
         self._streaming_stall_rms_ratio = max(0.0, float(self.config.streaming_stall_rms_ratio))
         self._streaming_stall_flush_chunks = max(1, int(self.config.streaming_stall_flush_chunks))
 
+        self._last_stop_monotonic = 0.0
         self._next_metrics_log_monotonic = time.monotonic() + 10.0
 
     def load_model(self):
@@ -261,7 +262,7 @@ class ShuVoiceApp(Gtk.Application):
 
         threading.Thread(target=self._asr_worker, name="asr", daemon=True).start()
 
-        log.info("Ready — use Hyprland bind/bindr with shuvoice --control start/stop")
+        log.info("Ready — use Hyprland bind/bindr with `shuvoice control start|stop`")
         log.info("Control socket: %s", self.control.socket_path)
 
     def do_shutdown(self):

@@ -86,6 +86,16 @@ class SherpaBackend(ASRBackend):
                 return errors
 
             if resolved_mode == "streaming" and allow_parakeet_streaming:
+                compatible, detail = cls._parakeet_streaming_model_compatible(config)
+                if compatible:
+                    return errors
+                errors.append(
+                    "Configured Sherpa model appears to be Parakeet TDT with streaming "
+                    "override enabled, but the model/runtime combination looks incompatible "
+                    f"with Sherpa online decoding ({detail}). "
+                    "Use offline instant mode (instant_mode=true with "
+                    "sherpa_decode_mode='auto', or sherpa_decode_mode='offline_instant')."
+                )
                 return errors
 
             message = (
@@ -477,6 +487,66 @@ class SherpaBackend(ASRBackend):
 
         return matches[0]
 
+    @staticmethod
+    def _onnx_file_contains_token(path: Path, token: bytes) -> bool:
+        """Check whether an ONNX file contains a metadata token string."""
+        overlap = max(0, len(token) - 1)
+        tail = b""
+
+        with path.open("rb") as fh:
+            while True:
+                chunk = fh.read(1024 * 1024)
+                if not chunk:
+                    return False
+
+                data = tail + chunk
+                if token in data:
+                    return True
+
+                tail = data[-overlap:] if overlap else b""
+
+    @classmethod
+    def _parakeet_streaming_model_compatible(cls, config: Config) -> tuple[bool, str]:
+        """Best-effort compatibility check for Parakeet streaming mode.
+
+        Returns (compatible, detail). If model files are not available yet,
+        this returns compatible=True and defers final check to load().
+        """
+        if not cls._looks_like_parakeet_model(config):
+            return True, "not a Parakeet model"
+
+        if config.resolved_sherpa_decode_mode != "streaming":
+            return True, "not in streaming mode"
+
+        if not bool(getattr(config, "sherpa_enable_parakeet_streaming", False)):
+            return True, "Parakeet streaming override disabled"
+
+        configured = getattr(config, "sherpa_model_dir", None)
+        model_name = str(getattr(config, "sherpa_model_name", "") or "").strip() or None
+        model_dir = Path(configured).expanduser() if configured else cls._default_model_dir(model_name)
+
+        if not model_dir.is_dir():
+            return True, f"model directory not present yet ({model_dir})"
+
+        try:
+            encoder = cls._pick_model_onnx(model_dir, "encoder")
+        except Exception as exc:  # noqa: BLE001
+            return False, f"unable to locate encoder ONNX file ({exc})"
+
+        try:
+            has_window_size = cls._onnx_file_contains_token(encoder, b"window_size")
+        except Exception as exc:  # noqa: BLE001
+            return False, f"failed to inspect encoder metadata ({exc})"
+
+        if not has_window_size:
+            return (
+                False,
+                "encoder metadata appears to be missing 'window_size' required by "
+                f"Sherpa online decoder ({encoder})",
+            )
+
+        return True, f"encoder metadata includes 'window_size' ({encoder})"
+
     def _load_online_recognizer(self) -> None:
         """Load OnlineRecognizer for streaming mode."""
         import sherpa_onnx
@@ -486,6 +556,13 @@ class SherpaBackend(ASRBackend):
 
         use_nemo_transducer = self._looks_like_parakeet_model(self.config)
         if use_nemo_transducer:
+            compatible, detail = self._parakeet_streaming_model_compatible(self.config)
+            if not compatible:
+                raise RuntimeError(
+                    "Parakeet streaming model is incompatible with Sherpa online decoding "
+                    f"on this runtime ({detail}). "
+                    "Use sherpa_decode_mode='offline_instant' for this model."
+                )
             log.info("Sherpa streaming Parakeet mode enabled (model_type='nemo_transducer')")
 
         recognizer_cls = sherpa_onnx.OnlineRecognizer

@@ -7,7 +7,7 @@ from collections.abc import Callable
 
 from ..asr import get_backend_class
 from ..config import Config
-from ..wizard_state import needs_wizard, write_config, write_marker
+from ..wizard_state import DEFAULT_SHERPA_MODEL_NAME, needs_wizard, write_config, write_marker
 from .hyprland import setup_keybind
 
 log = logging.getLogger(__name__)
@@ -27,6 +27,7 @@ def maybe_download_model(
     - ``skipped``
     - ``skipped_missing_deps``
     - ``cancelled``
+    - ``incompatible_streaming``
     - ``error``
 
     ``progress_callback`` receives ``(fraction, message)`` where fraction is
@@ -59,9 +60,49 @@ def maybe_download_model(
     _emit(0.0, "Preparing model download…")
 
     provider_note = ""
+    parakeet_streaming_requested = False
 
     def _with_provider_note(message: str) -> str:
         return f"{message}{provider_note}" if provider_note else message
+
+    def _check_parakeet_streaming_compatibility(
+        backend_cls: type,
+        cfg: Config,
+        *,
+        phase: str,
+    ) -> tuple[str, str] | None:
+        if cfg.asr_backend != "sherpa":
+            return None
+
+        model_name = str(getattr(cfg, "sherpa_model_name", "")).strip().lower()
+        if "parakeet" not in model_name:
+            return None
+
+        allow_parakeet_streaming = bool(getattr(cfg, "sherpa_enable_parakeet_streaming", False))
+        if cfg.resolved_sherpa_decode_mode != "streaming" or not allow_parakeet_streaming:
+            return None
+
+        checker = getattr(backend_cls, "_parakeet_streaming_model_compatible", None)
+        if not callable(checker):
+            return None
+
+        try:
+            compatible, detail = checker(cfg)
+        except Exception as exc:  # noqa: BLE001
+            compatible, detail = False, f"compatibility probe failed ({exc})"
+
+        if compatible:
+            return None
+
+        _emit(1.0, "Parakeet streaming is incompatible on this runtime")
+        return (
+            "incompatible_streaming",
+            _with_provider_note(
+                "Parakeet streaming profile is incompatible with this Sherpa runtime "
+                f"({detail}; phase={phase}). "
+                "Wizard will switch to Zipformer streaming profile to keep streaming available."
+            ),
+        )
 
     try:
         cfg = Config.load()
@@ -108,6 +149,20 @@ def maybe_download_model(
                             "sherpa_decode_mode='streaming'."
                         ),
                     )
+
+            parakeet_streaming_requested = bool(
+                "parakeet" in cfg.sherpa_model_name.lower()
+                and cfg.resolved_sherpa_decode_mode == "streaming"
+                and getattr(cfg, "sherpa_enable_parakeet_streaming", False)
+            )
+            if parakeet_streaming_requested:
+                incompatible = _check_parakeet_streaming_compatibility(
+                    backend_cls,
+                    cfg,
+                    phase="pre-download",
+                )
+                if incompatible is not None:
+                    return incompatible
     except Exception as exc:  # noqa: BLE001
         _emit(1.0, "Model download setup failed")
         return "error", f"Could not prepare model download: {exc}"
@@ -159,6 +214,15 @@ def maybe_download_model(
         _emit(1.0, "Model download failed")
         return "error", _with_provider_note(f"Model download failed: {exc}")
 
+    if cfg.asr_backend == "sherpa" and parakeet_streaming_requested:
+        incompatible = _check_parakeet_streaming_compatibility(
+            backend_cls,
+            cfg,
+            phase="post-download",
+        )
+        if incompatible is not None:
+            return incompatible
+
     _emit(1.0, "Model download completed")
     return "downloaded", _with_provider_note("Model download completed.")
 
@@ -192,6 +256,18 @@ def finish_setup(
         model_status, model_message = maybe_download_model(
             asr_backend,
             sherpa_model_name=sherpa_model_name,
+        )
+
+    if model_status == "incompatible_streaming" and asr_backend == "sherpa":
+        write_config(
+            "sherpa",
+            overwrite_existing=True,
+            sherpa_model_name=DEFAULT_SHERPA_MODEL_NAME,
+            sherpa_enable_parakeet_streaming=False,
+        )
+        model_message = (
+            f"{model_message} "
+            "Applied fallback profile: Streaming (Zipformer default model)."
         )
 
     write_marker()

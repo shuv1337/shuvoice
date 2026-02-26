@@ -12,7 +12,8 @@ def _make_sherpa_model_dir(tmp_path: Path) -> Path:
     model_dir = tmp_path / "sherpa-model"
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "tokens.txt").write_text("<blk>\na\n")
-    for name in ("encoder.onnx", "decoder.onnx", "joiner.onnx"):
+    (model_dir / "encoder.onnx").write_bytes(b"onnx-window_size")
+    for name in ("decoder.onnx", "joiner.onnx"):
         (model_dir / name).write_bytes(b"onnx")
     return model_dir
 
@@ -85,6 +86,29 @@ def test_sherpa_startup_guard_allows_parakeet_streaming_when_enabled(tmp_path: P
 
     sherpa_cls = get_backend_class("sherpa")
     assert sherpa_cls.startup_errors(cfg) == []
+
+
+def test_sherpa_startup_guard_blocks_parakeet_streaming_when_window_size_missing(tmp_path: Path):
+    model_dir = tmp_path / "sherpa-model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "tokens.txt").write_text("<blk>\na\n")
+    (model_dir / "encoder.onnx").write_bytes(b"onnx")
+    for name in ("decoder.onnx", "joiner.onnx"):
+        (model_dir / name).write_bytes(b"onnx")
+
+    cfg = Config(
+        asr_backend="sherpa",
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+        sherpa_model_dir=str(model_dir),
+        sherpa_decode_mode="streaming",
+        sherpa_enable_parakeet_streaming=True,
+    )
+
+    sherpa_cls = get_backend_class("sherpa")
+    errors = sherpa_cls.startup_errors(cfg)
+
+    assert errors
+    assert "window_size" in "\n".join(errors)
 
 
 def test_sherpa_startup_guard_allows_non_parakeet_streaming(tmp_path: Path):

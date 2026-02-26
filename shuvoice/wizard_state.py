@@ -170,7 +170,8 @@ def _resolve_shuvoice_command() -> str:
 
 def _control_exec(command: str, *, shuvoice_command: str | None = None) -> str:
     binary = shuvoice_command or _resolve_shuvoice_command()
-    return f"{shlex.quote(binary)} --control {command}"
+    quoted = shlex.quote(binary)
+    return f"{quoted} control {command} --control-wait-sec 0"
 
 
 def _normalize_bind_spec(mods: str, key: str) -> str | None:
@@ -214,6 +215,27 @@ def _parse_hypr_bind_line(line: str) -> tuple[str, str] | None:
 
     command = ",".join(parts[2:]).strip()
     return spec, command
+
+
+def _is_shuvoice_control_command(command_lc: str) -> bool:
+    if "shuvoice" not in command_lc:
+        return False
+    # Support both legacy and canonical control invocation styles:
+    #   shuvoice --control start
+    #   shuvoice control start [--control-wait-sec ...]
+    return "--control" in command_lc or " control " in f" {command_lc} "
+
+
+def _is_shuvoice_start_command(command_lc: str) -> bool:
+    if not _is_shuvoice_control_command(command_lc):
+        return False
+    return "--control start" in command_lc or " control start" in command_lc
+
+
+def _is_shuvoice_stop_command(command_lc: str) -> bool:
+    if not _is_shuvoice_control_command(command_lc):
+        return False
+    return "--control stop" in command_lc or " control stop" in command_lc
 
 
 def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
@@ -282,9 +304,9 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
 
             spec, command = parsed
             command_lc = command.lower()
-            is_shuvoice = "shuvoice" in command_lc and "--control" in command_lc
-            is_start = is_shuvoice and "--control start" in command_lc
-            is_stop = is_shuvoice and "--control stop" in command_lc
+            is_shuvoice = _is_shuvoice_control_command(command_lc)
+            is_start = _is_shuvoice_start_command(command_lc)
+            is_stop = _is_shuvoice_stop_command(command_lc)
 
             if spec in conflict_specs and not is_shuvoice:
                 conflict_files.setdefault(config_file, []).append(line_no)
@@ -353,8 +375,10 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
                     continue
                 _spec, command = parsed
                 command_lc = command.lower()
-                is_shuvoice_control = "shuvoice" in command_lc and "--control" in command_lc
-                is_start_or_stop = "--control start" in command_lc or "--control stop" in command_lc
+                is_shuvoice_control = _is_shuvoice_control_command(command_lc)
+                is_start_or_stop = _is_shuvoice_start_command(command_lc) or _is_shuvoice_stop_command(
+                    command_lc
+                )
                 if is_shuvoice_control and is_start_or_stop:
                     continue
                 filtered_lines.append(raw_line)
@@ -504,6 +528,10 @@ def write_config(
     - explicit streaming override (``sherpa_decode_mode = "streaming"`` +
       ``sherpa_enable_parakeet_streaming = true``).
 
+    Wizard also maps the selected Sherpa profile to typing behavior:
+    - Streaming profiles -> ``[typing].output_mode = "streaming_partial"``
+    - Instant profile -> ``[typing].output_mode = "final_only"``
+
     Writes use the config I/O durability path (atomic write + backup).
     For Sherpa, CUDA is selected only when the installed sherpa-onnx runtime
     exposes a CUDA provider; otherwise it defaults to CPU.
@@ -536,6 +564,11 @@ def write_config(
         asr_table = {}
         migrated["asr"] = asr_table
 
+    typing_table = migrated.get("typing")
+    if not isinstance(typing_table, dict):
+        typing_table = {}
+        migrated["typing"] = typing_table
+
     asr_table["asr_backend"] = asr_backend
     if provider_key:
         asr_table[provider_key] = provider
@@ -553,14 +586,17 @@ def write_config(
                 # Explicit override for Parakeet streaming path.
                 asr_table["instant_mode"] = False
                 asr_table["sherpa_decode_mode"] = "streaming"
+                typing_table["output_mode"] = "streaming_partial"
             else:
                 # Stable/default Parakeet path.
                 asr_table["instant_mode"] = True
                 asr_table["sherpa_decode_mode"] = "offline_instant"
+                typing_table["output_mode"] = "final_only"
         else:
             # Keep Sherpa defaults for Zipformer/non-Parakeet streaming models.
             asr_table["sherpa_decode_mode"] = "auto"
             asr_table["instant_mode"] = False
+            typing_table["output_mode"] = "streaming_partial"
 
     migrated["config_version"] = CURRENT_CONFIG_VERSION
 
@@ -609,16 +645,20 @@ def format_summary(
         if parakeet_streaming:
             profile_label = "Streaming (Parakeet)"
             decode_label = "Streaming (explicit override)"
+            output_mode_label = "streaming_partial"
         elif is_parakeet:
             profile_label = "Instant (Parakeet)"
             decode_label = "Offline instant (auto-enabled)"
+            output_mode_label = "final_only"
         else:
             profile_label = "Streaming"
             decode_label = "Streaming (auto)"
+            output_mode_label = "streaming_partial"
 
         lines.insert(1, f"Sherpa profile: {profile_label}")
         lines.insert(2, f"Sherpa model:   {model_label}")
         lines.insert(3, f"Sherpa decode:  {decode_label}")
+        lines.insert(4, f"Output mode:    {output_mode_label}")
 
     if hypr_key:
         bind_lines = format_hyprland_bind_for_keybind(

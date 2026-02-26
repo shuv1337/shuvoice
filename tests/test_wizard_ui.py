@@ -56,6 +56,14 @@ def test_model_status_text_maps_cancelled_state():
     assert "cancelled" in WelcomeWizard._model_download_status_text("cancelled").lower()
 
 
+def test_model_status_text_maps_incompatible_streaming_state():
+    from shuvoice.wizard import WelcomeWizard
+
+    status = WelcomeWizard._model_download_status_text("incompatible_streaming").lower()
+    assert "parakeet streaming" in status
+    assert "zipformer" in status
+
+
 def test_cancel_download_sets_event_and_updates_button():
     from shuvoice.wizard import WelcomeWizard
 
@@ -167,3 +175,45 @@ def test_complete_finish_shows_launch_button_and_waits_for_click():
     wizard._finalize_and_quit.assert_not_called()
     assert wizard.completed is False
     assert wizard._finish_in_progress is False
+
+
+def test_complete_finish_applies_zipformer_fallback_for_incompatible_parakeet_streaming():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard.__new__(WelcomeWizard)
+    wizard._asr_backend = "sherpa"
+    wizard._sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+    wizard._sherpa_enable_parakeet_streaming = True
+    wizard._keybind = "insert"
+    wizard._download_pulse_source_id = None
+    wizard._finish_in_progress = True
+    wizard.completed = False
+    wizard._launch_button = MagicMock()
+    wizard._set_cancel_download_visible = MagicMock()
+    wizard._set_download_note_visible = MagicMock()
+    wizard._apply_download_progress = MagicMock()
+    wizard._show_finish_status = MagicMock()
+    wizard._set_launch_button_visible = MagicMock()
+    wizard._finalize_and_quit = MagicMock()
+
+    with (
+        patch("shuvoice.wizard.write_config") as write_config,
+        patch("shuvoice.wizard.write_marker") as write_marker,
+    ):
+        WelcomeWizard._complete_finish(
+            wizard,
+            keybind_status="added",
+            sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+            model_status="incompatible_streaming",
+            model_message="not compatible",
+        )
+
+    write_config.assert_called_once_with(
+        "sherpa",
+        overwrite_existing=True,
+        sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
+        sherpa_enable_parakeet_streaming=False,
+    )
+    write_marker.assert_called_once()
+    assert wizard._sherpa_model_name == "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
+    assert wizard._sherpa_enable_parakeet_streaming is False

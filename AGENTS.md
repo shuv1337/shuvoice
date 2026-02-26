@@ -452,7 +452,7 @@ uv sync --dev --extra asr-nemo --extra asr-sherpa --extra asr-moonshine
 | [#13](https://github.com/shuv1337/shuvoice/issues/13) | Moonshine throughput slower than NeMo/Sherpa | Mitigated (safer defaults, ONNX tuning, GPU provider) |
 | — | `sherpa-onnx` source AUR builds may fail on GCC 15 due format-security warning flag interaction | Mitigation available (`python-sherpa-onnx-bin`, upstream patch staged) |
 | — | Prebuilt Sherpa CUDA wheels may be incompatible with newer CUDA stacks | Ongoing |
-| — | Parakeet streaming is behind explicit safety gate (`sherpa_enable_parakeet_streaming = true`) and may be less stable than offline instant mode on some model/runtime combos | By design |
+| — | Parakeet streaming is behind explicit safety gate (`sherpa_enable_parakeet_streaming = true`) and requires online-compatible encoder metadata (`window_size`); incompatible models are blocked pre-start with actionable errors | By design |
 
 ---
 

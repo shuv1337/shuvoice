@@ -67,6 +67,52 @@ def test_recording_status_reports_processing_between_stop_and_commit():
     assert ShuVoiceApp._recording_status(app) == "recording"
 
 
+def test_recording_start_ignores_spurious_restart_during_processing_rearm(monkeypatch):
+    monkeypatch.setattr("shuvoice.runtime.state_machine.time.monotonic", lambda: 10.2)
+
+    app = SimpleNamespace(
+        _recording=threading.Event(),
+        _processing=threading.Event(),
+        _asr_thread_alive=True,
+        _last_stop_monotonic=10.0,
+        _show_overlay_error=Mock(),
+    )
+    app._processing.set()
+
+    ShuVoiceApp._on_recording_start(app)
+
+    assert app._recording.is_set() is False
+
+
+def test_recording_start_allows_restart_after_processing_rearm_window(monkeypatch):
+    monkeypatch.setattr("shuvoice.runtime.state_machine.time.monotonic", lambda: 11.0)
+
+    tones: list[bool] = []
+    app = SimpleNamespace(
+        _recording=threading.Event(),
+        _processing=threading.Event(),
+        _asr_thread_alive=True,
+        _show_overlay_error=Mock(),
+        _asr_lock=threading.Lock(),
+        _asr_disabled=False,
+        _consecutive_asr_failures=0,
+        _disable_asr=Mock(),
+        _last_stop_monotonic=10.0,
+        _ASR_MAX_FAILURES=10,
+        audio=SimpleNamespace(clear=Mock()),
+        asr=SimpleNamespace(reset=Mock()),
+        overlay=None,
+        _play_feedback_tone=lambda is_start: tones.append(is_start),
+    )
+    app._processing.set()
+
+    ShuVoiceApp._on_recording_start(app)
+
+    assert app._recording.is_set() is True
+    assert app._processing.is_set() is False
+    assert tones == [True]
+
+
 def test_begin_utterance_resets_asr_before_threshold_setup():
     reset_calls = 0
 

@@ -804,6 +804,24 @@ class WelcomeWizard(Gtk.Application):
         model_status: str,
         model_message: str,
     ):
+        if model_status == "incompatible_streaming" and self._asr_backend == "sherpa":
+            try:
+                write_config(
+                    "sherpa",
+                    overwrite_existing=True,
+                    sherpa_model_name=DEFAULT_SHERPA_MODEL_NAME,
+                    sherpa_enable_parakeet_streaming=False,
+                )
+            except Exception:  # noqa: BLE001
+                log.exception("Wizard fallback to Zipformer streaming profile failed")
+            else:
+                self._sherpa_model_name = DEFAULT_SHERPA_MODEL_NAME
+                self._sherpa_enable_parakeet_streaming = False
+                sherpa_model_name = DEFAULT_SHERPA_MODEL_NAME
+                log.warning(
+                    "Wizard fallback applied: switched to Sherpa Zipformer streaming profile"
+                )
+
         if model_status == "downloaded":
             log.info("Wizard model setup: %s", model_message)
         elif model_status == "cancelled":
@@ -876,6 +894,10 @@ class WelcomeWizard(Gtk.Application):
             "skipped": "ℹ Model download skipped (backend downloads lazily).",
             "skipped_missing_deps": "⚠ Model not downloaded (missing dependencies). Run `shuvoice setup`.",
             "cancelled": "ℹ Model download cancelled. You can run `shuvoice model download` later.",
+            "incompatible_streaming": (
+                "⚠ Parakeet streaming is incompatible with this Sherpa runtime. "
+                "Switched to Zipformer streaming profile."
+            ),
             "error": "⚠ Model download failed. You can run `shuvoice model download` later.",
         }
         return messages.get(model_status, "")

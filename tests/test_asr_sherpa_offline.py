@@ -18,7 +18,8 @@ def _make_model_dir(tmp_path: Path) -> Path:
     model_dir = tmp_path / "sherpa-model"
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "tokens.txt").write_text("<blk>\na\n")
-    for name in ("encoder.onnx", "decoder.onnx", "joiner.onnx"):
+    (model_dir / "encoder.onnx").write_bytes(b"onnx-window_size")
+    for name in ("decoder.onnx", "joiner.onnx"):
         (model_dir / name).write_bytes(b"onnx")
     return model_dir
 
@@ -449,3 +450,31 @@ class TestSherpaOnlineRecognizerInit:
             backend._load_online_recognizer()
 
         assert captured_kwargs.get("model_type") == "nemo_transducer"
+
+    def test_online_parakeet_streaming_fails_fast_without_window_size_metadata(
+        self, tmp_path: Path
+    ):
+        model_dir = tmp_path / "sherpa-model"
+        model_dir.mkdir(parents=True, exist_ok=True)
+        (model_dir / "tokens.txt").write_text("<blk>\na\n")
+        (model_dir / "encoder.onnx").write_bytes(b"onnx")
+        for name in ("decoder.onnx", "joiner.onnx"):
+            (model_dir / name).write_bytes(b"onnx")
+
+        cfg = Config(
+            asr_backend="sherpa",
+            sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+            sherpa_model_dir=str(model_dir),
+            sherpa_decode_mode="streaming",
+            sherpa_enable_parakeet_streaming=True,
+        )
+        backend = create_backend("sherpa", cfg)
+        backend._model_files = {
+            "tokens": model_dir / "tokens.txt",
+            "encoder": model_dir / "encoder.onnx",
+            "decoder": model_dir / "decoder.onnx",
+            "joiner": model_dir / "joiner.onnx",
+        }
+
+        with pytest.raises(RuntimeError, match="window_size"):
+            backend._load_online_recognizer()

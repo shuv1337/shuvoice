@@ -67,6 +67,23 @@ class _CancelableBackend:
             raise RuntimeError("Model download cancelled")
 
 
+class _IncompatibleParakeetStreamingBackend(_DownloadCapableBackend):
+    @staticmethod
+    def _parakeet_streaming_model_compatible(_cfg: Config) -> tuple[bool, str]:
+        return False, "encoder metadata missing window_size"
+
+
+class _PostDownloadIncompatibleParakeetBackend(_DownloadCapableBackend):
+    _compat_calls = 0
+
+    @classmethod
+    def _parakeet_streaming_model_compatible(cls, _cfg: Config) -> tuple[bool, str]:
+        cls._compat_calls += 1
+        if cls._compat_calls == 1:
+            return True, "model directory not present yet"
+        return False, "encoder metadata missing window_size"
+
+
 def test_maybe_download_model_sherpa_uses_selected_model_name(monkeypatch):
     monkeypatch.setattr(
         "shuvoice.wizard.actions.Config.load",
@@ -135,6 +152,59 @@ def test_maybe_download_model_allows_parakeet_streaming_when_enabled(monkeypatch
     )
 
     assert status == "downloaded"
+
+
+def test_maybe_download_model_marks_incompatible_parakeet_streaming(monkeypatch):
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions.Config.load",
+        classmethod(
+            lambda cls: Config(
+                asr_backend="sherpa",
+                sherpa_decode_mode="streaming",
+                sherpa_enable_parakeet_streaming=True,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions.get_backend_class",
+        lambda _name: _IncompatibleParakeetStreamingBackend,
+    )
+
+    status, message = maybe_download_model(
+        "sherpa",
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+    )
+
+    assert status == "incompatible_streaming"
+    assert "Zipformer streaming profile" in message
+
+
+def test_maybe_download_model_marks_post_download_incompatibility(monkeypatch):
+    _PostDownloadIncompatibleParakeetBackend._compat_calls = 0
+    _PostDownloadIncompatibleParakeetBackend._last_kwargs = None
+
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions.Config.load",
+        classmethod(
+            lambda cls: Config(
+                asr_backend="sherpa",
+                sherpa_decode_mode="streaming",
+                sherpa_enable_parakeet_streaming=True,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions.get_backend_class",
+        lambda _name: _PostDownloadIncompatibleParakeetBackend,
+    )
+
+    status, _message = maybe_download_model(
+        "sherpa",
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+    )
+
+    assert status == "incompatible_streaming"
+    assert _PostDownloadIncompatibleParakeetBackend._last_kwargs is not None
 
 
 def test_maybe_download_model_skips_when_deps_missing(monkeypatch):

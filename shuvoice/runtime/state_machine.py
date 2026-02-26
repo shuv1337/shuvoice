@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import logging
+import time
 
 log = logging.getLogger(__name__)
+
+# Guard against spurious immediate re-starts caused by key bounce / compositor
+# ordering quirks on press+release keybinds (notably bare modifier keys).
+_PTT_REARM_GRACE_SEC = 0.35
 
 
 def on_recording_start(app) -> None:
@@ -15,6 +20,17 @@ def on_recording_start(app) -> None:
     if not app._asr_thread_alive:
         app._show_overlay_error("⚠ ASR thread crashed — restart ShuVoice")
         return
+
+    last_stop_monotonic = float(getattr(app, "_last_stop_monotonic", 0.0) or 0.0)
+    since_stop = time.monotonic() - last_stop_monotonic
+    if getattr(app, "_processing", None) is not None and app._processing.is_set():
+        if 0.0 <= since_stop < _PTT_REARM_GRACE_SEC:
+            log.debug(
+                "Ignoring start during processing rearm window (%.3fs < %.3fs)",
+                since_stop,
+                _PTT_REARM_GRACE_SEC,
+            )
+            return
 
     with app._asr_lock:
         if app._asr_disabled:
@@ -71,6 +87,7 @@ def on_recording_stop(app) -> None:
     log.info("Recording stopped")
     app._recording.clear()
     app._processing.set()
+    app._last_stop_monotonic = time.monotonic()
     metrics = getattr(app, "metrics", None)
     if metrics is not None:
         metrics.recording_stopped()
