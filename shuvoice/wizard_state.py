@@ -49,6 +49,7 @@ DEFAULT_KEYBIND_ID = "right_ctrl"
 def _is_parakeet_sherpa_model_name(model_name: str) -> bool:
     return "parakeet" in str(model_name).strip().lower()
 
+
 # Keybind presets for push-to-talk setup.
 # (id, display_label, hyprland_bind_key_spec, description)
 # hyprland_bind_key_spec is the "MODS, KEY" portion for bind/bindr lines.
@@ -592,9 +593,7 @@ def format_summary(
             model_label = chosen_model
 
         profile_label = "Instant (Parakeet)" if is_parakeet else "Streaming"
-        decode_label = (
-            "Offline instant (auto-enabled)" if is_parakeet else "Streaming (auto)"
-        )
+        decode_label = "Offline instant (auto-enabled)" if is_parakeet else "Streaming (auto)"
 
         lines.insert(1, f"Sherpa profile: {profile_label}")
         lines.insert(2, f"Sherpa model:   {model_label}")

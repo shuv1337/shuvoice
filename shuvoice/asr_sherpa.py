@@ -129,7 +129,11 @@ class SherpaBackend(ASRBackend):
         model_name = str(getattr(config, "sherpa_model_name", "")).strip().lower()
         model_dir = str(getattr(config, "sherpa_model_dir", "") or "").strip().lower()
         candidates = [model_name, model_dir]
-        return any(marker in candidate for candidate in candidates for marker in cls._PARAKEET_MODEL_MARKERS)
+        return any(
+            marker in candidate
+            for candidate in candidates
+            for marker in cls._PARAKEET_MODEL_MARKERS
+        )
 
     @staticmethod
     def _cuda_provider_available() -> tuple[bool, str]:
