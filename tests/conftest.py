@@ -21,6 +21,7 @@ try:
     import gi
 
     gi.require_version("Gtk", "4.0")
+    gi.require_version("Gtk4LayerShell", "1.0")
 except (ImportError, ValueError):
     # Mock gi structure
     mock_gi = MagicMock()
@@ -35,6 +36,7 @@ except (ImportError, ValueError):
     mock_glib = MagicMock()
     mock_gdk = MagicMock()
     mock_layershell = MagicMock()
+    mock_glib.SOURCE_REMOVE = 0
 
     # Mock properties to avoid AttributeErrors
     mock_gtk.Application = MagicMock

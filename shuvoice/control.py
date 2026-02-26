@@ -166,6 +166,7 @@ class ControlServer:
                         log.exception("Control socket accept failed")
                     break
 
+                conn.settimeout(1.0)
                 with conn:
                     response = "ERROR invalid request"
                     try:
