@@ -50,16 +50,24 @@ def _is_pathological_repetition(text: str) -> bool:
 
 
 def _stitch_by_word_overlap(previous: str, candidate: str) -> str | None:
-    prev_words = previous.split()
     new_words = candidate.split()
-    if not prev_words or not new_words:
+    if not new_words:
         return None
 
+    # Optimization: avoid splitting entire previous text if it's long.
+    limit = len(new_words)
+    prev_parts = previous.rsplit(None, limit)
+    if not prev_parts:
+        return None
+
+    # rsplit returns (up to) limit+1 items; if > limit, the first is the prefix
+    prev_tail_words = prev_parts[1:] if len(prev_parts) > limit else prev_parts
+
     min_words = max(1, MIN_OVERLAP_WORDS)
-    max_words = min(len(prev_words), len(new_words))
+    max_words = min(len(prev_tail_words), len(new_words))
 
     # Optimization: normalize relevant word ranges once (O(M) instead of O(M^2))
-    prev_tail_norm = [_normalize_word(word) for word in prev_words[-max_words:]]
+    prev_tail_norm = [_normalize_word(word) for word in prev_tail_words[-max_words:]]
     new_head_norm = [_normalize_word(word) for word in new_words[:max_words]]
 
     for overlap in range(max_words, min_words - 1, -1):
