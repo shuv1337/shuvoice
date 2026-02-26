@@ -469,6 +469,23 @@ rm -f ~/.config/systemd/user/shuvoice-waybar.service
 systemctl --user daemon-reload
 ```
 
+If the ShuVoice icon still appears in Waybar, it is usually configured as a
+Waybar module (not a systemd service). Remove/disable the module and restart
+Waybar:
+
+```bash
+# Find ShuVoice module references
+rg -n "custom/shuvoice|shuvoice-waybar\.sh|shuvoice-waybar" ~/.config/waybar -S
+
+# Edit ~/.config/waybar/config.jsonc:
+#   1) remove "custom/shuvoice" from modules-left/center/right
+#   2) remove the entire "custom/shuvoice": { ... } block
+
+# Restart Waybar process
+pkill -x waybar || true
+nohup waybar >/tmp/waybar-restart.log 2>&1 &
+```
+
 ### 2) Remove local model caches (ShuVoice + relevant HF repos)
 
 ```bash
