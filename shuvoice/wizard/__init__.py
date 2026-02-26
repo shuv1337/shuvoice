@@ -27,6 +27,7 @@ from gi.repository import Gtk4LayerShell as LayerShell
 from ..wizard_state import (
     ASR_BACKENDS,
     KEYBIND_PRESETS,
+    DEFAULT_KEYBIND_ID,
     DEFAULT_SHERPA_MODEL_NAME,
     PARAKEET_TDT_V3_INT8_MODEL_NAME,
 )
@@ -64,7 +65,7 @@ class WelcomeWizard(Gtk.Application):
         self._force_reconfigure = force_reconfigure
         self._asr_backend = "sherpa"
         self._sherpa_model_name = DEFAULT_SHERPA_MODEL_NAME
-        self._keybind = "insert"
+        self._keybind = DEFAULT_KEYBIND_ID
         self._finish_in_progress = False
         self._download_pulse_source_id: int | None = None
         self._download_cancel_event = threading.Event()
@@ -191,6 +192,18 @@ class WelcomeWizard(Gtk.Application):
         self._sherpa_profile_title.set_margin_top(8)
         page.append(self._sherpa_profile_title)
 
+        self._sherpa_profile_help = Gtk.Label(
+            label=(
+                "Streaming = live partial updates while holding push-to-talk.\n"
+                "Instant = one final transcript when you release push-to-talk."
+            )
+        )
+        self._sherpa_profile_help.add_css_class("wizard-desc")
+        self._sherpa_profile_help.set_halign(Gtk.Align.START)
+        self._sherpa_profile_help.set_justify(Gtk.Justification.LEFT)
+        self._sherpa_profile_help.set_margin_bottom(4)
+        page.append(self._sherpa_profile_help)
+
         self._sherpa_streaming_radio = Gtk.CheckButton(
             label="Streaming (Zipformer Kroko model)"
         )
@@ -202,8 +215,8 @@ class WelcomeWizard(Gtk.Application):
 
         self._sherpa_streaming_desc = Gtk.Label(
             label=(
-                "Designed for streaming updates while holding push-to-talk. "
-                "Best for live incremental transcripts."
+                "Shows incremental partial text while you hold the key. "
+                "Best when you want live feedback as you speak."
             )
         )
         self._sherpa_streaming_desc.add_css_class("wizard-radio-desc")
@@ -222,7 +235,7 @@ class WelcomeWizard(Gtk.Application):
 
         self._sherpa_parakeet_desc = Gtk.Label(
             label=(
-                "Single final transcript on key release (instant profile). "
+                "No partials; emits one final transcript on key release. "
                 "Wizard auto-enables instant_mode + sherpa_decode_mode=offline_instant."
             )
         )
@@ -252,7 +265,7 @@ class WelcomeWizard(Gtk.Application):
 
         sub = Gtk.Label(
             label="ShuVoice uses Hyprland bind/bindr for push-to-talk.\n"
-            "Hold the key to record, release to stop."
+            "Hold the key to record, release to stop. Default: Right Control."
         )
         sub.add_css_class("wizard-subtitle")
         sub.set_justify(Gtk.Justification.CENTER)
@@ -269,7 +282,7 @@ class WelcomeWizard(Gtk.Application):
             else:
                 radio.set_group(group)
 
-            if kb_id == "insert":
+            if kb_id == DEFAULT_KEYBIND_ID:
                 radio.set_active(True)
 
             radio.connect("toggled", self._on_keybind_toggled, kb_id)
@@ -409,12 +422,14 @@ class WelcomeWizard(Gtk.Application):
 
     def _sync_sherpa_model_controls(self):
         title = getattr(self, "_sherpa_profile_title", None)
+        help_text = getattr(self, "_sherpa_profile_help", None)
         streaming_radio = getattr(self, "_sherpa_streaming_radio", None)
         streaming_desc = getattr(self, "_sherpa_streaming_desc", None)
         parakeet_radio = getattr(self, "_sherpa_parakeet_radio", None)
         parakeet_desc = getattr(self, "_sherpa_parakeet_desc", None)
         if (
             title is None
+            or help_text is None
             or streaming_radio is None
             or streaming_desc is None
             or parakeet_radio is None
@@ -423,7 +438,14 @@ class WelcomeWizard(Gtk.Application):
             return
 
         is_sherpa = self._asr_backend == "sherpa"
-        for widget in (title, streaming_radio, streaming_desc, parakeet_radio, parakeet_desc):
+        for widget in (
+            title,
+            help_text,
+            streaming_radio,
+            streaming_desc,
+            parakeet_radio,
+            parakeet_desc,
+        ):
             widget.set_visible(is_sherpa)
 
         streaming_radio.set_sensitive(is_sherpa)

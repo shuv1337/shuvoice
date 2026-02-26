@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from shuvoice.wizard_state import (
     ASR_BACKENDS,
+    DEFAULT_KEYBIND_ID,
     DEFAULT_SHERPA_MODEL_NAME,
     KEYBIND_PRESETS,
     PARAKEET_TDT_V3_INT8_MODEL_NAME,
@@ -197,10 +198,11 @@ output_mode = \"final_only\"
 
 
 def test_format_summary_contains_backend_and_keybind():
-    """format_summary includes backend name and keybind label."""
+    """format_summary includes backend name and default keybind label."""
+    assert DEFAULT_KEYBIND_ID == "right_ctrl"
     result = format_summary("sherpa")
     assert "Sherpa-ONNX" in result
-    assert "Insert" in result
+    assert "Right Control" in result
     assert "hyprland.conf" in result
 
 

@@ -43,6 +43,7 @@ ASR_BACKENDS = [
 
 DEFAULT_SHERPA_MODEL_NAME = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
 PARAKEET_TDT_V3_INT8_MODEL_NAME = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+DEFAULT_KEYBIND_ID = "right_ctrl"
 
 
 def _is_parakeet_sherpa_model_name(model_name: str) -> bool:
@@ -52,13 +53,13 @@ def _is_parakeet_sherpa_model_name(model_name: str) -> bool:
 # (id, display_label, hyprland_bind_key_spec, description)
 # hyprland_bind_key_spec is the "MODS, KEY" portion for bind/bindr lines.
 KEYBIND_PRESETS = [
-    ("insert", "Insert", ", Insert", "Usually unused and easy to dedicate."),
     (
         "right_ctrl",
         "Right Control",
         ", Control_R",
-        "Comfortable hold-to-talk key on many keyboards.",
+        "Recommended default for hold-to-talk on most keyboards.",
     ),
+    ("insert", "Insert", ", Insert", "Usually unused and easy to dedicate."),
     ("f9", "F9", ", F9", "Simple single-key push-to-talk."),
     (
         "super_v",
@@ -559,7 +560,7 @@ def write_config(
 
 def format_summary(
     asr_backend: str,
-    keybind_id: str = "insert",
+    keybind_id: str = DEFAULT_KEYBIND_ID,
     *,
     auto_add_keybind: bool = True,
     sherpa_model_name: str | None = None,
