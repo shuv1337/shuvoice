@@ -206,12 +206,14 @@ def test_format_summary_contains_backend_and_keybind():
 
 def test_format_summary_sherpa_default_model_shows_streaming_mode():
     result = format_summary("sherpa", sherpa_model_name=DEFAULT_SHERPA_MODEL_NAME)
+    assert "Sherpa profile: Streaming" in result
     assert "Sherpa model:   Zipformer Kroko (default)" in result
     assert "Sherpa decode:  Streaming (auto)" in result
 
 
 def test_format_summary_sherpa_parakeet_model_label():
     result = format_summary("sherpa", sherpa_model_name=PARAKEET_TDT_V3_INT8_MODEL_NAME)
+    assert "Sherpa profile: Instant (Parakeet)" in result
     assert "Sherpa model:   Parakeet TDT v3 (int8)" in result
     assert "Sherpa decode:  Offline instant (auto-enabled)" in result
 

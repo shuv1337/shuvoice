@@ -27,7 +27,7 @@ ASR_BACKENDS = [
     (
         "sherpa",
         "Sherpa-ONNX",
-        "Fast ONNX-based streaming ASR.  Works on CPU — no GPU needed.",
+        "Fast ONNX ASR with profiles for Streaming (Zipformer) or Instant (Parakeet).",
     ),
     (
         "nemo",
@@ -581,18 +581,23 @@ def format_summary(
 
     if asr_backend == "sherpa":
         chosen_model = (sherpa_model_name or DEFAULT_SHERPA_MODEL_NAME).strip()
+        is_parakeet = _is_parakeet_sherpa_model_name(chosen_model)
+
         if chosen_model == PARAKEET_TDT_V3_INT8_MODEL_NAME:
             model_label = "Parakeet TDT v3 (int8)"
         elif chosen_model == DEFAULT_SHERPA_MODEL_NAME:
             model_label = "Zipformer Kroko (default)"
         else:
             model_label = chosen_model
-        lines.insert(1, f"Sherpa model:   {model_label}")
 
-        if _is_parakeet_sherpa_model_name(chosen_model):
-            lines.insert(2, "Sherpa decode:  Offline instant (auto-enabled)")
-        else:
-            lines.insert(2, "Sherpa decode:  Streaming (auto)")
+        profile_label = "Instant (Parakeet)" if is_parakeet else "Streaming"
+        decode_label = (
+            "Offline instant (auto-enabled)" if is_parakeet else "Streaming (auto)"
+        )
+
+        lines.insert(1, f"Sherpa profile: {profile_label}")
+        lines.insert(2, f"Sherpa model:   {model_label}")
+        lines.insert(3, f"Sherpa decode:  {decode_label}")
 
     if hypr_key:
         bind_lines = format_hyprland_bind_for_keybind(

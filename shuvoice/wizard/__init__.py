@@ -185,24 +185,51 @@ class WelcomeWizard(Gtk.Application):
             desc_label.set_halign(Gtk.Align.START)
             page.append(desc_label)
 
-        self._sherpa_parakeet_toggle = Gtk.CheckButton(
-            label="For Sherpa: use Parakeet TDT v3 (int8) model"
+        self._sherpa_profile_title = Gtk.Label(label="Sherpa profile")
+        self._sherpa_profile_title.add_css_class("wizard-subtitle")
+        self._sherpa_profile_title.set_halign(Gtk.Align.START)
+        self._sherpa_profile_title.set_margin_top(8)
+        page.append(self._sherpa_profile_title)
+
+        self._sherpa_streaming_radio = Gtk.CheckButton(
+            label="Streaming (Zipformer Kroko model)"
         )
-        self._sherpa_parakeet_toggle.add_css_class("wizard-radio")
-        self._sherpa_parakeet_toggle.set_active(False)
-        self._sherpa_parakeet_toggle.connect("toggled", self._on_sherpa_model_toggled)
-        page.append(self._sherpa_parakeet_toggle)
+        self._sherpa_streaming_radio.add_css_class("wizard-radio")
+        self._sherpa_streaming_radio.connect(
+            "toggled", self._on_sherpa_profile_toggled, DEFAULT_SHERPA_MODEL_NAME
+        )
+        page.append(self._sherpa_streaming_radio)
+
+        self._sherpa_streaming_desc = Gtk.Label(
+            label=(
+                "Designed for streaming updates while holding push-to-talk. "
+                "Best for live incremental transcripts."
+            )
+        )
+        self._sherpa_streaming_desc.add_css_class("wizard-radio-desc")
+        self._sherpa_streaming_desc.set_halign(Gtk.Align.START)
+        page.append(self._sherpa_streaming_desc)
+
+        self._sherpa_parakeet_radio = Gtk.CheckButton(
+            label="Instant (Parakeet TDT v3 int8 model)"
+        )
+        self._sherpa_parakeet_radio.add_css_class("wizard-radio")
+        self._sherpa_parakeet_radio.set_group(self._sherpa_streaming_radio)
+        self._sherpa_parakeet_radio.connect(
+            "toggled", self._on_sherpa_profile_toggled, PARAKEET_TDT_V3_INT8_MODEL_NAME
+        )
+        page.append(self._sherpa_parakeet_radio)
 
         self._sherpa_parakeet_desc = Gtk.Label(
             label=(
-                "Uses sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8. "
-                "Wizard auto-enables Sherpa offline instant decode mode for this "
-                "selection (single final transcript on key release)."
+                "Single final transcript on key release (instant profile). "
+                "Wizard auto-enables instant_mode + sherpa_decode_mode=offline_instant."
             )
         )
         self._sherpa_parakeet_desc.add_css_class("wizard-radio-desc")
         self._sherpa_parakeet_desc.set_halign(Gtk.Align.START)
         page.append(self._sherpa_parakeet_desc)
+
         self._sync_sherpa_model_controls()
 
         nav = self._make_nav_row(
@@ -376,28 +403,45 @@ class WelcomeWizard(Gtk.Application):
             self._asr_backend = backend_id
             self._sync_sherpa_model_controls()
 
-    def _on_sherpa_model_toggled(self, button: Gtk.CheckButton):
-        self._sherpa_model_name = (
-            PARAKEET_TDT_V3_INT8_MODEL_NAME if button.get_active() else DEFAULT_SHERPA_MODEL_NAME
-        )
+    def _on_sherpa_profile_toggled(self, button: Gtk.CheckButton, model_name: str):
+        if button.get_active():
+            self._sherpa_model_name = model_name
 
     def _sync_sherpa_model_controls(self):
-        toggle = getattr(self, "_sherpa_parakeet_toggle", None)
-        desc = getattr(self, "_sherpa_parakeet_desc", None)
-        if toggle is None or desc is None:
+        title = getattr(self, "_sherpa_profile_title", None)
+        streaming_radio = getattr(self, "_sherpa_streaming_radio", None)
+        streaming_desc = getattr(self, "_sherpa_streaming_desc", None)
+        parakeet_radio = getattr(self, "_sherpa_parakeet_radio", None)
+        parakeet_desc = getattr(self, "_sherpa_parakeet_desc", None)
+        if (
+            title is None
+            or streaming_radio is None
+            or streaming_desc is None
+            or parakeet_radio is None
+            or parakeet_desc is None
+        ):
             return
 
         is_sherpa = self._asr_backend == "sherpa"
-        toggle.set_sensitive(is_sherpa)
-        toggle.set_visible(is_sherpa)
-        desc.set_visible(is_sherpa)
+        for widget in (title, streaming_radio, streaming_desc, parakeet_radio, parakeet_desc):
+            widget.set_visible(is_sherpa)
+
+        streaming_radio.set_sensitive(is_sherpa)
+        parakeet_radio.set_sensitive(is_sherpa)
 
         if not is_sherpa:
             self._sherpa_model_name = DEFAULT_SHERPA_MODEL_NAME
             return
 
+        if self._sherpa_model_name == PARAKEET_TDT_V3_INT8_MODEL_NAME:
+            parakeet_radio.set_active(True)
+        else:
+            streaming_radio.set_active(True)
+
         self._sherpa_model_name = (
-            PARAKEET_TDT_V3_INT8_MODEL_NAME if toggle.get_active() else DEFAULT_SHERPA_MODEL_NAME
+            PARAKEET_TDT_V3_INT8_MODEL_NAME
+            if parakeet_radio.get_active()
+            else DEFAULT_SHERPA_MODEL_NAME
         )
 
     def _on_keybind_toggled(self, button: Gtk.CheckButton, kb_id: str):
