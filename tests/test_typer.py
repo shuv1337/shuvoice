@@ -105,7 +105,9 @@ def test_commit_final_auto_mode_prefers_direct_when_watchers_detected(monkeypatc
 
     monkeypatch.setattr(typer, "_detect_clipboard_watchers", lambda: True)
     monkeypatch.setattr(typer, "update_partial", lambda text: events.append(("update", text)))
-    monkeypatch.setattr(typer, "_capture_clipboard", lambda: events.append("capture") or (True, "x"))
+    monkeypatch.setattr(
+        typer, "_capture_clipboard", lambda: events.append("capture") or (True, "x")
+    )
     monkeypatch.setattr(typer, "_backspace_partial", lambda: events.append("backspace") or True)
     monkeypatch.setattr(
         typer,
