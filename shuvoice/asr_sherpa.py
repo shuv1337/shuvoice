@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import math
 import shutil
 import tarfile
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -199,6 +201,34 @@ class SherpaBackend(ASRBackend):
 
         return None
 
+    @staticmethod
+    def _format_bytes(num_bytes: int | float) -> str:
+        value = max(0.0, float(num_bytes))
+        units = ("B", "KiB", "MiB", "GiB", "TiB")
+        unit_index = 0
+
+        while value >= 1024.0 and unit_index < len(units) - 1:
+            value /= 1024.0
+            unit_index += 1
+
+        unit = units[unit_index]
+        if unit == "B":
+            return f"{int(value)} {unit}"
+        return f"{value:.1f} {unit}"
+
+    @staticmethod
+    def _format_eta(seconds: float | None) -> str:
+        if seconds is None or not math.isfinite(seconds):
+            return "--:--"
+
+        clamped = max(0, int(round(seconds)))
+        minutes, sec = divmod(clamped, 60)
+        hours, minutes = divmod(minutes, 60)
+
+        if hours > 0:
+            return f"{hours:d}:{minutes:02d}:{sec:02d}"
+        return f"{minutes:02d}:{sec:02d}"
+
     @classmethod
     def download_model(
         cls,
@@ -255,6 +285,7 @@ class SherpaBackend(ASRBackend):
 
                 _emit_progress(0.0, f"Downloading {resolved_model_name}")
                 last_fraction = -1.0
+                download_started_monotonic = time.monotonic()
 
                 def _reporthook(block_count: int, block_size: int, total_size: int) -> None:
                     nonlocal last_fraction
@@ -272,7 +303,23 @@ class SherpaBackend(ASRBackend):
                     if ui_fraction >= 0.9 or ui_fraction - last_fraction >= 0.01:
                         last_fraction = ui_fraction
                         percent = int(archive_fraction * 100)
-                        _emit_progress(ui_fraction, f"Downloading model archive… {percent}%")
+
+                        elapsed = max(0.001, time.monotonic() - download_started_monotonic)
+                        remaining_bytes = max(0, total_size - downloaded)
+                        bytes_per_second = downloaded / elapsed
+                        eta_seconds = (
+                            remaining_bytes / bytes_per_second if bytes_per_second > 0 else None
+                        )
+
+                        downloaded_text = cls._format_bytes(downloaded)
+                        total_text = cls._format_bytes(total_size)
+                        eta_text = cls._format_eta(eta_seconds)
+
+                        _emit_progress(
+                            ui_fraction,
+                            "Downloading model archive… "
+                            f"{percent}% ({downloaded_text}/{total_text}, ETA {eta_text})",
+                        )
 
                 try:
                     urllib.request.urlretrieve(archive_url, archive_path, reporthook=_reporthook)

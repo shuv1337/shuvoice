@@ -271,6 +271,63 @@ def test_sherpa_startup_warnings_downgrade_cuda_when_runtime_is_cpu_only(monkeyp
     assert any("Falling back to sherpa_provider='cpu'" in warning for warning in warnings)
 
 
+def test_sherpa_download_format_helpers():
+    sherpa_cls = get_backend_class("sherpa")
+
+    assert sherpa_cls._format_bytes(0) == "0 B"
+    assert sherpa_cls._format_bytes(1536) == "1.5 KiB"
+    assert sherpa_cls._format_bytes(3 * 1024 * 1024) == "3.0 MiB"
+
+    assert sherpa_cls._format_eta(None) == "--:--"
+    assert sherpa_cls._format_eta(65.0) == "01:05"
+    assert sherpa_cls._format_eta(3661.0) == "1:01:01"
+
+
+def test_sherpa_download_progress_includes_bytes_and_eta(monkeypatch, tmp_path: Path):
+    sherpa_cls = get_backend_class("sherpa")
+
+    source_dir = tmp_path / "source-model"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    (source_dir / "tokens.txt").write_text("<blk>\na\n")
+    for name in ("encoder.onnx", "decoder.onnx", "joiner.onnx"):
+        (source_dir / name).write_bytes(b"onnx")
+
+    monkeypatch.setattr(
+        "shuvoice.asr_sherpa.urllib.request.urlretrieve",
+        lambda _url, filename, reporthook=None: (
+            reporthook and reporthook(1, 1024 * 1024, 10 * 1024 * 1024),
+            reporthook and reporthook(5, 1024 * 1024, 10 * 1024 * 1024),
+            reporthook and reporthook(10, 1024 * 1024, 10 * 1024 * 1024),
+            Path(filename).write_bytes(b"archive"),
+        ),
+    )
+    monkeypatch.setattr(
+        sherpa_cls,
+        "_safe_extract_tar",
+        staticmethod(lambda _archive_path, _target_dir: None),
+    )
+    monkeypatch.setattr(
+        sherpa_cls,
+        "_find_extracted_model_dir",
+        classmethod(lambda cls, _root: source_dir),
+    )
+
+    timeline = iter([0.0, 1.0, 2.0, 3.0, 4.0])
+    monkeypatch.setattr("shuvoice.asr_sherpa.time.monotonic", lambda: next(timeline, 4.0))
+
+    events: list[tuple[float | None, str]] = []
+    target_dir = tmp_path / "downloaded-model"
+    sherpa_cls.download_model(
+        model_name="fake-model",
+        model_dir=str(target_dir),
+        progress_callback=lambda fraction, text: events.append((fraction, text)),
+    )
+
+    download_messages = [text for _fraction, text in events if "Downloading model archive" in text]
+    assert download_messages
+    assert any("ETA" in text and "/" in text for text in download_messages)
+
+
 def test_sherpa_load_requires_transducer_artifacts(tmp_path: Path):
     (tmp_path / "tokens.txt").write_text("<blk>\na\n")
 
