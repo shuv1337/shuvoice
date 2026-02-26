@@ -186,6 +186,11 @@ class WelcomeWizard(Gtk.Application):
             desc_label.set_halign(Gtk.Align.START)
             page.append(desc_label)
 
+            radio.update_relation(
+                [Gtk.AccessibleRelation.DESCRIBED_BY],
+                [desc_label],
+            )
+
         self._sherpa_profile_title = Gtk.Label(label="Sherpa profile")
         self._sherpa_profile_title.add_css_class("wizard-subtitle")
         self._sherpa_profile_title.set_halign(Gtk.Align.START)
@@ -223,6 +228,11 @@ class WelcomeWizard(Gtk.Application):
         self._sherpa_streaming_desc.set_halign(Gtk.Align.START)
         page.append(self._sherpa_streaming_desc)
 
+        self._sherpa_streaming_radio.update_relation(
+            [Gtk.AccessibleRelation.DESCRIBED_BY],
+            [self._sherpa_streaming_desc],
+        )
+
         self._sherpa_parakeet_radio = Gtk.CheckButton(
             label="Instant (Parakeet TDT v3 int8 model)"
         )
@@ -242,6 +252,11 @@ class WelcomeWizard(Gtk.Application):
         self._sherpa_parakeet_desc.add_css_class("wizard-radio-desc")
         self._sherpa_parakeet_desc.set_halign(Gtk.Align.START)
         page.append(self._sherpa_parakeet_desc)
+
+        self._sherpa_parakeet_radio.update_relation(
+            [Gtk.AccessibleRelation.DESCRIBED_BY],
+            [self._sherpa_parakeet_desc],
+        )
 
         self._sync_sherpa_model_controls()
 
@@ -293,6 +308,11 @@ class WelcomeWizard(Gtk.Application):
             desc_label.add_css_class("wizard-radio-desc")
             desc_label.set_halign(Gtk.Align.START)
             page.append(desc_label)
+
+            radio.update_relation(
+                [Gtk.AccessibleRelation.DESCRIBED_BY],
+                [desc_label],
+            )
 
         self._auto_add_last_non_custom = True
         self._auto_add_keybind = Gtk.CheckButton(

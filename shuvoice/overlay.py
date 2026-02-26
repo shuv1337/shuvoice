@@ -121,6 +121,7 @@ class CaptionOverlay:
         box.append(self._icon)
 
         self._label = Gtk.Label(label="")
+        self._label.set_accessible_role(Gtk.AccessibleRole.STATUS)
         self._label.add_css_class("caption-label")
         self._label.set_wrap(True)
         self._label.set_max_width_chars(60)
@@ -179,6 +180,7 @@ class CaptionOverlay:
     def _do_set_text(self, text: str):
         if self._label:
             self._label.set_text(text)
+            self._label.update_property([Gtk.AccessibleProperty.LABEL], [text])
             if text and not self._visible:
                 self._do_show()
         return GLib.SOURCE_REMOVE
