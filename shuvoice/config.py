@@ -47,6 +47,7 @@ CONFIG_SECTION_FIELDS: dict[str, tuple[str, ...]] = {
         "sherpa_model_name",
         "sherpa_model_dir",
         "sherpa_decode_mode",
+        "sherpa_enable_parakeet_streaming",
         "sherpa_provider",
         "sherpa_num_threads",
         "sherpa_chunk_ms",
@@ -184,6 +185,7 @@ class Config:
     sherpa_model_name: str = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
     sherpa_model_dir: str | None = None
     sherpa_decode_mode: str = "auto"  # auto | streaming | offline_instant
+    sherpa_enable_parakeet_streaming: bool = False
     sherpa_provider: str = "cpu"  # cpu | cuda
     sherpa_num_threads: int = 2
     sherpa_chunk_ms: int = 100
@@ -269,6 +271,9 @@ class Config:
             raise ValueError(
                 "sherpa_decode_mode must be one of: auto, streaming, offline_instant"
             )
+
+        if not isinstance(self.sherpa_enable_parakeet_streaming, bool):
+            raise ValueError("sherpa_enable_parakeet_streaming must be true or false")
 
         self.sherpa_provider = str(self.sherpa_provider).strip().lower()
         if self.sherpa_provider not in {"cpu", "cuda"}:

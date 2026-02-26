@@ -89,18 +89,25 @@ def maybe_download_model(
                     f"'{cfg.sherpa_provider}'."
                 )
 
-            if (
-                "parakeet" in cfg.sherpa_model_name.lower()
-                and cfg.resolved_sherpa_decode_mode != "offline_instant"
-            ):
-                _emit(1.0, "Parakeet requires Sherpa offline instant mode")
-                return (
-                    "error",
-                    _with_provider_note(
-                        "Parakeet model selection requires sherpa_decode_mode='offline_instant' "
-                        "(or instant_mode=true with sherpa_decode_mode='auto')."
-                    ),
+            if "parakeet" in cfg.sherpa_model_name.lower():
+                allow_parakeet_streaming = bool(
+                    getattr(cfg, "sherpa_enable_parakeet_streaming", False)
                 )
+                if (
+                    cfg.resolved_sherpa_decode_mode != "offline_instant"
+                    and not allow_parakeet_streaming
+                ):
+                    _emit(1.0, "Parakeet streaming is disabled by default")
+                    return (
+                        "error",
+                        _with_provider_note(
+                            "Parakeet model selection requires sherpa_decode_mode='offline_instant' "
+                            "(or instant_mode=true with sherpa_decode_mode='auto'). "
+                            "To use Parakeet in streaming mode, set "
+                            "sherpa_enable_parakeet_streaming=true and "
+                            "sherpa_decode_mode='streaming'."
+                        ),
+                    )
     except Exception as exc:  # noqa: BLE001
         _emit(1.0, "Model download setup failed")
         return "error", f"Could not prepare model download: {exc}"
@@ -163,6 +170,7 @@ def finish_setup(
     auto_add_keybind: bool,
     overwrite_existing: bool,
     sherpa_model_name: str | None = None,
+    sherpa_enable_parakeet_streaming: bool = False,
     auto_download_model: bool = True,
 ) -> tuple[str, str, str, str]:
     """Persist wizard selections and optionally configure keybind/model download."""
@@ -170,6 +178,7 @@ def finish_setup(
         asr_backend,
         overwrite_existing=overwrite_existing,
         sherpa_model_name=sherpa_model_name,
+        sherpa_enable_parakeet_streaming=sherpa_enable_parakeet_streaming,
     )
 
     keybind_status = "not_attempted"

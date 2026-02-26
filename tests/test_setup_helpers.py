@@ -39,3 +39,21 @@ def test_model_status_mentions_configured_sherpa_model_name_when_missing(monkeyp
     status = model_status_for_backend(cfg)
 
     assert "parakeet-tdt-0.6b-v3-int8" in status
+
+
+def test_model_status_mentions_parakeet_streaming_enabled(monkeypatch):
+    cfg = Config(
+        asr_backend="sherpa",
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+        sherpa_decode_mode="streaming",
+        sherpa_enable_parakeet_streaming=True,
+    )
+
+    monkeypatch.setattr(
+        "shuvoice.setup_helpers._is_complete_sherpa_model_dir",
+        lambda _path: False,
+    )
+
+    status = model_status_for_backend(cfg)
+
+    assert "Parakeet streaming mode enabled" in status

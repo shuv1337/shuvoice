@@ -42,7 +42,7 @@ Model locations in this repo/runtime:
 
 > Note: Sherpa CUDA requires a source-built `sherpa-onnx` GPU wheel plus CUDA 12 compatibility libs on this host stack.
 >
-> Note: Parakeet TDT (`sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8`) is supported via Sherpa offline instant mode (`instant_mode=true` + `sherpa_decode_mode="offline_instant"`, or `sherpa_decode_mode="auto"` with instant mode on). Parakeet + streaming mode remains blocked by startup guards.
+> Note: Parakeet TDT (`sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8`) is supported via Sherpa offline instant mode (`instant_mode=true` + `sherpa_decode_mode="offline_instant"`, or `sherpa_decode_mode="auto"` with instant mode on). Streaming Parakeet is opt-in: set `sherpa_decode_mode="streaming"` plus `sherpa_enable_parakeet_streaming=true`.
 
 ## Backend accuracy/performance snapshot (manual regression suite)
 
@@ -374,10 +374,13 @@ The wizard can optionally auto-add Hyprland push-to-talk binds when the
 selected key is not already used (default presets include **Insert** and
 **Right Control**).
 
-When Sherpa is selected, the wizard also lets you choose the model variant
-(default Zipformer or Parakeet TDT v3 int8), shows download progress in the
-finish screen (with a cancel button), and attempts to auto-download the
-selected model at finish.
+When Sherpa is selected, the wizard lets you choose between:
+- Streaming (Zipformer)
+- Streaming (Parakeet, explicit override)
+- Instant (Parakeet)
+
+It also shows download progress in the finish screen (with a cancel button),
+and attempts to auto-download the selected model at finish.
 
 Wizard screens:
 
@@ -408,6 +411,7 @@ Example config:
 - `examples/config-sherpa-cuda.toml`
 - `examples/config-sherpa-cpu.toml`
 - `examples/config-sherpa-parakeet-offline.toml`
+- `examples/config-sherpa-parakeet-streaming.toml`
 - `examples/config-moonshine-cpu.toml`
 - `examples/waybar-custom-shuvoice.jsonc` (Waybar custom module snippet)
 - `examples/waybar-custom-shuvoice-wrapper.jsonc` (wrapper-script variant)
@@ -435,7 +439,11 @@ Resolution rules:
 - `auto`: resolves to `offline_instant` for Parakeet model names when
   `instant_mode = true`; otherwise resolves to `streaming`.
 
-Parakeet TDT v3 requires offline instant mode:
+Parakeet safety gate:
+- `sherpa_enable_parakeet_streaming = false` (default): block Parakeet + streaming.
+- `sherpa_enable_parakeet_streaming = true`: allow Parakeet + streaming.
+
+Parakeet TDT v3 stable/default path (offline instant):
 
 ```toml
 [asr]
@@ -445,8 +453,18 @@ instant_mode = true
 sherpa_decode_mode = "offline_instant"
 ```
 
-If Parakeet is selected with streaming decode mode, startup guards block launch
-with an actionable error and service exit code 78 (to avoid restart loops).
+Parakeet streaming is available as an explicit opt-in safety override:
+
+```toml
+[asr]
+asr_backend = "sherpa"
+sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+sherpa_decode_mode = "streaming"
+sherpa_enable_parakeet_streaming = true
+```
+
+Without `sherpa_enable_parakeet_streaming = true`, startup guards still block
+Parakeet + streaming combinations with an actionable error (exit code 78).
 
 Optional: set `instant_mode = true` under `[asr]` for low-latency tuning.
 This applies backend-specific behavior:
@@ -586,9 +604,10 @@ ShuVoice is released under the MIT License. See `LICENSE`.
     `tokens.txt` and ONNX files for encoder/decoder/joiner.
   - If `sherpa_model_dir` is unset, ShuVoice will auto-download `sherpa_model_name`.
 - `Parakeet requires offline instant mode` startup error
-  - Use `sherpa_decode_mode = "offline_instant"`, or set `instant_mode = true` with
-    `sherpa_decode_mode = "auto"`.
-  - Do not run Parakeet with `sherpa_decode_mode = "streaming"`; startup guard blocks this.
+  - Stable path: use `sherpa_decode_mode = "offline_instant"`, or set
+    `instant_mode = true` with `sherpa_decode_mode = "auto"`.
+  - Streaming override: set both `sherpa_decode_mode = "streaming"` and
+    `sherpa_enable_parakeet_streaming = true`.
 - `sherpa_provider='cuda' requested, but runtime does not expose CUDAExecutionProvider`
   - Install a CUDA-enabled sherpa-onnx runtime, or run with `sherpa_provider = "cpu"`.
   - `setup`/`preflight` now report requested vs effective provider and decode mode.

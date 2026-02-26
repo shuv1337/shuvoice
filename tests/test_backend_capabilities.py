@@ -73,6 +73,20 @@ def test_sherpa_startup_guard_matrix_for_parakeet(
         assert errors == []
 
 
+def test_sherpa_startup_guard_allows_parakeet_streaming_when_enabled(tmp_path: Path):
+    model_dir = _make_sherpa_model_dir(tmp_path)
+    cfg = Config(
+        asr_backend="sherpa",
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+        sherpa_model_dir=str(model_dir),
+        sherpa_decode_mode="streaming",
+        sherpa_enable_parakeet_streaming=True,
+    )
+
+    sherpa_cls = get_backend_class("sherpa")
+    assert sherpa_cls.startup_errors(cfg) == []
+
+
 def test_sherpa_startup_guard_allows_non_parakeet_streaming(tmp_path: Path):
     model_dir = _make_sherpa_model_dir(tmp_path)
     cfg = Config(

@@ -242,7 +242,7 @@ def test_sherpa_auto_download_uses_configured_model_name(monkeypatch, tmp_path: 
     assert cfg.sherpa_model_dir == str(auto_dir)
 
 
-def test_sherpa_startup_errors_block_parakeet_until_offline_mode_exists():
+def test_sherpa_startup_errors_block_parakeet_streaming_by_default():
     cfg = Config(asr_backend="sherpa", sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8")
 
     sherpa_cls = get_backend_class("sherpa")
@@ -250,7 +250,8 @@ def test_sherpa_startup_errors_block_parakeet_until_offline_mode_exists():
 
     assert errors
     assert any("Parakeet" in error for error in errors)
-    assert any("offline instant mode" in error for error in errors)
+    assert any("offline" in error.lower() for error in errors)
+    assert any("sherpa_enable_parakeet_streaming" in error for error in errors)
 
 
 def test_sherpa_startup_warnings_downgrade_cuda_when_runtime_is_cpu_only(monkeypatch):

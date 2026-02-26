@@ -228,6 +228,11 @@ def test_sherpa_provider_validation():
         Config(sherpa_provider="rocm")
 
 
+def test_sherpa_enable_parakeet_streaming_validation():
+    with pytest.raises(ValueError, match="sherpa_enable_parakeet_streaming"):
+        Config(sherpa_enable_parakeet_streaming="yes")
+
+
 def test_sherpa_model_name_validation():
     with pytest.raises(ValueError, match="sherpa_model_name"):
         Config(sherpa_model_name="   ")
@@ -514,7 +519,9 @@ def test_to_nested_dict_includes_sherpa_decode_mode():
     cfg = Config(
         asr_backend="sherpa",
         sherpa_decode_mode="offline_instant",
+        sherpa_enable_parakeet_streaming=True,
     )
 
     data = cfg.to_nested_dict()
     assert data["asr"]["sherpa_decode_mode"] == "offline_instant"
+    assert data["asr"]["sherpa_enable_parakeet_streaming"] is True

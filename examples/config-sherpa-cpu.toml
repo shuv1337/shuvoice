@@ -21,10 +21,14 @@ asr_backend = "sherpa"
 # sherpa_model_name = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
 # sherpa_decode_mode = "auto"
 #
-# Parakeet TDT v3 offline-instant option:
+# Parakeet TDT v3 offline-instant option (stable/default):
 # sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 # instant_mode = true
 # sherpa_decode_mode = "offline_instant"
+#
+# Optional Parakeet streaming override:
+# sherpa_decode_mode = "streaming"
+# sherpa_enable_parakeet_streaming = true
 #
 # Set this to your local model directory. See README.md for Sherpa model setup.
 sherpa_model_dir = "/path/to/sherpa-model-dir"

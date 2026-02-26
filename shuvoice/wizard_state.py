@@ -27,7 +27,7 @@ ASR_BACKENDS = [
     (
         "sherpa",
         "Sherpa-ONNX",
-        "Fast ONNX ASR with profiles for Streaming (Zipformer) or Instant (Parakeet).",
+        "Fast ONNX ASR with profiles for Streaming (Zipformer/Parakeet) or Instant (Parakeet).",
     ),
     (
         "nemo",
@@ -489,6 +489,7 @@ def write_config(
     *,
     overwrite_existing: bool = False,
     sherpa_model_name: str | None = None,
+    sherpa_enable_parakeet_streaming: bool = False,
 ):
     """Write wizard selections to config.toml.
 
@@ -496,9 +497,12 @@ def write_config(
     true, ``[asr].asr_backend`` and the provider/device key are updated.
 
     For Sherpa, optionally persists ``sherpa_model_name`` so the runtime can
-    auto-download the selected model variant on first launch. When a Parakeet
-    model is selected, the wizard also writes a working decode config:
-    ``instant_mode = true`` and ``sherpa_decode_mode = "offline_instant"``.
+    auto-download the selected model variant on first launch. For Parakeet,
+    wizard can write either:
+    - stable/default instant mode (``instant_mode = true`` +
+      ``sherpa_decode_mode = "offline_instant"``), or
+    - explicit streaming override (``sherpa_decode_mode = "streaming"`` +
+      ``sherpa_enable_parakeet_streaming = true``).
 
     Writes use the config I/O durability path (atomic write + backup).
     For Sherpa, CUDA is selected only when the installed sherpa-onnx runtime
@@ -538,14 +542,23 @@ def write_config(
 
     if asr_backend == "sherpa":
         chosen_model = (sherpa_model_name or DEFAULT_SHERPA_MODEL_NAME).strip()
-        asr_table["sherpa_model_name"] = chosen_model
+        is_parakeet = _is_parakeet_sherpa_model_name(chosen_model)
+        enable_parakeet_streaming = bool(sherpa_enable_parakeet_streaming and is_parakeet)
 
-        if _is_parakeet_sherpa_model_name(chosen_model):
-            # Parakeet requires the Sherpa offline instant decode path.
-            asr_table["instant_mode"] = True
-            asr_table["sherpa_decode_mode"] = "offline_instant"
+        asr_table["sherpa_model_name"] = chosen_model
+        asr_table["sherpa_enable_parakeet_streaming"] = enable_parakeet_streaming
+
+        if is_parakeet:
+            if enable_parakeet_streaming:
+                # Explicit override for Parakeet streaming path.
+                asr_table["instant_mode"] = False
+                asr_table["sherpa_decode_mode"] = "streaming"
+            else:
+                # Stable/default Parakeet path.
+                asr_table["instant_mode"] = True
+                asr_table["sherpa_decode_mode"] = "offline_instant"
         else:
-            # Keep Sherpa defaults for streaming models.
+            # Keep Sherpa defaults for Zipformer/non-Parakeet streaming models.
             asr_table["sherpa_decode_mode"] = "auto"
             asr_table["instant_mode"] = False
 
@@ -564,6 +577,7 @@ def format_summary(
     *,
     auto_add_keybind: bool = True,
     sherpa_model_name: str | None = None,
+    sherpa_enable_parakeet_streaming: bool = False,
 ) -> str:
     """Build a human-readable summary of wizard selections."""
     asr_name = next(
@@ -583,6 +597,7 @@ def format_summary(
     if asr_backend == "sherpa":
         chosen_model = (sherpa_model_name or DEFAULT_SHERPA_MODEL_NAME).strip()
         is_parakeet = _is_parakeet_sherpa_model_name(chosen_model)
+        parakeet_streaming = bool(sherpa_enable_parakeet_streaming and is_parakeet)
 
         if chosen_model == PARAKEET_TDT_V3_INT8_MODEL_NAME:
             model_label = "Parakeet TDT v3 (int8)"
@@ -591,10 +606,15 @@ def format_summary(
         else:
             model_label = chosen_model
 
-        profile_label = "Instant (Parakeet)" if is_parakeet else "Streaming"
-        decode_label = (
-            "Offline instant (auto-enabled)" if is_parakeet else "Streaming (auto)"
-        )
+        if parakeet_streaming:
+            profile_label = "Streaming (Parakeet)"
+            decode_label = "Streaming (explicit override)"
+        elif is_parakeet:
+            profile_label = "Instant (Parakeet)"
+            decode_label = "Offline instant (auto-enabled)"
+        else:
+            profile_label = "Streaming"
+            decode_label = "Streaming (auto)"
 
         lines.insert(1, f"Sherpa profile: {profile_label}")
         lines.insert(2, f"Sherpa model:   {model_label}")

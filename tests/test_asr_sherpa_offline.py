@@ -412,3 +412,40 @@ class TestSherpaOfflineRecognizerInit:
             backend._load_offline_recognizer()
 
         assert captured_kwargs.get("provider") == "cuda"
+
+
+class TestSherpaOnlineRecognizerInit:
+    """Tests for OnlineRecognizer initialization details."""
+
+    def test_online_parakeet_streaming_uses_nemo_transducer_model_type(self, tmp_path: Path):
+        model_dir = _make_model_dir(tmp_path)
+        cfg = Config(
+            asr_backend="sherpa",
+            sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+            sherpa_model_dir=str(model_dir),
+            sherpa_decode_mode="streaming",
+            sherpa_enable_parakeet_streaming=True,
+        )
+        backend = create_backend("sherpa", cfg)
+
+        mock_sherpa = MagicMock()
+        captured_kwargs = {}
+
+        def capture_from_transducer(**kwargs):
+            captured_kwargs.update(kwargs)
+            return MagicMock()
+
+        mock_online_cls = MagicMock()
+        mock_online_cls.from_transducer = capture_from_transducer
+        mock_sherpa.OnlineRecognizer = mock_online_cls
+
+        with patch.dict("sys.modules", {"sherpa_onnx": mock_sherpa}):
+            backend._model_files = {
+                "tokens": model_dir / "tokens.txt",
+                "encoder": model_dir / "encoder.onnx",
+                "decoder": model_dir / "decoder.onnx",
+                "joiner": model_dir / "joiner.onnx",
+            }
+            backend._load_online_recognizer()
+
+        assert captured_kwargs.get("model_type") == "nemo_transducer"

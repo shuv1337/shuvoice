@@ -256,6 +256,7 @@ sherpa_chunk_ms = 100
 | `sherpa_model_name` | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` | Archive/model name used for auto-download when `sherpa_model_dir` is unset |
 | `sherpa_model_dir` | *none* | If unset, ShuVoice auto-downloads `sherpa_model_name` to `~/.local/share/shuvoice/models/sherpa/<sherpa_model_name>/` |
 | `sherpa_decode_mode` | `auto` | `auto`, `streaming`, or `offline_instant`. `auto` resolves to `offline_instant` for Parakeet + `instant_mode=true`, otherwise `streaming`. |
+| `sherpa_enable_parakeet_streaming` | `false` | Safety gate for Parakeet streaming path. Must be `true` to allow Parakeet with `sherpa_decode_mode = "streaming"`. |
 | `sherpa_provider` | `cpu` | `cpu` or `cuda` |
 | `sherpa_num_threads` | `2` | CPU threads |
 | `sherpa_chunk_ms` | `100` | Streaming chunk duration (ignored in `offline_instant` mode) |
@@ -270,9 +271,18 @@ instant_mode = true
 sherpa_decode_mode = "offline_instant"
 ```
 
-Parakeet is supported via Sherpa offline instant mode. Startup guards continue
-blocking Parakeet + streaming combinations because that path is incompatible
-and can crash during recognizer initialization.
+Parakeet is supported via Sherpa offline instant mode by default.
+
+To opt into Parakeet streaming, explicitly enable both:
+
+```toml
+[asr]
+sherpa_decode_mode = "streaming"
+sherpa_enable_parakeet_streaming = true
+```
+
+When enabled, ShuVoice initializes Sherpa online transducer with
+`model_type="nemo_transducer"` for Parakeet models.
 
 #### Model directory structure
 
@@ -442,7 +452,7 @@ uv sync --dev --extra asr-nemo --extra asr-sherpa --extra asr-moonshine
 | [#13](https://github.com/shuv1337/shuvoice/issues/13) | Moonshine throughput slower than NeMo/Sherpa | Mitigated (safer defaults, ONNX tuning, GPU provider) |
 | — | `sherpa-onnx` source AUR builds may fail on GCC 15 due format-security warning flag interaction | Mitigation available (`python-sherpa-onnx-bin`, upstream patch staged) |
 | — | Prebuilt Sherpa CUDA wheels may be incompatible with newer CUDA stacks | Ongoing |
-| — | Parakeet selected with `sherpa_decode_mode = "streaming"` is blocked by startup guard (use offline instant mode) | By design |
+| — | Parakeet streaming is behind explicit safety gate (`sherpa_enable_parakeet_streaming = true`) and may be less stable than offline instant mode on some model/runtime combos | By design |
 
 ---
 

@@ -60,10 +60,13 @@ def model_status_for_backend(config: Config) -> str:
         if "parakeet" in model_name.lower():
             if decode_mode == "offline_instant":
                 parakeet_note = "; Parakeet offline instant mode configured"
+            elif bool(getattr(config, "sherpa_enable_parakeet_streaming", False)):
+                parakeet_note = "; Parakeet streaming mode enabled"
             else:
                 parakeet_note = (
                     "; Parakeet selected but decode mode resolves to streaming "
-                    "(set instant_mode=true or sherpa_decode_mode='offline_instant')"
+                    "(set instant_mode=true or sherpa_decode_mode='offline_instant', "
+                    "or enable sherpa_enable_parakeet_streaming for streaming)"
                 )
 
         model_dir = Path(config.sherpa_model_dir).expanduser() if config.sherpa_model_dir else None

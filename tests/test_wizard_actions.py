@@ -114,6 +114,29 @@ def test_maybe_download_model_rejects_parakeet_without_offline_mode(monkeypatch)
     assert "offline_instant" in message
 
 
+def test_maybe_download_model_allows_parakeet_streaming_when_enabled(monkeypatch):
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions.Config.load",
+        classmethod(
+            lambda cls: Config(
+                asr_backend="sherpa",
+                sherpa_decode_mode="streaming",
+                sherpa_enable_parakeet_streaming=True,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions.get_backend_class", lambda _name: _DownloadCapableBackend
+    )
+
+    status, _message = maybe_download_model(
+        "sherpa",
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+    )
+
+    assert status == "downloaded"
+
+
 def test_maybe_download_model_skips_when_deps_missing(monkeypatch):
     monkeypatch.setattr("shuvoice.wizard.actions.Config.load", classmethod(lambda cls: Config()))
     monkeypatch.setattr(

@@ -107,6 +107,35 @@ def test_on_finish_writes_config_releases_window_and_quits():
     assert wizard.completed is True
 
 
+def test_on_finish_passes_parakeet_streaming_profile_to_write_config():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard.__new__(WelcomeWizard)
+    wizard._asr_backend = "sherpa"
+    wizard._sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+    wizard._sherpa_enable_parakeet_streaming = True
+    wizard._keybind = "f9"
+    wizard.completed = False
+    wizard._release_input_and_destroy_window = MagicMock()
+    wizard.quit = MagicMock()
+
+    with (
+        patch("shuvoice.wizard.write_config") as write_config,
+        patch(
+            "shuvoice.wizard.maybe_download_model", return_value=("skipped", "noop")
+        ),
+        patch("shuvoice.wizard.write_marker"),
+    ):
+        WelcomeWizard._on_finish(wizard, None)
+
+    write_config.assert_called_once_with(
+        "sherpa",
+        overwrite_existing=False,
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+        sherpa_enable_parakeet_streaming=True,
+    )
+
+
 def test_complete_finish_shows_launch_button_and_waits_for_click():
     from shuvoice.wizard import WelcomeWizard
 

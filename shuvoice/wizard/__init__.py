@@ -65,6 +65,7 @@ class WelcomeWizard(Gtk.Application):
         self._force_reconfigure = force_reconfigure
         self._asr_backend = "sherpa"
         self._sherpa_model_name = DEFAULT_SHERPA_MODEL_NAME
+        self._sherpa_enable_parakeet_streaming = False
         self._keybind = DEFAULT_KEYBIND_ID
         self._finish_in_progress = False
         self._download_pulse_source_id: int | None = None
@@ -195,7 +196,8 @@ class WelcomeWizard(Gtk.Application):
         self._sherpa_profile_help = Gtk.Label(
             label=(
                 "Streaming = live partial updates while holding push-to-talk.\n"
-                "Instant = one final transcript when you release push-to-talk."
+                "Instant = one final transcript when you release push-to-talk.\n"
+                "Parakeet streaming is available as an explicit override profile."
             )
         )
         self._sherpa_profile_help.add_css_class("wizard-desc")
@@ -209,7 +211,9 @@ class WelcomeWizard(Gtk.Application):
         )
         self._sherpa_streaming_radio.add_css_class("wizard-radio")
         self._sherpa_streaming_radio.connect(
-            "toggled", self._on_sherpa_profile_toggled, DEFAULT_SHERPA_MODEL_NAME
+            "toggled",
+            self._on_sherpa_profile_toggled,
+            (DEFAULT_SHERPA_MODEL_NAME, False),
         )
         page.append(self._sherpa_streaming_radio)
 
@@ -223,13 +227,38 @@ class WelcomeWizard(Gtk.Application):
         self._sherpa_streaming_desc.set_halign(Gtk.Align.START)
         page.append(self._sherpa_streaming_desc)
 
+        self._sherpa_parakeet_streaming_radio = Gtk.CheckButton(
+            label="Streaming (Parakeet TDT v3 int8 model)"
+        )
+        self._sherpa_parakeet_streaming_radio.add_css_class("wizard-radio")
+        self._sherpa_parakeet_streaming_radio.set_group(self._sherpa_streaming_radio)
+        self._sherpa_parakeet_streaming_radio.connect(
+            "toggled",
+            self._on_sherpa_profile_toggled,
+            (PARAKEET_TDT_V3_INT8_MODEL_NAME, True),
+        )
+        page.append(self._sherpa_parakeet_streaming_radio)
+
+        self._sherpa_parakeet_streaming_desc = Gtk.Label(
+            label=(
+                "Live partial updates with Parakeet. "
+                "Wizard sets sherpa_decode_mode=streaming + "
+                "sherpa_enable_parakeet_streaming=true."
+            )
+        )
+        self._sherpa_parakeet_streaming_desc.add_css_class("wizard-radio-desc")
+        self._sherpa_parakeet_streaming_desc.set_halign(Gtk.Align.START)
+        page.append(self._sherpa_parakeet_streaming_desc)
+
         self._sherpa_parakeet_radio = Gtk.CheckButton(
             label="Instant (Parakeet TDT v3 int8 model)"
         )
         self._sherpa_parakeet_radio.add_css_class("wizard-radio")
         self._sherpa_parakeet_radio.set_group(self._sherpa_streaming_radio)
         self._sherpa_parakeet_radio.connect(
-            "toggled", self._on_sherpa_profile_toggled, PARAKEET_TDT_V3_INT8_MODEL_NAME
+            "toggled",
+            self._on_sherpa_profile_toggled,
+            (PARAKEET_TDT_V3_INT8_MODEL_NAME, False),
         )
         page.append(self._sherpa_parakeet_radio)
 
@@ -416,15 +445,25 @@ class WelcomeWizard(Gtk.Application):
             self._asr_backend = backend_id
             self._sync_sherpa_model_controls()
 
-    def _on_sherpa_profile_toggled(self, button: Gtk.CheckButton, model_name: str):
-        if button.get_active():
-            self._sherpa_model_name = model_name
+    def _on_sherpa_profile_toggled(
+        self,
+        button: Gtk.CheckButton,
+        profile: tuple[str, bool],
+    ):
+        if not button.get_active():
+            return
+
+        model_name, enable_parakeet_streaming = profile
+        self._sherpa_model_name = model_name
+        self._sherpa_enable_parakeet_streaming = bool(enable_parakeet_streaming)
 
     def _sync_sherpa_model_controls(self):
         title = getattr(self, "_sherpa_profile_title", None)
         help_text = getattr(self, "_sherpa_profile_help", None)
         streaming_radio = getattr(self, "_sherpa_streaming_radio", None)
         streaming_desc = getattr(self, "_sherpa_streaming_desc", None)
+        parakeet_streaming_radio = getattr(self, "_sherpa_parakeet_streaming_radio", None)
+        parakeet_streaming_desc = getattr(self, "_sherpa_parakeet_streaming_desc", None)
         parakeet_radio = getattr(self, "_sherpa_parakeet_radio", None)
         parakeet_desc = getattr(self, "_sherpa_parakeet_desc", None)
         if (
@@ -432,6 +471,8 @@ class WelcomeWizard(Gtk.Application):
             or help_text is None
             or streaming_radio is None
             or streaming_desc is None
+            or parakeet_streaming_radio is None
+            or parakeet_streaming_desc is None
             or parakeet_radio is None
             or parakeet_desc is None
         ):
@@ -443,28 +484,41 @@ class WelcomeWizard(Gtk.Application):
             help_text,
             streaming_radio,
             streaming_desc,
+            parakeet_streaming_radio,
+            parakeet_streaming_desc,
             parakeet_radio,
             parakeet_desc,
         ):
             widget.set_visible(is_sherpa)
 
         streaming_radio.set_sensitive(is_sherpa)
+        parakeet_streaming_radio.set_sensitive(is_sherpa)
         parakeet_radio.set_sensitive(is_sherpa)
 
         if not is_sherpa:
             self._sherpa_model_name = DEFAULT_SHERPA_MODEL_NAME
+            self._sherpa_enable_parakeet_streaming = False
             return
 
-        if self._sherpa_model_name == PARAKEET_TDT_V3_INT8_MODEL_NAME:
+        if (
+            self._sherpa_model_name == PARAKEET_TDT_V3_INT8_MODEL_NAME
+            and bool(getattr(self, "_sherpa_enable_parakeet_streaming", False))
+        ):
+            parakeet_streaming_radio.set_active(True)
+        elif self._sherpa_model_name == PARAKEET_TDT_V3_INT8_MODEL_NAME:
             parakeet_radio.set_active(True)
         else:
             streaming_radio.set_active(True)
 
-        self._sherpa_model_name = (
-            PARAKEET_TDT_V3_INT8_MODEL_NAME
-            if parakeet_radio.get_active()
-            else DEFAULT_SHERPA_MODEL_NAME
-        )
+        if parakeet_streaming_radio.get_active():
+            self._sherpa_model_name = PARAKEET_TDT_V3_INT8_MODEL_NAME
+            self._sherpa_enable_parakeet_streaming = True
+        elif parakeet_radio.get_active():
+            self._sherpa_model_name = PARAKEET_TDT_V3_INT8_MODEL_NAME
+            self._sherpa_enable_parakeet_streaming = False
+        else:
+            self._sherpa_model_name = DEFAULT_SHERPA_MODEL_NAME
+            self._sherpa_enable_parakeet_streaming = False
 
     def _on_keybind_toggled(self, button: Gtk.CheckButton, kb_id: str):
         if button.get_active():
@@ -574,11 +628,22 @@ class WelcomeWizard(Gtk.Application):
                 log.debug("Failed to disable finish button", exc_info=True)
 
         sherpa_model_name = getattr(self, "_sherpa_model_name", DEFAULT_SHERPA_MODEL_NAME)
+        sherpa_enable_parakeet_streaming = bool(
+            getattr(self, "_sherpa_enable_parakeet_streaming", False)
+        )
+
+        write_kwargs: dict[str, object] = {
+            "overwrite_existing": getattr(self, "_force_reconfigure", False),
+            "sherpa_model_name": sherpa_model_name,
+        }
+        if self._asr_backend == "sherpa":
+            write_kwargs["sherpa_enable_parakeet_streaming"] = (
+                sherpa_enable_parakeet_streaming
+            )
 
         write_config(
             self._asr_backend,
-            overwrite_existing=getattr(self, "_force_reconfigure", False),
-            sherpa_model_name=sherpa_model_name,
+            **write_kwargs,
         )
 
         keybind_status = KeybindSetupStatus.NOT_ATTEMPTED.value
@@ -842,6 +907,9 @@ class WelcomeWizard(Gtk.Application):
                 self._keybind,
                 auto_add_keybind=self._auto_add_enabled(),
                 sherpa_model_name=getattr(self, "_sherpa_model_name", DEFAULT_SHERPA_MODEL_NAME),
+                sherpa_enable_parakeet_streaming=bool(
+                    getattr(self, "_sherpa_enable_parakeet_streaming", False)
+                ),
             )
         )
 

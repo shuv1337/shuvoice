@@ -43,10 +43,14 @@ use_cuda_graph_decoder = false
 # Sherpa settings (used when asr_backend = "sherpa")
 # sherpa_model_name = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
 # sherpa_decode_mode = "auto"  # auto | streaming | offline_instant
-# For Parakeet TDT v3 via Sherpa release assets:
+# For Parakeet TDT v3 via Sherpa release assets (stable/default path):
 # sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 # instant_mode = true
 # sherpa_decode_mode = "offline_instant"
+#
+# Optional Parakeet streaming override:
+# sherpa_decode_mode = "streaming"
+# sherpa_enable_parakeet_streaming = true
 # sherpa_model_dir = "/path/to/sherpa-model"  # optional; auto-downloads selected sherpa_model_name when unset
 # sherpa_provider = "cpu"   # cpu | cuda
 # sherpa_num_threads = 2

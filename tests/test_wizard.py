@@ -77,6 +77,7 @@ def test_write_config_creates_toml_with_cuda(tmp_path):
         assert 'sherpa_provider = "cuda"' in content
         assert 'sherpa_decode_mode = "auto"' in content
         assert "instant_mode = false" in content
+        assert "sherpa_enable_parakeet_streaming = false" in content
 
 
 def test_write_config_creates_toml_without_cuda(tmp_path):
@@ -96,6 +97,7 @@ def test_write_config_creates_toml_without_cuda(tmp_path):
         assert 'sherpa_provider = "cpu"' in content
         assert 'sherpa_decode_mode = "auto"' in content
         assert "instant_mode = false" in content
+        assert "sherpa_enable_parakeet_streaming = false" in content
 
 
 def test_write_config_sherpa_custom_model_name(tmp_path):
@@ -111,6 +113,27 @@ def test_write_config_sherpa_custom_model_name(tmp_path):
         assert f'sherpa_model_name = "{PARAKEET_TDT_V3_INT8_MODEL_NAME}"' in content
         assert "instant_mode = true" in content
         assert 'sherpa_decode_mode = "offline_instant"' in content
+        assert "sherpa_enable_parakeet_streaming = false" in content
+
+
+def test_write_config_sherpa_parakeet_streaming_override(tmp_path):
+    """write_config can persist Parakeet streaming override profile."""
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_sherpa_cuda_provider", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        write_config(
+            "sherpa",
+            sherpa_model_name=PARAKEET_TDT_V3_INT8_MODEL_NAME,
+            sherpa_enable_parakeet_streaming=True,
+        )
+
+        content = (tmp_path / "config.toml").read_text()
+        assert f'sherpa_model_name = "{PARAKEET_TDT_V3_INT8_MODEL_NAME}"' in content
+        assert 'sherpa_decode_mode = "streaming"' in content
+        assert "instant_mode = false" in content
+        assert "sherpa_enable_parakeet_streaming = true" in content
 
 
 def test_write_config_nemo_sets_device(tmp_path):
@@ -218,6 +241,17 @@ def test_format_summary_sherpa_parakeet_model_label():
     assert "Sherpa profile: Instant (Parakeet)" in result
     assert "Sherpa model:   Parakeet TDT v3 (int8)" in result
     assert "Sherpa decode:  Offline instant (auto-enabled)" in result
+
+
+def test_format_summary_sherpa_parakeet_streaming_profile_label():
+    result = format_summary(
+        "sherpa",
+        sherpa_model_name=PARAKEET_TDT_V3_INT8_MODEL_NAME,
+        sherpa_enable_parakeet_streaming=True,
+    )
+    assert "Sherpa profile: Streaming (Parakeet)" in result
+    assert "Sherpa model:   Parakeet TDT v3 (int8)" in result
+    assert "Sherpa decode:  Streaming (explicit override)" in result
 
 
 def test_format_summary_includes_hyprland_bind_lines_for_preset():

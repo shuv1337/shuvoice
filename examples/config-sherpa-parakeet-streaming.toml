@@ -1,4 +1,4 @@
-# ShuVoice example: Sherpa Parakeet TDT v3 (offline instant mode)
+# ShuVoice example: Sherpa Parakeet TDT v3 (streaming opt-in)
 
 config_version = 1
 
@@ -21,15 +21,14 @@ sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 # Optional local model directory. If unset, ShuVoice auto-downloads this model name.
 # sherpa_model_dir = "/path/to/sherpa-model-dir"
 
-# Stable/default Parakeet path in ShuVoice:
-instant_mode = true
-sherpa_decode_mode = "offline_instant"
+# Streaming override for Parakeet:
+instant_mode = false
+sherpa_decode_mode = "streaming"
+sherpa_enable_parakeet_streaming = true
 
 # cpu | cuda (falls back to cpu at runtime if CUDA provider is unavailable)
 sherpa_provider = "cpu"
 sherpa_num_threads = 2
-
-# Streaming-only tuning key (kept for compatibility; ignored by offline_instant mode)
 sherpa_chunk_ms = 100
 
 [control]
@@ -37,6 +36,6 @@ sherpa_chunk_ms = 100
 # control_socket = "/path/to/control.sock"
 
 [typing]
-output_mode = "final_only"
+output_mode = "streaming_partial"
 typing_final_injection_mode = "auto"
 use_clipboard_for_final = true

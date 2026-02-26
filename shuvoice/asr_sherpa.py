@@ -77,21 +77,26 @@ class SherpaBackend(ASRBackend):
         errors: list[str] = []
 
         if cls._looks_like_parakeet_model(config):
-            # Check if offline mode is enabled - Parakeet is allowed in offline mode
             resolved_mode = config.resolved_sherpa_decode_mode
+            allow_parakeet_streaming = bool(
+                getattr(config, "sherpa_enable_parakeet_streaming", False)
+            )
+
             if resolved_mode == "offline_instant":
-                # Parakeet is allowed in offline instant mode
+                return errors
+
+            if resolved_mode == "streaming" and allow_parakeet_streaming:
                 return errors
 
             message = (
                 "Configured Sherpa model appears to be Parakeet TDT, but ShuVoice is "
-                "configured for streaming mode. Parakeet requires offline instant mode. "
-                "Enable instant_mode=true with sherpa_decode_mode='auto' or set "
-                "sherpa_decode_mode='offline_instant' explicitly. "
-                "This model is incompatible with the streaming path and can crash during "
-                "recognizer initialization (missing encoder metadata such as 'window_size'). "
-                "Use a streaming Sherpa model like "
-                "'sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06' for streaming mode."
+                "configured for streaming mode. By default, Parakeet remains blocked in "
+                "streaming mode to avoid startup/runtime instability with incompatible model "
+                "metadata. "
+                "Use offline instant mode (instant_mode=true with sherpa_decode_mode='auto', "
+                "or sherpa_decode_mode='offline_instant') for the stable path. "
+                "To force streaming anyway, set "
+                "sherpa_enable_parakeet_streaming=true and sherpa_decode_mode='streaming'."
             )
             errors.append(message)
 
@@ -479,18 +484,32 @@ class SherpaBackend(ASRBackend):
         model_files = self._model_files
         assert model_files is not None
 
+        use_nemo_transducer = self._looks_like_parakeet_model(self.config)
+        if use_nemo_transducer:
+            log.info("Sherpa streaming Parakeet mode enabled (model_type='nemo_transducer')")
+
         recognizer_cls = sherpa_onnx.OnlineRecognizer
         if hasattr(recognizer_cls, "from_transducer"):
-            self._recognizer = recognizer_cls.from_transducer(
-                encoder=str(model_files["encoder"]),
-                decoder=str(model_files["decoder"]),
-                joiner=str(model_files["joiner"]),
-                tokens=str(model_files["tokens"]),
-                num_threads=int(self.config.sherpa_num_threads),
-                provider=self.config.sherpa_provider,
-                sample_rate=int(self.config.sample_rate),
-                feature_dim=80,
-            )
+            recognizer_kwargs: dict[str, Any] = {
+                "encoder": str(model_files["encoder"]),
+                "decoder": str(model_files["decoder"]),
+                "joiner": str(model_files["joiner"]),
+                "tokens": str(model_files["tokens"]),
+                "num_threads": int(self.config.sherpa_num_threads),
+                "provider": self.config.sherpa_provider,
+                "sample_rate": int(self.config.sample_rate),
+                "feature_dim": 80,
+            }
+            if use_nemo_transducer:
+                recognizer_kwargs["model_type"] = "nemo_transducer"
+
+            try:
+                self._recognizer = recognizer_cls.from_transducer(**recognizer_kwargs)
+            except TypeError as exc:
+                if not use_nemo_transducer or "model_type" not in str(exc):
+                    raise
+                recognizer_kwargs.pop("model_type", None)
+                self._recognizer = recognizer_cls.from_transducer(**recognizer_kwargs)
         else:
             feat_config = sherpa_onnx.FeatureConfig(
                 sample_rate=int(self.config.sample_rate),
@@ -501,12 +520,23 @@ class SherpaBackend(ASRBackend):
                 decoder=str(model_files["decoder"]),
                 joiner=str(model_files["joiner"]),
             )
-            model_config = sherpa_onnx.OnlineModelConfig(
-                transducer=transducer_config,
-                tokens=str(model_files["tokens"]),
-                num_threads=int(self.config.sherpa_num_threads),
-                provider=self.config.sherpa_provider,
-            )
+            model_kwargs: dict[str, Any] = {
+                "transducer": transducer_config,
+                "tokens": str(model_files["tokens"]),
+                "num_threads": int(self.config.sherpa_num_threads),
+                "provider": self.config.sherpa_provider,
+            }
+            if use_nemo_transducer:
+                model_kwargs["model_type"] = "nemo_transducer"
+
+            try:
+                model_config = sherpa_onnx.OnlineModelConfig(**model_kwargs)
+            except TypeError as exc:
+                if not use_nemo_transducer or "model_type" not in str(exc):
+                    raise
+                model_kwargs.pop("model_type", None)
+                model_config = sherpa_onnx.OnlineModelConfig(**model_kwargs)
+
             recognizer_config = sherpa_onnx.OnlineRecognizerConfig(
                 feat_config=feat_config,
                 model_config=model_config,
