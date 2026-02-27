@@ -21,6 +21,8 @@ try:
     import gi
 
     gi.require_version("Gtk", "4.0")
+    # Also check LayerShell, as some tests import shuvoice.wizard which requires it immediately
+    gi.require_version("Gtk4LayerShell", "1.0")
 except (ImportError, ValueError):
     # Mock gi structure
     mock_gi = MagicMock()

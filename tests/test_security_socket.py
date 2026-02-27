@@ -1,10 +1,11 @@
 import socket
-import threading
 import time
-import os
-import pytest
 from pathlib import Path
+
+import pytest
+
 from shuvoice.control import ControlServer
+
 
 def noop(*args, **kwargs):
     return None
