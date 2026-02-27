@@ -27,7 +27,7 @@ ASR_BACKENDS = [
     (
         "sherpa",
         "Sherpa-ONNX",
-        "Fast ONNX ASR with profiles for Streaming (Zipformer/Parakeet) or Instant (Parakeet).",
+        "Fast ONNX ASR with profiles for Streaming (Zipformer) or Instant (Parakeet).",
     ),
     (
         "nemo",

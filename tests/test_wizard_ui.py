@@ -50,6 +50,25 @@ def test_finish_status_text_maps_known_states():
     assert "already bound" in WelcomeWizard._finish_status_text("conflict")
 
 
+def test_wizard_defaults_to_parakeet_instant_profile():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard()
+    assert wizard._sherpa_model_name == "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+    assert wizard._sherpa_enable_parakeet_streaming is False
+
+
+def test_asr_page_omits_parakeet_streaming_override_option():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard()
+    wizard._build_asr_page()
+
+    assert hasattr(wizard, "_sherpa_streaming_radio")
+    assert hasattr(wizard, "_sherpa_parakeet_radio")
+    assert not hasattr(wizard, "_sherpa_parakeet_streaming_radio")
+
+
 def test_model_status_text_maps_cancelled_state():
     from shuvoice.wizard import WelcomeWizard
 

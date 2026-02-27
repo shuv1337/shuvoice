@@ -45,6 +45,9 @@ from .ui import find_logo, setup_css
 
 log = logging.getLogger(__name__)
 
+# Wizard UX default: stable Parakeet instant profile.
+DEFAULT_WIZARD_SHERPA_MODEL_NAME = PARAKEET_TDT_V3_INT8_MODEL_NAME
+
 # Re-export for __main__.py and backward compatibility.
 __all__ = [
     "WelcomeWizard",
@@ -66,7 +69,7 @@ class WelcomeWizard(Gtk.Application):
         self.completed = False
         self._force_reconfigure = force_reconfigure
         self._asr_backend = "sherpa"
-        self._sherpa_model_name = DEFAULT_SHERPA_MODEL_NAME
+        self._sherpa_model_name = DEFAULT_WIZARD_SHERPA_MODEL_NAME
         self._sherpa_enable_parakeet_streaming = False
         self._typing_final_injection_mode = DEFAULT_FINAL_INJECTION_MODE
         self._keybind = DEFAULT_KEYBIND_ID
@@ -199,8 +202,7 @@ class WelcomeWizard(Gtk.Application):
         self._sherpa_profile_help = Gtk.Label(
             label=(
                 "Streaming = live partial updates while holding push-to-talk.\n"
-                "Instant = one final transcript when you release push-to-talk.\n"
-                "Parakeet streaming is available as an explicit override profile."
+                "Instant = one final transcript on key release (recommended)."
             )
         )
         self._sherpa_profile_help.add_css_class("wizard-desc")
@@ -223,38 +225,15 @@ class WelcomeWizard(Gtk.Application):
         self._sherpa_streaming_desc = Gtk.Label(
             label=(
                 "Shows incremental partial text while you hold the key. "
-                "Best when you want live feedback as you speak."
+                "Use this only if you specifically want live partial updates."
             )
         )
         self._sherpa_streaming_desc.add_css_class("wizard-radio-desc")
         self._sherpa_streaming_desc.set_halign(Gtk.Align.START)
         page.append(self._sherpa_streaming_desc)
 
-        self._sherpa_parakeet_streaming_radio = Gtk.CheckButton(
-            label="Streaming (Parakeet TDT v3 int8 model)"
-        )
-        self._sherpa_parakeet_streaming_radio.add_css_class("wizard-radio")
-        self._sherpa_parakeet_streaming_radio.set_group(self._sherpa_streaming_radio)
-        self._sherpa_parakeet_streaming_radio.connect(
-            "toggled",
-            self._on_sherpa_profile_toggled,
-            (PARAKEET_TDT_V3_INT8_MODEL_NAME, True),
-        )
-        page.append(self._sherpa_parakeet_streaming_radio)
-
-        self._sherpa_parakeet_streaming_desc = Gtk.Label(
-            label=(
-                "Live partial updates with Parakeet. "
-                "Wizard sets sherpa_decode_mode=streaming + "
-                "sherpa_enable_parakeet_streaming=true."
-            )
-        )
-        self._sherpa_parakeet_streaming_desc.add_css_class("wizard-radio-desc")
-        self._sherpa_parakeet_streaming_desc.set_halign(Gtk.Align.START)
-        page.append(self._sherpa_parakeet_streaming_desc)
-
         self._sherpa_parakeet_radio = Gtk.CheckButton(
-            label="Instant (Parakeet TDT v3 int8 model)"
+            label="Instant (Parakeet TDT v3 int8 model, recommended)"
         )
         self._sherpa_parakeet_radio.add_css_class("wizard-radio")
         self._sherpa_parakeet_radio.set_group(self._sherpa_streaming_radio)
@@ -267,8 +246,8 @@ class WelcomeWizard(Gtk.Application):
 
         self._sherpa_parakeet_desc = Gtk.Label(
             label=(
-                "No partials; emits one final transcript on key release. "
-                "Wizard auto-enables instant_mode + sherpa_decode_mode=offline_instant."
+                "Stable default profile. Emits one final transcript on key release and "
+                "auto-enables instant_mode + sherpa_decode_mode=offline_instant."
             )
         )
         self._sherpa_parakeet_desc.add_css_class("wizard-radio-desc")
@@ -506,8 +485,6 @@ class WelcomeWizard(Gtk.Application):
         help_text = getattr(self, "_sherpa_profile_help", None)
         streaming_radio = getattr(self, "_sherpa_streaming_radio", None)
         streaming_desc = getattr(self, "_sherpa_streaming_desc", None)
-        parakeet_streaming_radio = getattr(self, "_sherpa_parakeet_streaming_radio", None)
-        parakeet_streaming_desc = getattr(self, "_sherpa_parakeet_streaming_desc", None)
         parakeet_radio = getattr(self, "_sherpa_parakeet_radio", None)
         parakeet_desc = getattr(self, "_sherpa_parakeet_desc", None)
         if (
@@ -515,8 +492,6 @@ class WelcomeWizard(Gtk.Application):
             or help_text is None
             or streaming_radio is None
             or streaming_desc is None
-            or parakeet_streaming_radio is None
-            or parakeet_streaming_desc is None
             or parakeet_radio is None
             or parakeet_desc is None
         ):
@@ -528,36 +503,25 @@ class WelcomeWizard(Gtk.Application):
             help_text,
             streaming_radio,
             streaming_desc,
-            parakeet_streaming_radio,
-            parakeet_streaming_desc,
             parakeet_radio,
             parakeet_desc,
         ):
             widget.set_visible(is_sherpa)
 
         streaming_radio.set_sensitive(is_sherpa)
-        parakeet_streaming_radio.set_sensitive(is_sherpa)
         parakeet_radio.set_sensitive(is_sherpa)
 
         if not is_sherpa:
-            self._sherpa_model_name = DEFAULT_SHERPA_MODEL_NAME
+            self._sherpa_model_name = DEFAULT_WIZARD_SHERPA_MODEL_NAME
             self._sherpa_enable_parakeet_streaming = False
             return
 
-        if (
-            self._sherpa_model_name == PARAKEET_TDT_V3_INT8_MODEL_NAME
-            and bool(getattr(self, "_sherpa_enable_parakeet_streaming", False))
-        ):
-            parakeet_streaming_radio.set_active(True)
-        elif self._sherpa_model_name == PARAKEET_TDT_V3_INT8_MODEL_NAME:
+        if self._sherpa_model_name == PARAKEET_TDT_V3_INT8_MODEL_NAME:
             parakeet_radio.set_active(True)
         else:
             streaming_radio.set_active(True)
 
-        if parakeet_streaming_radio.get_active():
-            self._sherpa_model_name = PARAKEET_TDT_V3_INT8_MODEL_NAME
-            self._sherpa_enable_parakeet_streaming = True
-        elif parakeet_radio.get_active():
+        if parakeet_radio.get_active():
             self._sherpa_model_name = PARAKEET_TDT_V3_INT8_MODEL_NAME
             self._sherpa_enable_parakeet_streaming = False
         else:
