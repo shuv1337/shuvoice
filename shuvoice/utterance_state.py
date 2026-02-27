@@ -46,13 +46,41 @@ class _UtteranceState:
         if not self.buffer:
             return np.empty(0, dtype=np.float32), False
 
-        if len(self.buffer) == 1 and len(self.buffer[0]) >= native:
-            audio_data = self.buffer[0]
-        else:
-            audio_data = np.concatenate(self.buffer)
+        # Fast path: first chunk is large enough
+        if len(self.buffer[0]) >= native:
+            first_chunk = self.buffer[0]
+            to_process = first_chunk[:native]
+            remainder = first_chunk[native:]
 
-        to_process = audio_data[:native]
-        remainder = audio_data[native:]
-        self.buffer = [remainder] if len(remainder) > 0 else []
-        self.total = len(remainder)
-        return to_process, self.total >= native
+            if remainder.size > 0:
+                self.buffer[0] = remainder
+            else:
+                self.buffer.pop(0)
+
+            self.total -= native
+            return to_process, True  # Since we checked len >= native
+
+        # Slow path: consume multiple chunks until we satisfy `native`
+        extracted_chunks = []
+        samples_extracted = 0
+
+        while self.buffer and samples_extracted < native:
+            chunk = self.buffer[0]
+            needed = native - samples_extracted
+
+            if len(chunk) <= needed:
+                extracted_chunks.append(chunk)
+                samples_extracted += len(chunk)
+                self.buffer.pop(0)
+            else:
+                extracted_chunks.append(chunk[:needed])
+                self.buffer[0] = chunk[needed:]
+                samples_extracted += needed
+
+        if not extracted_chunks:
+            return np.empty(0, dtype=np.float32), False
+
+        to_process = np.concatenate(extracted_chunks)
+        self.total -= len(to_process)
+
+        return to_process, len(to_process) >= native
