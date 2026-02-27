@@ -25,68 +25,69 @@ def find_logo() -> Path | None:
 def setup_css() -> None:
     css = Gtk.CssProvider()
     css.load_from_string(
-        "window.wizard-window { background-color: rgba(15, 15, 20, 0.95); }\n"
-        ".wizard-page {\n"
-        "  padding: 48px 64px;\n"
-        "}\n"
-        ".wizard-title {\n"
-        "  color: white;\n"
-        "  font-size: 28px;\n"
-        "  font-weight: bold;\n"
-        "}\n"
-        ".wizard-subtitle {\n"
-        "  color: rgba(255, 255, 255, 0.7);\n"
-        "  font-size: 16px;\n"
-        "  margin-top: 4px;\n"
-        "  margin-bottom: 16px;\n"
-        "}\n"
-        ".wizard-desc {\n"
-        "  color: rgba(255, 255, 255, 0.55);\n"
-        "  font-size: 14px;\n"
-        "}\n"
-        ".wizard-radio label {\n"
-        "  color: white;\n"
-        "  font-size: 16px;\n"
-        "}\n"
-        ".wizard-radio-desc {\n"
-        "  color: rgba(255, 255, 255, 0.55);\n"
-        "  font-size: 13px;\n"
-        "  margin-left: 28px;\n"
-        "  margin-bottom: 8px;\n"
-        "}\n"
-        ".wizard-btn {\n"
-        "  padding: 8px 24px;\n"
-        "  font-size: 15px;\n"
-        "  border-radius: 8px;\n"
-        "  background-color: rgba(255, 255, 255, 0.12);\n"
-        "  color: white;\n"
-        "}\n"
-        ".wizard-btn:hover {\n"
-        "  background-color: rgba(255, 255, 255, 0.2);\n"
-        "}\n"
-        ".wizard-btn:focus {\n"
-        "  background-color: rgba(255, 255, 255, 0.25);\n"
-        "  outline: 2px solid white;\n"
-        "}\n"
-        ".wizard-btn-primary {\n"
-        "  background-color: rgba(60, 120, 220, 0.85);\n"
-        "}\n"
-        ".wizard-btn-primary:hover {\n"
-        "  background-color: rgba(60, 120, 220, 1.0);\n"
-        "}\n"
-        ".wizard-btn-primary:focus {\n"
-        "  background-color: rgba(60, 120, 220, 1.0);\n"
-        "  outline: 2px solid white;\n"
-        "}\n"
-        ".wizard-summary {\n"
-        "  color: rgba(255, 255, 255, 0.8);\n"
-        "  font-size: 15px;\n"
-        "  font-family: monospace;\n"
-        "  background-color: rgba(255, 255, 255, 0.06);\n"
-        "  border-radius: 8px;\n"
-        "  padding: 16px 20px;\n"
-        "  margin-top: 12px;\n"
-        "}\n"
+        """window.wizard-window { background-color: rgba(15, 15, 20, 0.95); }
+.wizard-page {
+  padding: 48px 64px;
+}
+.wizard-title {
+  color: white;
+  font-size: 28px;
+  font-weight: bold;
+}
+.wizard-subtitle {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 16px;
+  margin-top: 4px;
+  margin-bottom: 16px;
+}
+.wizard-desc {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 14px;
+}
+.wizard-radio label {
+  color: white;
+  font-size: 16px;
+}
+.wizard-radio-desc {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 13px;
+  margin-left: 28px;
+  margin-bottom: 8px;
+}
+.wizard-btn {
+  padding: 8px 24px;
+  font-size: 15px;
+  border-radius: 8px;
+  background-color: rgba(255, 255, 255, 0.12);
+  color: white;
+}
+.wizard-btn:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+.wizard-btn:focus {
+  background-color: rgba(255, 255, 255, 0.25);
+  outline: 2px solid white;
+}
+.wizard-btn-primary {
+  background-color: rgba(60, 120, 220, 0.85);
+}
+.wizard-btn-primary:hover {
+  background-color: rgba(60, 120, 220, 1.0);
+}
+.wizard-btn-primary:focus {
+  background-color: rgba(60, 120, 220, 1.0);
+  outline: 2px solid white;
+}
+.wizard-summary {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 15px;
+  font-family: monospace;
+  background-color: rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-top: 12px;
+}
+"""
     )
     Gtk.StyleContext.add_provider_for_display(
         Gdk.Display.get_default(),
