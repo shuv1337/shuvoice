@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
@@ -455,22 +455,24 @@ def test_on_model_loaded_defers_activation_when_splash_is_too_fast(monkeypatch):
     monkeypatch.setattr("shuvoice.app.GLib.timeout_add", timeout_add)
     monkeypatch.setattr("shuvoice.app.time.monotonic", lambda: 10.2)
 
-    app = SimpleNamespace(
-        _model_loaded=False,
-        _splash_started_monotonic=10.0,
-        _MIN_SPLASH_VISIBLE_SEC=2.0,
-        _complete_model_loaded_startup=Mock(),
-    )
+    # Patch SOURCE_REMOVE to be 0 (integer) instead of a Mock, to satisfy the assertion
+    with patch("shuvoice.app.GLib.SOURCE_REMOVE", 0):
+        app = SimpleNamespace(
+            _model_loaded=False,
+            _splash_started_monotonic=10.0,
+            _MIN_SPLASH_VISIBLE_SEC=2.0,
+            _complete_model_loaded_startup=Mock(),
+        )
 
-    result = ShuVoiceApp._on_model_loaded(app)
+        result = ShuVoiceApp._on_model_loaded(app)
 
-    assert app._model_loaded is True
-    assert result == 0
-    timeout_add.assert_called_once()
-    delay_ms, callback = timeout_add.call_args.args
-    assert delay_ms == 2000
-    assert callback is app._complete_model_loaded_startup
-    app._complete_model_loaded_startup.assert_not_called()
+        assert app._model_loaded is True
+        assert result == 0
+        timeout_add.assert_called_once()
+        delay_ms, callback = timeout_add.call_args.args
+        assert delay_ms == 2000
+        assert callback is app._complete_model_loaded_startup
+        app._complete_model_loaded_startup.assert_not_called()
 
 
 def test_complete_model_loaded_startup_dismisses_splash_and_finishes():
@@ -481,13 +483,15 @@ def test_complete_model_loaded_startup_dismisses_splash_and_finishes():
         _finish_activation=Mock(),
     )
 
-    result = ShuVoiceApp._complete_model_loaded_startup(app)
+    # Patch SOURCE_REMOVE to be 0 (integer)
+    with patch("shuvoice.app.GLib.SOURCE_REMOVE", 0):
+        result = ShuVoiceApp._complete_model_loaded_startup(app)
 
-    splash.dismiss.assert_called_once()
-    assert app._splash is None
-    assert app._splash_started_monotonic is None
-    app._finish_activation.assert_called_once()
-    assert result == 0
+        splash.dismiss.assert_called_once()
+        assert app._splash is None
+        assert app._splash_started_monotonic is None
+        app._finish_activation.assert_called_once()
+        assert result == 0
 
 
 def test_on_model_loaded_prefers_realized_splash_timestamp(monkeypatch):
@@ -504,7 +508,8 @@ def test_on_model_loaded_prefers_realized_splash_timestamp(monkeypatch):
         _complete_model_loaded_startup=Mock(),
     )
 
-    ShuVoiceApp._on_model_loaded(app)
+    with patch("shuvoice.app.GLib.SOURCE_REMOVE", 0):
+        ShuVoiceApp._on_model_loaded(app)
 
     timeout_add.assert_called_once()
     delay_ms, callback = timeout_add.call_args.args
