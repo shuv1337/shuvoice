@@ -1,14 +1,3 @@
-"""Local control socket for Hyprland bind/bindr integration.
-
-This provides a Unix-domain socket command channel so a running ShuVoice
-instance can be controlled by short-lived CLI invocations, e.g.:
-
-  shuvoice --control start
-  shuvoice --control stop
-
-Intended for Hyprland push-to-talk control via bind/bindr commands.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -167,11 +156,17 @@ class ControlServer:
                     break
 
                 with conn:
+                    # Security: Enforce timeout on accepted connections to prevent DoS
+                    # where a client connects but sends no data, blocking the thread.
+                    conn.settimeout(1.0)
                     response = "ERROR invalid request"
                     try:
                         payload = conn.recv(1024)
                         command = payload.decode("utf-8", errors="replace").strip().lower()
                         response = self._handle_command(command)
+                    except socket.timeout:
+                        log.warning("Control socket connection timed out (DoS protection)")
+                        response = "ERROR timeout"
                     except Exception:
                         log.exception("Error handling control command")
                         response = "ERROR internal error"

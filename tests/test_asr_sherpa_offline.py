@@ -454,6 +454,7 @@ class TestSherpaOnlineRecognizerInit:
     def test_online_parakeet_streaming_fails_fast_without_window_size_metadata(
         self, tmp_path: Path
     ):
+        pytest.importorskip("sherpa_onnx")
         model_dir = tmp_path / "sherpa-model"
         model_dir.mkdir(parents=True, exist_ok=True)
         (model_dir / "tokens.txt").write_text("<blk>\na\n")
