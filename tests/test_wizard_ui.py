@@ -103,6 +103,7 @@ def test_on_finish_writes_config_releases_window_and_quits():
         "moonshine",
         overwrite_existing=False,
         sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
+        typing_final_injection_mode="auto",
     )
     maybe_download.assert_called_once_with(
         "moonshine",
@@ -141,6 +142,7 @@ def test_on_finish_passes_parakeet_streaming_profile_to_write_config():
         overwrite_existing=False,
         sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
         sherpa_enable_parakeet_streaming=True,
+        typing_final_injection_mode="auto",
     )
 
 
@@ -213,6 +215,7 @@ def test_complete_finish_applies_zipformer_fallback_for_incompatible_parakeet_st
         overwrite_existing=True,
         sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
         sherpa_enable_parakeet_streaming=False,
+        typing_final_injection_mode="auto",
     )
     write_marker.assert_called_once()
     assert wizard._sherpa_model_name == "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"

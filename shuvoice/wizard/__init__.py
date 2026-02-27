@@ -27,8 +27,10 @@ from gi.repository import Gtk4LayerShell as LayerShell
 from ..wizard_state import (
     ASR_BACKENDS,
     KEYBIND_PRESETS,
+    DEFAULT_FINAL_INJECTION_MODE,
     DEFAULT_KEYBIND_ID,
     DEFAULT_SHERPA_MODEL_NAME,
+    FINAL_INJECTION_MODES,
     PARAKEET_TDT_V3_INT8_MODEL_NAME,
 )
 from .actions import maybe_download_model, needs_wizard, write_config, write_marker
@@ -66,6 +68,7 @@ class WelcomeWizard(Gtk.Application):
         self._asr_backend = "sherpa"
         self._sherpa_model_name = DEFAULT_SHERPA_MODEL_NAME
         self._sherpa_enable_parakeet_streaming = False
+        self._typing_final_injection_mode = DEFAULT_FINAL_INJECTION_MODE
         self._keybind = DEFAULT_KEYBIND_ID
         self._finish_in_progress = False
         self._download_pulse_source_id: int | None = None
@@ -351,6 +354,47 @@ class WelcomeWizard(Gtk.Application):
         self._update_keybind_preview()
         page.append(self._keybind_preview)
 
+        injection_title = Gtk.Label(label="Final text injection")
+        injection_title.add_css_class("wizard-subtitle")
+        injection_title.set_halign(Gtk.Align.START)
+        injection_title.set_margin_top(12)
+        page.append(injection_title)
+
+        injection_help = Gtk.Label(
+            label=(
+                "Choose how the final transcript is committed when you release push-to-talk.\n"
+                "If one mode misbehaves in an app, rerun wizard and switch modes."
+            )
+        )
+        injection_help.add_css_class("wizard-desc")
+        injection_help.set_halign(Gtk.Align.START)
+        injection_help.set_justify(Gtk.Justification.LEFT)
+        page.append(injection_help)
+
+        mode_group: Gtk.CheckButton | None = None
+        self._final_injection_radios: dict[str, Gtk.CheckButton] = {}
+        active_mode = getattr(self, "_typing_final_injection_mode", DEFAULT_FINAL_INJECTION_MODE)
+
+        for mode_id, mode_label, mode_desc in FINAL_INJECTION_MODES:
+            mode_radio = Gtk.CheckButton(label=mode_label)
+            mode_radio.add_css_class("wizard-radio")
+            if mode_group is None:
+                mode_group = mode_radio
+            else:
+                mode_radio.set_group(mode_group)
+
+            if mode_id == active_mode:
+                mode_radio.set_active(True)
+
+            mode_radio.connect("toggled", self._on_final_injection_toggled, mode_id)
+            page.append(mode_radio)
+            self._final_injection_radios[mode_id] = mode_radio
+
+            mode_desc_label = Gtk.Label(label=mode_desc)
+            mode_desc_label.add_css_class("wizard-radio-desc")
+            mode_desc_label.set_halign(Gtk.Align.START)
+            page.append(mode_desc_label)
+
         nav = self._make_nav_row(
             back_page="asr",
             next_page="done",
@@ -534,6 +578,11 @@ class WelcomeWizard(Gtk.Application):
             self._auto_add_last_non_custom = self._auto_add_keybind.get_active()
         self._update_keybind_preview()
 
+    def _on_final_injection_toggled(self, button: Gtk.CheckButton, mode_id: str):
+        if not button.get_active():
+            return
+        self._typing_final_injection_mode = mode_id
+
     def _sync_auto_add_keybind_state(self):
         if not hasattr(self, "_auto_add_keybind"):
             return
@@ -635,6 +684,11 @@ class WelcomeWizard(Gtk.Application):
         write_kwargs: dict[str, object] = {
             "overwrite_existing": getattr(self, "_force_reconfigure", False),
             "sherpa_model_name": sherpa_model_name,
+            "typing_final_injection_mode": getattr(
+                self,
+                "_typing_final_injection_mode",
+                DEFAULT_FINAL_INJECTION_MODE,
+            ),
         }
         if self._asr_backend == "sherpa":
             write_kwargs["sherpa_enable_parakeet_streaming"] = (
@@ -811,6 +865,11 @@ class WelcomeWizard(Gtk.Application):
                     overwrite_existing=True,
                     sherpa_model_name=DEFAULT_SHERPA_MODEL_NAME,
                     sherpa_enable_parakeet_streaming=False,
+                    typing_final_injection_mode=getattr(
+                        self,
+                        "_typing_final_injection_mode",
+                        DEFAULT_FINAL_INJECTION_MODE,
+                    ),
                 )
             except Exception:  # noqa: BLE001
                 log.exception("Wizard fallback to Zipformer streaming profile failed")
@@ -842,10 +901,11 @@ class WelcomeWizard(Gtk.Application):
 
         write_marker()
         log.info(
-            "Wizard setup ready: asr_backend=%s sherpa_model=%s keybind=%s keybind_setup=%s model_setup=%s",
+            "Wizard setup ready: asr_backend=%s sherpa_model=%s keybind=%s final_injection=%s keybind_setup=%s model_setup=%s",
             self._asr_backend,
             sherpa_model_name,
             self._keybind,
+            getattr(self, "_typing_final_injection_mode", DEFAULT_FINAL_INJECTION_MODE),
             keybind_status,
             model_status,
         )
@@ -931,6 +991,11 @@ class WelcomeWizard(Gtk.Application):
                 sherpa_model_name=getattr(self, "_sherpa_model_name", DEFAULT_SHERPA_MODEL_NAME),
                 sherpa_enable_parakeet_streaming=bool(
                     getattr(self, "_sherpa_enable_parakeet_streaming", False)
+                ),
+                typing_final_injection_mode=getattr(
+                    self,
+                    "_typing_final_injection_mode",
+                    DEFAULT_FINAL_INJECTION_MODE,
                 ),
             )
         )

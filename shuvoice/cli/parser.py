@@ -239,6 +239,17 @@ def create_parser() -> argparse.ArgumentParser:
     config_sub.add_parser("effective", help="Print merged effective config")
     config_sub.add_parser("path", help="Print active config file path")
     config_sub.add_parser("validate", help="Validate active config")
+    config_set_parser = config_sub.add_parser("set", help="Set supported config keys")
+    config_set_parser.add_argument(
+        "key",
+        choices=["typing_final_injection_mode"],
+        help="Config key to set",
+    )
+    config_set_parser.add_argument(
+        "value",
+        choices=["auto", "clipboard", "direct"],
+        help="New value for the selected key",
+    )
 
     model_parser = subparsers.add_parser("model", help="Model management commands")
     _add_runtime_overrides(model_parser)
@@ -327,7 +338,7 @@ def resolve_command(
         return "run", warnings
     if command == "config":
         if not args.config_command:
-            parser.error("config subcommand required: effective | path | validate")
+            parser.error("config subcommand required: effective | path | validate | set")
         return f"config_{args.config_command}", warnings
     if command == "model":
         if args.model_command != "download":

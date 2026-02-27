@@ -235,6 +235,7 @@ def finish_setup(
     overwrite_existing: bool,
     sherpa_model_name: str | None = None,
     sherpa_enable_parakeet_streaming: bool = False,
+    typing_final_injection_mode: str = "auto",
     auto_download_model: bool = True,
 ) -> tuple[str, str, str, str]:
     """Persist wizard selections and optionally configure keybind/model download."""
@@ -243,6 +244,7 @@ def finish_setup(
         overwrite_existing=overwrite_existing,
         sherpa_model_name=sherpa_model_name,
         sherpa_enable_parakeet_streaming=sherpa_enable_parakeet_streaming,
+        typing_final_injection_mode=typing_final_injection_mode,
     )
 
     keybind_status = "not_attempted"
@@ -264,6 +266,7 @@ def finish_setup(
             overwrite_existing=True,
             sherpa_model_name=DEFAULT_SHERPA_MODEL_NAME,
             sherpa_enable_parakeet_streaming=False,
+            typing_final_injection_mode=typing_final_injection_mode,
         )
         model_message = (
             f"{model_message} "

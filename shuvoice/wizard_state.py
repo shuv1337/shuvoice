@@ -45,6 +45,28 @@ DEFAULT_SHERPA_MODEL_NAME = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06
 PARAKEET_TDT_V3_INT8_MODEL_NAME = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 DEFAULT_KEYBIND_ID = "right_ctrl"
 
+# Final text-injection presets for wizard configuration.
+# (id, display_label, description)
+FINAL_INJECTION_MODES = [
+    (
+        "auto",
+        "Auto (recommended)",
+        "Uses clipboard paste by default, and falls back to direct typing when clipboard watchers are detected.",
+    ),
+    (
+        "clipboard",
+        "Clipboard paste (Ctrl+V)",
+        "Copies final text to the clipboard and pastes with Ctrl+V. Best for apps that reject synthetic typing.",
+    ),
+    (
+        "direct",
+        "Direct typing (keystroke simulation)",
+        "Types final text directly with wtype and avoids clipboard changes.",
+    ),
+]
+DEFAULT_FINAL_INJECTION_MODE = "auto"
+_FINAL_INJECTION_MODE_SET = {mode for mode, _label, _desc in FINAL_INJECTION_MODES}
+
 
 def _is_parakeet_sherpa_model_name(model_name: str) -> bool:
     return "parakeet" in str(model_name).strip().lower()
@@ -514,6 +536,7 @@ def write_config(
     overwrite_existing: bool = False,
     sherpa_model_name: str | None = None,
     sherpa_enable_parakeet_streaming: bool = False,
+    typing_final_injection_mode: str = DEFAULT_FINAL_INJECTION_MODE,
 ):
     """Write wizard selections to config.toml.
 
@@ -532,10 +555,22 @@ def write_config(
     - Streaming profiles -> ``[typing].output_mode = "streaming_partial"``
     - Instant profile -> ``[typing].output_mode = "final_only"``
 
+    Final text injection mode is persisted to ``[typing].typing_final_injection_mode``
+    so users can pick between clipboard paste and direct keystroke typing from
+    the wizard UI.
+
     Writes use the config I/O durability path (atomic write + backup).
     For Sherpa, CUDA is selected only when the installed sherpa-onnx runtime
     exposes a CUDA provider; otherwise it defaults to CPU.
     """
+    injection_mode = str(typing_final_injection_mode).strip().lower()
+    if injection_mode not in _FINAL_INJECTION_MODE_SET:
+        allowed = ", ".join(sorted(_FINAL_INJECTION_MODE_SET))
+        raise ValueError(
+            "typing_final_injection_mode must be one of: "
+            f"{allowed}"
+        )
+
     if asr_backend == "sherpa":
         sherpa_cuda_available = _detect_sherpa_cuda_provider()
         provider = "cuda" if sherpa_cuda_available else "cpu"
@@ -572,6 +607,10 @@ def write_config(
     asr_table["asr_backend"] = asr_backend
     if provider_key:
         asr_table[provider_key] = provider
+
+    typing_table["typing_final_injection_mode"] = injection_mode
+    # Keep legacy compatibility flag in sync for older tooling/parsers.
+    typing_table["use_clipboard_for_final"] = injection_mode != "direct"
 
     if asr_backend == "sherpa":
         chosen_model = (sherpa_model_name or DEFAULT_SHERPA_MODEL_NAME).strip()
@@ -614,6 +653,7 @@ def format_summary(
     auto_add_keybind: bool = True,
     sherpa_model_name: str | None = None,
     sherpa_enable_parakeet_streaming: bool = False,
+    typing_final_injection_mode: str = DEFAULT_FINAL_INJECTION_MODE,
 ) -> str:
     """Build a human-readable summary of wizard selections."""
     asr_name = next(
@@ -625,9 +665,17 @@ def format_summary(
         ("Custom", None),
     )
 
+    injection_mode = str(typing_final_injection_mode).strip().lower()
+    injection_label = {
+        "auto": "Auto (recommended)",
+        "clipboard": "Clipboard paste (Ctrl+V)",
+        "direct": "Direct typing (keystroke simulation)",
+    }.get(injection_mode, injection_mode or DEFAULT_FINAL_INJECTION_MODE)
+
     lines = [
-        f"ASR backend:    {asr_name}",
-        f"Push-to-talk:   {keybind_label}",
+        f"ASR backend:      {asr_name}",
+        f"Final injection:  {injection_label}",
+        f"Push-to-talk:     {keybind_label}",
     ]
 
     if asr_backend == "sherpa":

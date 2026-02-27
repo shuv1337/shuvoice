@@ -127,6 +127,33 @@ def test_config_effective_error(monkeypatch, capsys):
     assert "ERROR: broken" in err
 
 
+def test_config_set_updates_typing_final_injection_mode(monkeypatch, tmp_path, capsys):
+    config_file = tmp_path / "config.toml"
+    config_file.write_text("[typing]\ntyping_final_injection_mode = \"auto\"\n", encoding="utf-8")
+
+    monkeypatch.setattr(config_cmd.Config, "config_path", classmethod(lambda cls: config_file))
+
+    assert config_cmd.config_set("typing_final_injection_mode", "direct") == 0
+    out = capsys.readouterr().out
+    assert "OK set typing_final_injection_mode=direct" in out
+
+    content = config_file.read_text(encoding="utf-8")
+    assert 'typing_final_injection_mode = "direct"' in content
+    assert "use_clipboard_for_final = false" in content
+
+
+def test_config_set_rejects_invalid_value(capsys):
+    assert config_cmd.config_set("typing_final_injection_mode", "invalid") == 1
+    err = capsys.readouterr().err
+    assert "typing_final_injection_mode must be one of" in err
+
+
+def test_config_set_rejects_unsupported_key(capsys):
+    assert config_cmd.config_set("unknown_key", "value") == 1
+    err = capsys.readouterr().err
+    assert "unsupported config key" in err
+
+
 def test_run_control_stop_waits_for_processing_to_finish(monkeypatch, capsys):
     calls: list[str] = []
 

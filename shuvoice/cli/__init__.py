@@ -9,7 +9,7 @@ from typing import Sequence
 
 from .commands.audio import list_audio_devices
 from .commands.common import load_effective_config
-from .commands.config import config_effective, config_path, config_validate
+from .commands.config import config_effective, config_path, config_set, config_validate
 from .commands.control import run_control
 from .commands.diagnostics import diagnostics
 from .commands.model import download_model
@@ -71,6 +71,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if resolved == "config_effective":
         return config_effective()
+
+    if resolved == "config_set":
+        return config_set(args.key, args.value)
 
     config = _load_config_or_exit(args)
     if config is None:

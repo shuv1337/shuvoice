@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from shuvoice.wizard_state import (
     ASR_BACKENDS,
+    DEFAULT_FINAL_INJECTION_MODE,
     DEFAULT_KEYBIND_ID,
     DEFAULT_SHERPA_MODEL_NAME,
     KEYBIND_PRESETS,
@@ -79,6 +82,8 @@ def test_write_config_creates_toml_with_cuda(tmp_path):
         assert "instant_mode = false" in content
         assert "sherpa_enable_parakeet_streaming = false" in content
         assert 'output_mode = "streaming_partial"' in content
+        assert f'typing_final_injection_mode = "{DEFAULT_FINAL_INJECTION_MODE}"' in content
+        assert "use_clipboard_for_final = true" in content
 
 
 def test_write_config_creates_toml_without_cuda(tmp_path):
@@ -100,6 +105,8 @@ def test_write_config_creates_toml_without_cuda(tmp_path):
         assert "instant_mode = false" in content
         assert "sherpa_enable_parakeet_streaming = false" in content
         assert 'output_mode = "streaming_partial"' in content
+        assert f'typing_final_injection_mode = "{DEFAULT_FINAL_INJECTION_MODE}"' in content
+        assert "use_clipboard_for_final = true" in content
 
 
 def test_write_config_sherpa_custom_model_name(tmp_path):
@@ -117,6 +124,8 @@ def test_write_config_sherpa_custom_model_name(tmp_path):
         assert 'sherpa_decode_mode = "offline_instant"' in content
         assert "sherpa_enable_parakeet_streaming = false" in content
         assert 'output_mode = "final_only"' in content
+        assert f'typing_final_injection_mode = "{DEFAULT_FINAL_INJECTION_MODE}"' in content
+        assert "use_clipboard_for_final = true" in content
 
 
 def test_write_config_sherpa_parakeet_streaming_override(tmp_path):
@@ -138,6 +147,8 @@ def test_write_config_sherpa_parakeet_streaming_override(tmp_path):
         assert "instant_mode = false" in content
         assert "sherpa_enable_parakeet_streaming = true" in content
         assert 'output_mode = "streaming_partial"' in content
+        assert f'typing_final_injection_mode = "{DEFAULT_FINAL_INJECTION_MODE}"' in content
+        assert "use_clipboard_for_final = true" in content
 
 
 def test_write_config_nemo_sets_device(tmp_path):
@@ -152,6 +163,28 @@ def test_write_config_nemo_sets_device(tmp_path):
         content = (tmp_path / "config.toml").read_text()
         assert 'asr_backend = "nemo"' in content
         assert 'device = "cuda"' in content
+        assert f'typing_final_injection_mode = "{DEFAULT_FINAL_INJECTION_MODE}"' in content
+
+
+def test_write_config_typing_mode_direct_updates_legacy_flag(tmp_path):
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        write_config("moonshine", typing_final_injection_mode="direct")
+
+    content = (tmp_path / "config.toml").read_text()
+    assert 'typing_final_injection_mode = "direct"' in content
+    assert "use_clipboard_for_final = false" in content
+
+
+def test_write_config_rejects_invalid_typing_mode(tmp_path):
+    with patch("shuvoice.wizard_state.Config") as mock_config:
+        mock_config.config_dir.return_value = tmp_path
+        with patch("shuvoice.wizard_state._detect_cuda", return_value=False):
+            with pytest.raises(ValueError, match="typing_final_injection_mode"):
+                write_config("nemo", typing_final_injection_mode="invalid")
 
 
 def test_write_config_does_not_overwrite_existing(tmp_path):
@@ -229,8 +262,14 @@ def test_format_summary_contains_backend_and_keybind():
     assert DEFAULT_KEYBIND_ID == "right_ctrl"
     result = format_summary("sherpa")
     assert "Sherpa-ONNX" in result
+    assert "Final injection:  Auto (recommended)" in result
     assert "Right Control" in result
     assert "hyprland.conf" in result
+
+
+def test_format_summary_shows_selected_final_injection_mode():
+    result = format_summary("nemo", typing_final_injection_mode="direct")
+    assert "Final injection:  Direct typing (keystroke simulation)" in result
 
 
 def test_format_summary_sherpa_default_model_shows_streaming_mode():
