@@ -10,6 +10,7 @@ from shuvoice.control import ControlServer
 def noop(*args, **kwargs):
     return None
 
+
 def test_control_socket_timeout_dos_protection(tmp_path: Path):
     """
     Verify that the control server times out idle connections to prevent DoS.
@@ -53,8 +54,7 @@ def test_control_socket_timeout_dos_protection(tmp_path: Path):
             assert elapsed < 3.0, "Server took too long to timeout"
 
             response = data.decode("utf-8").strip()
-            assert "ERROR timeout" in response or response == "", \
-                f"Unexpected response: {response}"
+            assert "ERROR timeout" in response or response == "", f"Unexpected response: {response}"
 
         except socket.timeout:
             pytest.fail("Client timed out waiting for server to close connection")

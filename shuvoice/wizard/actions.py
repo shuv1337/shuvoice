@@ -173,7 +173,9 @@ def maybe_download_model(
 
     if not backend_cls.capabilities.supports_model_download:
         _emit(1.0, "Model download skipped (lazy backend)")
-        return "skipped", _with_provider_note("Selected backend downloads models lazily at runtime.")
+        return "skipped", _with_provider_note(
+            "Selected backend downloads models lazily at runtime."
+        )
 
     missing = backend_cls.dependency_errors()
     if missing:
@@ -266,8 +268,7 @@ def finish_setup(
             sherpa_enable_parakeet_streaming=False,
         )
         model_message = (
-            f"{model_message} "
-            "Applied fallback profile: Streaming (Zipformer default model)."
+            f"{model_message} Applied fallback profile: Streaming (Zipformer default model)."
         )
 
     write_marker()

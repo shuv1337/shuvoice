@@ -49,6 +49,7 @@ DEFAULT_KEYBIND_ID = "right_ctrl"
 def _is_parakeet_sherpa_model_name(model_name: str) -> bool:
     return "parakeet" in str(model_name).strip().lower()
 
+
 # Keybind presets for push-to-talk setup.
 # (id, display_label, hyprland_bind_key_spec, description)
 # hyprland_bind_key_spec is the "MODS, KEY" portion for bind/bindr lines.
@@ -376,9 +377,9 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
                 _spec, command = parsed
                 command_lc = command.lower()
                 is_shuvoice_control = _is_shuvoice_control_command(command_lc)
-                is_start_or_stop = _is_shuvoice_start_command(command_lc) or _is_shuvoice_stop_command(
+                is_start_or_stop = _is_shuvoice_start_command(
                     command_lc
-                )
+                ) or _is_shuvoice_stop_command(command_lc)
                 if is_shuvoice_control and is_start_or_stop:
                     continue
                 filtered_lines.append(raw_line)
