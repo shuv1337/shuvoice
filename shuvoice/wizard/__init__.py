@@ -20,9 +20,15 @@ import gi
 
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
-gi.require_version("Gtk4LayerShell", "1.0")
+
+try:
+    gi.require_version("Gtk4LayerShell", "1.0")
+    from gi.repository import Gtk4LayerShell as LayerShell
+except ValueError:
+    # Allow import without LayerShell for headless tests/docs
+    LayerShell = None  # type: ignore
+
 from gi.repository import GLib, Gtk
-from gi.repository import Gtk4LayerShell as LayerShell
 
 from ..wizard_state import (
     ASR_BACKENDS,
