@@ -209,9 +209,7 @@ class WelcomeWizard(Gtk.Application):
         self._sherpa_profile_help.set_margin_bottom(4)
         page.append(self._sherpa_profile_help)
 
-        self._sherpa_streaming_radio = Gtk.CheckButton(
-            label="Streaming (Zipformer Kroko model)"
-        )
+        self._sherpa_streaming_radio = Gtk.CheckButton(label="Streaming (Zipformer Kroko model)")
         self._sherpa_streaming_radio.add_css_class("wizard-radio")
         self._sherpa_streaming_radio.connect(
             "toggled",
@@ -253,9 +251,7 @@ class WelcomeWizard(Gtk.Application):
         self._sherpa_parakeet_streaming_desc.set_halign(Gtk.Align.START)
         page.append(self._sherpa_parakeet_streaming_desc)
 
-        self._sherpa_parakeet_radio = Gtk.CheckButton(
-            label="Instant (Parakeet TDT v3 int8 model)"
-        )
+        self._sherpa_parakeet_radio = Gtk.CheckButton(label="Instant (Parakeet TDT v3 int8 model)")
         self._sherpa_parakeet_radio.add_css_class("wizard-radio")
         self._sherpa_parakeet_radio.set_group(self._sherpa_streaming_radio)
         self._sherpa_parakeet_radio.connect(
@@ -544,9 +540,8 @@ class WelcomeWizard(Gtk.Application):
             self._sherpa_enable_parakeet_streaming = False
             return
 
-        if (
-            self._sherpa_model_name == PARAKEET_TDT_V3_INT8_MODEL_NAME
-            and bool(getattr(self, "_sherpa_enable_parakeet_streaming", False))
+        if self._sherpa_model_name == PARAKEET_TDT_V3_INT8_MODEL_NAME and bool(
+            getattr(self, "_sherpa_enable_parakeet_streaming", False)
         ):
             parakeet_streaming_radio.set_active(True)
         elif self._sherpa_model_name == PARAKEET_TDT_V3_INT8_MODEL_NAME:
@@ -691,9 +686,7 @@ class WelcomeWizard(Gtk.Application):
             ),
         }
         if self._asr_backend == "sherpa":
-            write_kwargs["sherpa_enable_parakeet_streaming"] = (
-                sherpa_enable_parakeet_streaming
-            )
+            write_kwargs["sherpa_enable_parakeet_streaming"] = sherpa_enable_parakeet_streaming
 
         write_config(
             self._asr_backend,

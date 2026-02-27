@@ -130,9 +130,7 @@ def test_on_finish_passes_parakeet_streaming_profile_to_write_config():
 
     with (
         patch("shuvoice.wizard.write_config") as write_config,
-        patch(
-            "shuvoice.wizard.maybe_download_model", return_value=("skipped", "noop")
-        ),
+        patch("shuvoice.wizard.maybe_download_model", return_value=("skipped", "noop")),
         patch("shuvoice.wizard.write_marker"),
     ):
         WelcomeWizard._on_finish(wizard, None)

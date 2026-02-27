@@ -16,11 +16,18 @@ if "evdev" not in sys.modules:
     except ImportError:
         sys.modules["evdev"] = MagicMock()
 
-# Check if Gtk is available; if not, mock gi
+# Check if Gtk/LayerShell are available; if not, mock gi
 try:
     import gi
 
     gi.require_version("Gtk", "4.0")
+    # This check is crucial: even if Gtk is present (via python-gi),
+    # Gtk4LayerShell might be missing in the system packages (common in CI/containers).
+    # If this fails, we must fall back to full mocking to prevent module-level crashes.
+    try:
+        gi.require_version("Gtk4LayerShell", "1.0")
+    except ValueError:
+        raise ImportError("Gtk4LayerShell namespace missing")
 except (ImportError, ValueError):
     # Mock gi structure
     mock_gi = MagicMock()
