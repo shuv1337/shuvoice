@@ -124,7 +124,9 @@ def test_sherpa_startup_guard_allows_non_parakeet_streaming(tmp_path: Path):
     assert sherpa_cls.startup_errors(cfg) == []
 
 
-def test_sherpa_startup_warning_cuda_fallback_applies_in_streaming_mode(monkeypatch, tmp_path: Path):
+def test_sherpa_startup_warning_cuda_fallback_applies_in_streaming_mode(
+    monkeypatch, tmp_path: Path
+):
     model_dir = _make_sherpa_model_dir(tmp_path)
     cfg = Config(
         asr_backend="sherpa",
