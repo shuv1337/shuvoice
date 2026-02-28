@@ -469,12 +469,15 @@ class TestSherpaOnlineRecognizerInit:
             sherpa_enable_parakeet_streaming=True,
         )
         backend = create_backend("sherpa", cfg)
-        backend._model_files = {
-            "tokens": model_dir / "tokens.txt",
-            "encoder": model_dir / "encoder.onnx",
-            "decoder": model_dir / "decoder.onnx",
-            "joiner": model_dir / "joiner.onnx",
-        }
+        mock_sherpa = MagicMock()
 
-        with pytest.raises(RuntimeError, match="window_size"):
-            backend._load_online_recognizer()
+        with patch.dict("sys.modules", {"sherpa_onnx": mock_sherpa}):
+            backend._model_files = {
+                "tokens": model_dir / "tokens.txt",
+                "encoder": model_dir / "encoder.onnx",
+                "decoder": model_dir / "decoder.onnx",
+                "joiner": model_dir / "joiner.onnx",
+            }
+
+            with pytest.raises(RuntimeError, match="window_size"):
+                backend._load_online_recognizer()
