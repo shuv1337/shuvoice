@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from shuvoice.config import Config
+
+gi = pytest.importorskip("gi")
+try:
+    gi.require_version("Gtk4LayerShell", "1.0")
+except ValueError:
+    pytest.skip("Gtk4LayerShell not available", allow_module_level=True)
+
+# ruff: noqa: E402
 from shuvoice.wizard.actions import maybe_download_model
 
 
