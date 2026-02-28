@@ -451,6 +451,7 @@ class TestSherpaOnlineRecognizerInit:
 
         assert captured_kwargs.get("model_type") == "nemo_transducer"
 
+    @patch.dict("sys.modules", {"sherpa_onnx": MagicMock()})
     def test_online_parakeet_streaming_fails_fast_without_window_size_metadata(
         self, tmp_path: Path
     ):
