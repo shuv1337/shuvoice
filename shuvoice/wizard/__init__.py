@@ -211,9 +211,7 @@ class WelcomeWizard(Gtk.Application):
         self._sherpa_profile_help.set_margin_bottom(4)
         page.append(self._sherpa_profile_help)
 
-        self._sherpa_streaming_radio = Gtk.CheckButton(
-            label="Streaming (Zipformer Kroko model)"
-        )
+        self._sherpa_streaming_radio = Gtk.CheckButton(label="Streaming (Zipformer Kroko model)")
         self._sherpa_streaming_radio.add_css_class("wizard-radio")
         self._sherpa_streaming_radio.connect(
             "toggled",
@@ -655,9 +653,7 @@ class WelcomeWizard(Gtk.Application):
             ),
         }
         if self._asr_backend == "sherpa":
-            write_kwargs["sherpa_enable_parakeet_streaming"] = (
-                sherpa_enable_parakeet_streaming
-            )
+            write_kwargs["sherpa_enable_parakeet_streaming"] = sherpa_enable_parakeet_streaming
 
         write_config(
             self._asr_backend,

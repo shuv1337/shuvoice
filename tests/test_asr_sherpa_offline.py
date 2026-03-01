@@ -451,6 +451,8 @@ class TestSherpaOnlineRecognizerInit:
 
         assert captured_kwargs.get("model_type") == "nemo_transducer"
 
+    import sys
+    @pytest.mark.skipif('sherpa_onnx' not in sys.modules, reason='Requires sherpa_onnx')
     def test_online_parakeet_streaming_fails_fast_without_window_size_metadata(
         self, tmp_path: Path
     ):

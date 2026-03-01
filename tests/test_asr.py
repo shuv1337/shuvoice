@@ -243,7 +243,9 @@ def test_sherpa_auto_download_uses_configured_model_name(monkeypatch, tmp_path: 
 
 
 def test_sherpa_startup_errors_block_parakeet_streaming_by_default():
-    cfg = Config(asr_backend="sherpa", sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8")
+    cfg = Config(
+        asr_backend="sherpa", sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+    )
 
     sherpa_cls = get_backend_class("sherpa")
     errors = sherpa_cls.startup_errors(cfg)
