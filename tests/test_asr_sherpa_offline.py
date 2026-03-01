@@ -476,5 +476,6 @@ class TestSherpaOnlineRecognizerInit:
             "joiner": model_dir / "joiner.onnx",
         }
 
-        with pytest.raises(RuntimeError, match="window_size"):
-            backend._load_online_recognizer()
+        with patch.dict("sys.modules", {"sherpa_onnx": MagicMock()}):
+            with pytest.raises(RuntimeError, match="window_size"):
+                backend._load_online_recognizer()
