@@ -27,19 +27,9 @@ The README uses a `picture` block to select a light/dark logo depending on viewe
 ```html
 <p align="center">
   <picture>
-    <source
-      media="(prefers-color-scheme: dark)"
-      srcset="./docs/assets/branding/shuvoice-variant-dark-lockup.png"
-    />
-    <source
-      media="(prefers-color-scheme: light)"
-      srcset="./docs/assets/branding/shuvoice-variant-light-lockup.png"
-    />
-    <img
-      src="./docs/assets/branding/shuvoice-variant-dark-lockup.png"
-      alt="ShuVoice logo"
-      width="760"
-    />
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/branding/shuvoice-variant-dark-lockup.png">
+    <source media="(prefers-color-scheme: light)" srcset="./docs/assets/branding/shuvoice-variant-light-lockup.png">
+    <img src="./docs/assets/branding/shuvoice-variant-dark-lockup.png" alt="ShuVoice logo" width="760">
   </picture>
 </p>
 ```
@@ -56,10 +46,10 @@ sudo pacman -S imagemagick oxipng   # Arch Linux
 
 ### Target dimensions
 
-| Asset                              | Max width | Rationale                                               |
-| ---------------------------------- | --------: | ------------------------------------------------------- |
-| `shuvoice-variant-dark-lockup.png` |     960px | README displays at 760px; 960 provides retina headroom  |
-| All others                         |     640px | Runtime splash/wizard display at 320px; 640 provides 2× |
+| Asset | Max width | Rationale |
+|---|---:|---|
+| `shuvoice-variant-dark-lockup.png` | 960px | README displays at 760px; 960 provides retina headroom |
+| All others | 640px | Runtime splash/wizard display at 320px; 640 provides 2× |
 
 ### Optimization workflow
 
