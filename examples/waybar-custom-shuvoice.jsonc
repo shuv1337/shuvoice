@@ -8,6 +8,6 @@
     "on-click": "shuvoice-waybar toggle-record",
     "on-click-middle": "shuvoice-waybar service-toggle",
     "on-click-right": "shuvoice-waybar menu",
-    "tooltip": true
-  }
+    "tooltip": true,
+  },
 }

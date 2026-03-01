@@ -28,11 +28,11 @@ Core pipeline + production hardening are implemented:
 
 ## Current backend models & providers
 
-| Backend (`asr_backend`) | Current model(s) | Provider setting | Supported providers |
-|---|---|---|---|
-| `nemo` | `nvidia/nemotron-speech-streaming-en-0.6b` | `device` | `cuda` (default), `cpu` |
-| `sherpa` | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` (streaming default), `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8` (offline instant) | `sherpa_provider` | `cpu` (default), `cuda` |
-| `moonshine` | `moonshine/tiny` (default, also `moonshine/base`) | `moonshine_provider` | `cpu` (default), `cuda` |
+| Backend (`asr_backend`) | Current model(s)                                                                                                                          | Provider setting     | Supported providers     |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | ----------------------- |
+| `nemo`                  | `nvidia/nemotron-speech-streaming-en-0.6b`                                                                                                | `device`             | `cuda` (default), `cpu` |
+| `sherpa`                | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` (streaming default), `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8` (offline instant) | `sherpa_provider`    | `cpu` (default), `cuda` |
+| `moonshine`             | `moonshine/tiny` (default, also `moonshine/base`)                                                                                         | `moonshine_provider` | `cpu` (default), `cuda` |
 
 Model locations in this repo/runtime:
 
@@ -50,15 +50,16 @@ Results below were measured on 2026-02-22 using `scripts/tts_roundtrip.py` with 
 same 10-utterance phrase set used by `tests/integration/test_roundtrip_regression.py`
 (2 phrases × 5 repeats, `--flush-chunks 5`).
 
-| Model/profile | Median similarity | Mean similarity | Empty ratio | Wall time (10 utt) | RTF (wall/audio, lower is faster) |
-|---|---:|---:|---:|---:|---:|
-| NeMo `nvidia/nemotron-speech-streaming-en-0.6b` (`device=cuda`) | 0.776 | 0.775 | 0.000 | 8.33s | 0.26 |
-| Sherpa `...kroko-2025-08-06` (`provider=cuda`) | 0.720 | 0.720 | 0.000 | 2.52s | 0.08 |
-| Sherpa `...kroko-2025-08-06` (`provider=cpu`) | 0.720 | 0.720 | 0.000 | 1.62s | 0.05 |
-| Moonshine `moonshine/base` | 0.625 | 0.625 | 0.000 | 21.93s | 0.68 |
-| Moonshine `moonshine/tiny` | 0.795 | 0.795 | 0.000 | 10.03s | 0.31 |
+| Model/profile                                                   | Median similarity | Mean similarity | Empty ratio | Wall time (10 utt) | RTF (wall/audio, lower is faster) |
+| --------------------------------------------------------------- | ----------------: | --------------: | ----------: | -----------------: | --------------------------------: |
+| NeMo `nvidia/nemotron-speech-streaming-en-0.6b` (`device=cuda`) |             0.776 |           0.775 |       0.000 |              8.33s |                              0.26 |
+| Sherpa `...kroko-2025-08-06` (`provider=cuda`)                  |             0.720 |           0.720 |       0.000 |              2.52s |                              0.08 |
+| Sherpa `...kroko-2025-08-06` (`provider=cpu`)                   |             0.720 |           0.720 |       0.000 |              1.62s |                              0.05 |
+| Moonshine `moonshine/base`                                      |             0.625 |           0.625 |       0.000 |             21.93s |                              0.68 |
+| Moonshine `moonshine/tiny`                                      |             0.795 |           0.795 |       0.000 |             10.03s |                              0.31 |
 
 Notes:
+
 - This is a **regression stress fixture**, not a universal quality ranking.
 - Numbers include model load + full roundtrip harness runtime.
 - Moonshine throughput improved via deferred chunk-buffer coalescing in `MoonshineBackend.process_chunk()`.
@@ -261,6 +262,7 @@ python -m shuvoice --control status
 ```
 
 Notes:
+
 - `start`/`stop` is recommended for push-to-talk flows (`bind` + `bindr`).
 - `status` may report `processing` briefly after `stop`/`toggle` while final text is being flushed/typed.
 - CLI waits up to 2s after `stop` (or a stop-side `toggle`) for processing to finish; adjust with `--control-wait-sec`.
@@ -336,12 +338,24 @@ State classes exported by the module:
 Example CSS:
 
 ```css
-#custom-shuvoice.recording { color: #f38ba8; }
-#custom-shuvoice.processing { color: #fab387; }
-#custom-shuvoice.idle { color: #a6e3a1; }
-#custom-shuvoice.starting { color: #f9e2af; }
-#custom-shuvoice.stopped { color: #7f849c; }
-#custom-shuvoice.error { color: #f38ba8; }
+#custom-shuvoice.recording {
+  color: #f38ba8;
+}
+#custom-shuvoice.processing {
+  color: #fab387;
+}
+#custom-shuvoice.idle {
+  color: #a6e3a1;
+}
+#custom-shuvoice.starting {
+  color: #f9e2af;
+}
+#custom-shuvoice.stopped {
+  color: #7f849c;
+}
+#custom-shuvoice.error {
+  color: #f38ba8;
+}
 ```
 
 Hyprland blur/transparency for the overlay layer surface:
@@ -376,11 +390,13 @@ selected key is not already used (default presets include **Insert** and
 **Right Control**).
 
 When Sherpa is selected, the wizard lets you choose between:
+
 - Streaming (Zipformer)
 - Streaming (Parakeet, explicit override)
 - Instant (Parakeet)
 
 Wizard now also maps typing/output behavior automatically:
+
 - Streaming profiles -> `output_mode = "streaming_partial"`
 - Instant profile -> `output_mode = "final_only"`
 
@@ -438,6 +454,7 @@ sherpa_decode_mode = "auto"  # auto | streaming | offline_instant
 ```
 
 Resolution rules:
+
 - `streaming`: always use the existing streaming chunk path.
 - `offline_instant`: accumulate audio while PTT is held, decode once on release,
   and commit only the final transcript.
@@ -445,6 +462,7 @@ Resolution rules:
   `instant_mode = true`; otherwise resolves to `streaming`.
 
 Parakeet safety gate:
+
 - `sherpa_enable_parakeet_streaming = false` (default): block Parakeet + streaming.
 - `sherpa_enable_parakeet_streaming = true`: allow Parakeet + streaming.
 
@@ -587,6 +605,7 @@ python scripts/tts_roundtrip.py \
 ```
 
 The script:
+
 - generates WAV files via `espeak-ng`
 - streams each file through ShuVoice ASR chunking logic
 - prints reference vs hypothesis similarity
@@ -650,7 +669,7 @@ ShuVoice is released under the MIT License. See `LICENSE`.
   - Set `typing_final_injection_mode = "auto"` in your config (the new default). This detects clipboard managers and uses direct typing to prevent conflicts.
 - Recognition quality is poor / start-stop triggers repeatedly
   - Increase ASR context for accuracy (eg. `right_context=13`, with higher latency).
-  - Select the correct mic (`python -m shuvoice audio list-devices`, then set `audio_device`). Prefer device *name* over numeric index, because indices can change between runs.
+  - Select the correct mic (`python -m shuvoice audio list-devices`, then set `audio_device`). Prefer device _name_ over numeric index, because indices can change between runs.
   - Increase `input_gain` moderately (eg. `1.3` to `1.8`) if your mic is too quiet.
   - If silent presses still produce phantom text (eg. "thank you"), raise `silence_rms_threshold` slightly (eg. `0.010` to `0.015`) and/or increase `silence_rms_multiplier` (eg. `2.0`) in config.
 - Long phrases plateau or cut out mid-sentence

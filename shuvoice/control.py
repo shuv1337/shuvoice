@@ -167,6 +167,9 @@ class ControlServer:
                     break
 
                 with conn:
+                    # Security: explicit timeout on accepted connection to prevent
+                    # malicious clients from keeping the thread open indefinitely.
+                    conn.settimeout(0.5)
                     response = "ERROR invalid request"
                     try:
                         payload = conn.recv(1024)

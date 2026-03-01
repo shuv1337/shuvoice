@@ -42,15 +42,15 @@ text is typed into the focused window via direct typing or clipboard paste
 
 ## Environment
 
-| Component | Value |
-|---|---|
-| OS | Linux (Wayland/Hyprland target) |
-| Python (venv) | 3.12+ (recommended) |
-| Python (system) | 3.12+ |
-| Virtual env | `.venv/` |
-| GPU | Optional (recommended for NeMo / Sherpa CUDA) |
-| CUDA | CUDA 12.x-compatible runtime required by many prebuilt GPU wheels |
-| Package manager | `uv` (Python), `pacman` (system) |
+| Component       | Value                                                             |
+| --------------- | ----------------------------------------------------------------- |
+| OS              | Linux (Wayland/Hyprland target)                                   |
+| Python (venv)   | 3.12+ (recommended)                                               |
+| Python (system) | 3.12+                                                             |
+| Virtual env     | `.venv/`                                                          |
+| GPU             | Optional (recommended for NeMo / Sherpa CUDA)                     |
+| CUDA            | CUDA 12.x-compatible runtime required by many prebuilt GPU wheels |
+| Package manager | `uv` (Python), `pacman` (system)                                  |
 
 ### Important version notes
 
@@ -126,6 +126,7 @@ Only keys for the active backend need to be present.
 
 Optional low-latency profile: set `[asr].instant_mode = true`.
 This applies backend-specific tuning at runtime:
+
 - NeMo: forces `right_context = 0`
 - Sherpa (streaming mode): caps `sherpa_chunk_ms` to `80`
 - Sherpa (offline_instant mode): uses one-shot utterance decode on key release
@@ -136,11 +137,11 @@ This applies backend-specific tuning at runtime:
 
 Applied only for backends that do **not** request raw audio.
 
-| Key | Default | Notes |
-|---|---:|---|
-| `auto_gain_target_peak` | `0.15` | Target RMS peak for utterance gain |
-| `auto_gain_max` | `10.0` | Upper cap for utterance gain |
-| `auto_gain_settle_chunks` | `2` | Speech chunks required before gain updates |
+| Key                       | Default | Notes                                      |
+| ------------------------- | ------: | ------------------------------------------ |
+| `auto_gain_target_peak`   |  `0.15` | Target RMS peak for utterance gain         |
+| `auto_gain_max`           |  `10.0` | Upper cap for utterance gain               |
+| `auto_gain_settle_chunks` |     `2` | Speech chunks required before gain updates |
 
 ### Typing text replacements
 
@@ -160,12 +161,12 @@ Empty values delete the matched word.
 
 ### Final text injection mode (clipboard vs direct)
 
-| Key | Default | Notes |
-|---|---:|---|
-| `typing_final_injection_mode` | `auto` | `auto`, `clipboard`, `direct`. In `auto`, ShuVoice detects known clipboard watchers (`wl-paste --watch`, `wl-clip-persist`, `elephant`) and switches to direct `wtype` final typing to avoid clipboard-history pollution/races. |
-| `typing_clipboard_settle_delay_ms` | `40` | Delay between `wl-copy` and simulated `Ctrl+V` in clipboard mode to reduce paste timing races. |
-| `use_clipboard_for_final` | `true` (legacy) | Soft-deprecated compatibility flag. If `typing_final_injection_mode` is absent, this maps to `clipboard` (`true`) or `direct` (`false`). |
-| `preserve_clipboard` | `false` | Capture/restore clipboard around final commit in clipboard mode; direct mode does not touch clipboard. |
+| Key                                |         Default | Notes                                                                                                                                                                                                                           |
+| ---------------------------------- | --------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `typing_final_injection_mode`      |          `auto` | `auto`, `clipboard`, `direct`. In `auto`, ShuVoice detects known clipboard watchers (`wl-paste --watch`, `wl-clip-persist`, `elephant`) and switches to direct `wtype` final typing to avoid clipboard-history pollution/races. |
+| `typing_clipboard_settle_delay_ms` |            `40` | Delay between `wl-copy` and simulated `Ctrl+V` in clipboard mode to reduce paste timing races.                                                                                                                                  |
+| `use_clipboard_for_final`          | `true` (legacy) | Soft-deprecated compatibility flag. If `typing_final_injection_mode` is absent, this maps to `clipboard` (`true`) or `direct` (`false`).                                                                                        |
+| `preserve_clipboard`               |         `false` | Capture/restore clipboard around final commit in clipboard mode; direct mode does not touch clipboard.                                                                                                                          |
 
 ---
 
@@ -173,11 +174,11 @@ Empty values delete the matched word.
 
 ### Gain / preprocessing behavior
 
-| Backend | `wants_raw_audio` | App auto-gain | Notes |
-|---|---|---|---|
-| NeMo | `true` | Bypassed | Backend handles normalization |
-| Moonshine | `true` | Bypassed | Backend handles normalization |
-| Sherpa | `false` | Enabled | App-side gain helps quiet inputs |
+| Backend   | `wants_raw_audio` | App auto-gain | Notes                            |
+| --------- | ----------------- | ------------- | -------------------------------- |
+| NeMo      | `true`            | Bypassed      | Backend handles normalization    |
+| Moonshine | `true`            | Bypassed      | Backend handles normalization    |
+| Sherpa    | `false`           | Enabled       | App-side gain helps quiet inputs |
 
 ### NeMo Backend
 
@@ -198,12 +199,12 @@ use_cuda_graph_decoder = false
 
 #### Config keys
 
-| Key | Default | Notes |
-|---|---|---|
-| `model_name` | `nvidia/nemotron-speech-streaming-en-0.6b` | Hugging Face model ID |
-| `right_context` | `13` | 0–13; higher accuracy, higher latency |
-| `device` | `cuda` | `cuda` or `cpu` |
-| `use_cuda_graph_decoder` | `false` | Keep false unless validated |
+| Key                      | Default                                    | Notes                                 |
+| ------------------------ | ------------------------------------------ | ------------------------------------- |
+| `model_name`             | `nvidia/nemotron-speech-streaming-en-0.6b` | Hugging Face model ID                 |
+| `right_context`          | `13`                                       | 0–13; higher accuracy, higher latency |
+| `device`                 | `cuda`                                     | `cuda` or `cpu`                       |
+| `use_cuda_graph_decoder` | `false`                                    | Keep false unless validated           |
 
 #### Dependencies
 
@@ -252,15 +253,15 @@ sherpa_chunk_ms = 100
 
 #### Config keys
 
-| Key | Default | Notes |
-|---|---:|---|
-| `sherpa_model_name` | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` | Archive/model name used for auto-download when `sherpa_model_dir` is unset |
-| `sherpa_model_dir` | *none* | If unset, ShuVoice auto-downloads `sherpa_model_name` to `~/.local/share/shuvoice/models/sherpa/<sherpa_model_name>/` |
-| `sherpa_decode_mode` | `auto` | `auto`, `streaming`, or `offline_instant`. `auto` resolves to `offline_instant` for Parakeet + `instant_mode=true`, otherwise `streaming`. |
-| `sherpa_enable_parakeet_streaming` | `false` | Safety gate for Parakeet streaming path. Must be `true` to allow Parakeet with `sherpa_decode_mode = "streaming"`. |
-| `sherpa_provider` | `cpu` | `cpu` or `cuda` |
-| `sherpa_num_threads` | `2` | CPU threads |
-| `sherpa_chunk_ms` | `100` | Streaming chunk duration (ignored in `offline_instant` mode) |
+| Key                                |                                               Default | Notes                                                                                                                                      |
+| ---------------------------------- | ----------------------------------------------------: | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sherpa_model_name`                | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` | Archive/model name used for auto-download when `sherpa_model_dir` is unset                                                                 |
+| `sherpa_model_dir`                 |                                                _none_ | If unset, ShuVoice auto-downloads `sherpa_model_name` to `~/.local/share/shuvoice/models/sherpa/<sherpa_model_name>/`                      |
+| `sherpa_decode_mode`               |                                                `auto` | `auto`, `streaming`, or `offline_instant`. `auto` resolves to `offline_instant` for Parakeet + `instant_mode=true`, otherwise `streaming`. |
+| `sherpa_enable_parakeet_streaming` |                                               `false` | Safety gate for Parakeet streaming path. Must be `true` to allow Parakeet with `sherpa_decode_mode = "streaming"`.                         |
+| `sherpa_provider`                  |                                                 `cpu` | `cpu` or `cuda`                                                                                                                            |
+| `sherpa_num_threads`               |                                                   `2` | CPU threads                                                                                                                                |
+| `sherpa_chunk_ms`                  |                                                 `100` | Streaming chunk duration (ignored in `offline_instant` mode)                                                                               |
 
 Parakeet TDT v3 note (Sherpa runtime):
 
@@ -358,11 +359,11 @@ moonshine_onnx_threads = 0
 
 #### Performance expectations
 
-| Config | Per-phrase avg | Best for |
-|---|---|---|
-| `moonshine/tiny` + CPU | ~3.4s | Short utterances (<5s) on CPU-only systems |
-| `moonshine/tiny` + CUDA | ~0.5s (est.) | Interactive use with GPU |
-| `moonshine/base` + CPU | ~7.9s | Not recommended for interactive use |
+| Config                  | Per-phrase avg | Best for                                   |
+| ----------------------- | -------------- | ------------------------------------------ |
+| `moonshine/tiny` + CPU  | ~3.4s          | Short utterances (<5s) on CPU-only systems |
+| `moonshine/tiny` + CUDA | ~0.5s (est.)   | Interactive use with GPU                   |
+| `moonshine/base` + CPU  | ~7.9s          | Not recommended for interactive use        |
 
 > Moonshine re-encodes the full audio buffer on every inference call.
 > Keep `moonshine_max_window_sec` ≤ 5.0 to limit worst-case latency.
@@ -371,16 +372,16 @@ moonshine_onnx_threads = 0
 
 #### Config keys
 
-| Key | Default | Notes |
-|---|---|---|
-| `moonshine_model_name` | `moonshine/tiny` | `moonshine/tiny` (fast) or `moonshine/base` (slower, slightly more accurate) |
-| `moonshine_model_dir` | *none* | Optional local model path |
-| `moonshine_model_precision` | `float` | ONNX precision |
-| `moonshine_chunk_ms` | `100` | Chunk duration |
-| `moonshine_max_window_sec` | `5.0` | Max audio window before reset |
-| `moonshine_max_tokens` | `64` | Max generated tokens per window |
-| `moonshine_provider` | `cpu` | `cpu` or `cuda` (requires onnxruntime with CUDAExecutionProvider) |
-| `moonshine_onnx_threads` | `0` | ONNX intra-op threads; 0 = auto |
+| Key                         | Default          | Notes                                                                        |
+| --------------------------- | ---------------- | ---------------------------------------------------------------------------- |
+| `moonshine_model_name`      | `moonshine/tiny` | `moonshine/tiny` (fast) or `moonshine/base` (slower, slightly more accurate) |
+| `moonshine_model_dir`       | _none_           | Optional local model path                                                    |
+| `moonshine_model_precision` | `float`          | ONNX precision                                                               |
+| `moonshine_chunk_ms`        | `100`            | Chunk duration                                                               |
+| `moonshine_max_window_sec`  | `5.0`            | Max audio window before reset                                                |
+| `moonshine_max_tokens`      | `64`             | Max generated tokens per window                                              |
+| `moonshine_provider`        | `cpu`            | `cpu` or `cuda` (requires onnxruntime with CUDAExecutionProvider)            |
+| `moonshine_onnx_threads`    | `0`              | ONNX intra-op threads; 0 = auto                                              |
 
 #### Dependencies
 
@@ -393,11 +394,11 @@ uv sync --extra asr-moonshine
 
 ## Model Locations
 
-| Backend | Model | Location |
-|---|---|---|
-| NeMo | `nvidia/nemotron-speech-streaming-en-0.6b` | Hugging Face cache (`~/.cache/huggingface/...`) |
-| Sherpa | `sherpa_model_name` (default `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06`) | `~/.local/share/shuvoice/models/sherpa/<sherpa_model_name>/` or custom `sherpa_model_dir` |
-| Moonshine | `UsefulSensors/moonshine` | Hugging Face cache (`~/.cache/huggingface/...`) |
+| Backend   | Model                                                                               | Location                                                                                  |
+| --------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| NeMo      | `nvidia/nemotron-speech-streaming-en-0.6b`                                          | Hugging Face cache (`~/.cache/huggingface/...`)                                           |
+| Sherpa    | `sherpa_model_name` (default `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06`) | `~/.local/share/shuvoice/models/sherpa/<sherpa_model_name>/` or custom `sherpa_model_dir` |
+| Moonshine | `UsefulSensors/moonshine`                                                           | Hugging Face cache (`~/.cache/huggingface/...`)                                           |
 
 ---
 
@@ -434,13 +435,13 @@ uv sync --dev --extra asr-nemo --extra asr-sherpa --extra asr-moonshine
 
 ### Common dev tools
 
-| Tool | Purpose | Install |
-|---|---|---|
-| `patchelf` | Patch RUNPATH for CUDA provider libs | `pacman -S patchelf` |
-| `gh` | GitHub CLI | `pacman -S github-cli` |
-| `uv` | Python package manager | [astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/) |
-| `ruff` | Lint/format | managed by uv (`uv sync --dev`) |
-| `pytest` | Tests | managed by uv (`uv sync --dev`) |
+| Tool       | Purpose                              | Install                                                                 |
+| ---------- | ------------------------------------ | ----------------------------------------------------------------------- |
+| `patchelf` | Patch RUNPATH for CUDA provider libs | `pacman -S patchelf`                                                    |
+| `gh`       | GitHub CLI                           | `pacman -S github-cli`                                                  |
+| `uv`       | Python package manager               | [astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/) |
+| `ruff`     | Lint/format                          | managed by uv (`uv sync --dev`)                                         |
+| `pytest`   | Tests                                | managed by uv (`uv sync --dev`)                                         |
 
 ---
 
@@ -602,14 +603,14 @@ uv run shuvoice wizard
 
 ## Known Issues
 
-| Issue | Description | Status |
-|---|---|---|
-| [#7](https://github.com/shuv1337/shuvoice/issues/7) | Sherpa may drop trailing words on early key release | Open |
-| [#12](https://github.com/shuv1337/shuvoice/issues/12) | Moonshine repetition guard misses some token/long-clause loops | Fixed |
-| [#13](https://github.com/shuv1337/shuvoice/issues/13) | Moonshine throughput slower than NeMo/Sherpa | Mitigated (safer defaults, ONNX tuning, GPU provider) |
-| — | `sherpa-onnx` source AUR builds may fail on GCC 15 due format-security warning flag interaction | Mitigation available (`python-sherpa-onnx-bin`, upstream patch staged) |
-| — | Prebuilt Sherpa CUDA wheels may be incompatible with newer CUDA stacks | Ongoing |
-| — | Parakeet streaming is behind explicit safety gate (`sherpa_enable_parakeet_streaming = true`) and requires online-compatible encoder metadata (`window_size`); incompatible models are blocked pre-start with actionable errors | By design |
+| Issue                                                 | Description                                                                                                                                                                                                                     | Status                                                                 |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| [#7](https://github.com/shuv1337/shuvoice/issues/7)   | Sherpa may drop trailing words on early key release                                                                                                                                                                             | Open                                                                   |
+| [#12](https://github.com/shuv1337/shuvoice/issues/12) | Moonshine repetition guard misses some token/long-clause loops                                                                                                                                                                  | Fixed                                                                  |
+| [#13](https://github.com/shuv1337/shuvoice/issues/13) | Moonshine throughput slower than NeMo/Sherpa                                                                                                                                                                                    | Mitigated (safer defaults, ONNX tuning, GPU provider)                  |
+| —                                                     | `sherpa-onnx` source AUR builds may fail on GCC 15 due format-security warning flag interaction                                                                                                                                 | Mitigation available (`python-sherpa-onnx-bin`, upstream patch staged) |
+| —                                                     | Prebuilt Sherpa CUDA wheels may be incompatible with newer CUDA stacks                                                                                                                                                          | Ongoing                                                                |
+| —                                                     | Parakeet streaming is behind explicit safety gate (`sherpa_enable_parakeet_streaming = true`) and requires online-compatible encoder metadata (`window_size`); incompatible models are blocked pre-start with actionable errors | By design                                                              |
 
 ---
 
