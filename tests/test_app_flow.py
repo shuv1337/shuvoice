@@ -7,6 +7,7 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
+from shuvoice.app import GLib
 from shuvoice.utterance_state import _UtteranceState
 
 pytest.importorskip("gi")
@@ -462,10 +463,10 @@ def test_on_model_loaded_defers_activation_when_splash_is_too_fast(monkeypatch):
         _complete_model_loaded_startup=Mock(),
     )
 
-    _ = ShuVoiceApp._on_model_loaded(app)
+    result = ShuVoiceApp._on_model_loaded(app)
 
     assert app._model_loaded is True
-    # assert result == 0 # Mocked GLib.SOURCE_REMOVE value can vary
+    assert result == getattr(GLib, "SOURCE_REMOVE", 0)
     timeout_add.assert_called_once()
     delay_ms, callback = timeout_add.call_args.args
     assert delay_ms == 2000
@@ -481,13 +482,13 @@ def test_complete_model_loaded_startup_dismisses_splash_and_finishes():
         _finish_activation=Mock(),
     )
 
-    _ = ShuVoiceApp._complete_model_loaded_startup(app)
+    result = ShuVoiceApp._complete_model_loaded_startup(app)
 
     splash.dismiss.assert_called_once()
     assert app._splash is None
     assert app._splash_started_monotonic is None
     app._finish_activation.assert_called_once()
-    # assert result == 0 # Mocked GLib.SOURCE_REMOVE value can vary
+    assert result == getattr(GLib, "SOURCE_REMOVE", 0)
 
 
 def test_on_model_loaded_prefers_realized_splash_timestamp(monkeypatch):
