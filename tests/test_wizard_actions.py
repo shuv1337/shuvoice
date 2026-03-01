@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from shuvoice.config import Config
-from shuvoice.wizard.actions import maybe_download_model
+
+try:
+    from shuvoice.wizard.actions import maybe_download_model
+except ValueError:
+    pytest.skip("Gtk4LayerShell not available", allow_module_level=True)
 
 
 class _DownloadCapableBackend:
