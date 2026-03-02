@@ -551,9 +551,12 @@ def write_config(
     - explicit streaming override (``sherpa_decode_mode = "streaming"`` +
       ``sherpa_enable_parakeet_streaming = true``).
 
-    Wizard also maps the selected Sherpa profile to typing behavior:
-    - Streaming profiles -> ``[typing].output_mode = "streaming_partial"``
+    Wizard maps Sherpa profiles to overlay-only typing by default:
+    - Streaming profiles -> ``[typing].output_mode = "final_only"``
     - Instant profile -> ``[typing].output_mode = "final_only"``
+
+    Users can still opt into live partial typing manually with
+    ``[typing].output_mode = "streaming_partial"``.
 
     Final text injection mode is persisted to ``[typing].typing_final_injection_mode``
     so users can pick between clipboard paste and direct keystroke typing from
@@ -625,7 +628,7 @@ def write_config(
                 # Explicit override for Parakeet streaming path.
                 asr_table["instant_mode"] = False
                 asr_table["sherpa_decode_mode"] = "streaming"
-                typing_table["output_mode"] = "streaming_partial"
+                typing_table["output_mode"] = "final_only"
             else:
                 # Stable/default Parakeet path.
                 asr_table["instant_mode"] = True
@@ -635,7 +638,7 @@ def write_config(
             # Keep Sherpa defaults for Zipformer/non-Parakeet streaming models.
             asr_table["sherpa_decode_mode"] = "auto"
             asr_table["instant_mode"] = False
-            typing_table["output_mode"] = "streaming_partial"
+            typing_table["output_mode"] = "final_only"
 
     migrated["config_version"] = CURRENT_CONFIG_VERSION
 
@@ -693,7 +696,7 @@ def format_summary(
         if parakeet_streaming:
             profile_label = "Streaming (Parakeet)"
             decode_label = "Streaming (explicit override)"
-            output_mode_label = "streaming_partial"
+            output_mode_label = "final_only"
         elif is_parakeet:
             profile_label = "Instant (Parakeet)"
             decode_label = "Offline instant (auto-enabled)"
@@ -701,7 +704,7 @@ def format_summary(
         else:
             profile_label = "Streaming"
             decode_label = "Streaming (auto)"
-            output_mode_label = "streaming_partial"
+            output_mode_label = "final_only"
 
         lines.insert(1, f"Sherpa profile: {profile_label}")
         lines.insert(2, f"Sherpa model:   {model_label}")

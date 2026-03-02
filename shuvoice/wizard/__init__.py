@@ -201,8 +201,8 @@ class WelcomeWizard(Gtk.Application):
 
         self._sherpa_profile_help = Gtk.Label(
             label=(
-                "Streaming = live partial updates while holding push-to-talk.\n"
-                "Instant = one final transcript on key release (recommended)."
+                "Streaming = live overlay updates while holding push-to-talk.\n"
+                "Text is committed only on key release (no live partial typing)."
             )
         )
         self._sherpa_profile_help.add_css_class("wizard-desc")
@@ -224,8 +224,8 @@ class WelcomeWizard(Gtk.Application):
 
         self._sherpa_streaming_desc = Gtk.Label(
             label=(
-                "Shows incremental partial text while you hold the key. "
-                "Use this only if you specifically want live partial updates."
+                "Shows incremental transcript updates in the overlay while you hold the key. "
+                "Final text is committed on key release."
             )
         )
         self._sherpa_streaming_desc.add_css_class("wizard-radio-desc")

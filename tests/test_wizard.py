@@ -81,7 +81,7 @@ def test_write_config_creates_toml_with_cuda(tmp_path):
         assert 'sherpa_decode_mode = "auto"' in content
         assert "instant_mode = false" in content
         assert "sherpa_enable_parakeet_streaming = false" in content
-        assert 'output_mode = "streaming_partial"' in content
+        assert 'output_mode = "final_only"' in content
         assert f'typing_final_injection_mode = "{DEFAULT_FINAL_INJECTION_MODE}"' in content
         assert "use_clipboard_for_final = true" in content
 
@@ -104,7 +104,7 @@ def test_write_config_creates_toml_without_cuda(tmp_path):
         assert 'sherpa_decode_mode = "auto"' in content
         assert "instant_mode = false" in content
         assert "sherpa_enable_parakeet_streaming = false" in content
-        assert 'output_mode = "streaming_partial"' in content
+        assert 'output_mode = "final_only"' in content
         assert f'typing_final_injection_mode = "{DEFAULT_FINAL_INJECTION_MODE}"' in content
         assert "use_clipboard_for_final = true" in content
 
@@ -146,7 +146,7 @@ def test_write_config_sherpa_parakeet_streaming_override(tmp_path):
         assert 'sherpa_decode_mode = "streaming"' in content
         assert "instant_mode = false" in content
         assert "sherpa_enable_parakeet_streaming = true" in content
-        assert 'output_mode = "streaming_partial"' in content
+        assert 'output_mode = "final_only"' in content
         assert f'typing_final_injection_mode = "{DEFAULT_FINAL_INJECTION_MODE}"' in content
         assert "use_clipboard_for_final = true" in content
 
@@ -277,7 +277,7 @@ def test_format_summary_sherpa_default_model_shows_streaming_mode():
     assert "Sherpa profile: Streaming" in result
     assert "Sherpa model:   Zipformer Kroko (default)" in result
     assert "Sherpa decode:  Streaming (auto)" in result
-    assert "Output mode:    streaming_partial" in result
+    assert "Output mode:    final_only" in result
 
 
 def test_format_summary_sherpa_parakeet_model_label():
@@ -297,7 +297,7 @@ def test_format_summary_sherpa_parakeet_streaming_profile_label():
     assert "Sherpa profile: Streaming (Parakeet)" in result
     assert "Sherpa model:   Parakeet TDT v3 (int8)" in result
     assert "Sherpa decode:  Streaming (explicit override)" in result
-    assert "Output mode:    streaming_partial" in result
+    assert "Output mode:    final_only" in result
 
 
 def test_format_summary_includes_hyprland_bind_lines_for_preset():

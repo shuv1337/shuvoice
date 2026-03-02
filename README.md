@@ -377,12 +377,14 @@ selected key is not already used (default presets include **Insert** and
 
 When Sherpa is selected, the wizard lets you choose between:
 - Streaming (Zipformer)
-- Streaming (Parakeet, explicit override)
 - Instant (Parakeet)
 
-Wizard now also maps typing/output behavior automatically:
-- Streaming profiles -> `output_mode = "streaming_partial"`
+Wizard now maps typing/output behavior to safer overlay-only defaults:
+- Streaming profiles -> `output_mode = "final_only"`
 - Instant profile -> `output_mode = "final_only"`
+
+(If you explicitly want live partial typing into the focused app, set
+`output_mode = "streaming_partial"` manually.)
 
 It also shows download progress in the finish screen (with a cancel button),
 and attempts to auto-download the selected model at finish.
