@@ -95,16 +95,17 @@ def transcribe_native_chunk(app, state, error_context: str) -> bool:
         app._recover_asr_after_failure(error_context)
         return False
 
+    chunk_rms = audio_rms(to_process)
     metrics = getattr(app, "metrics", None)
     if metrics is not None:
-        metrics.observe_chunk(audio_rms(to_process), app.audio.queue.qsize())
+        metrics.observe_chunk(chunk_rms, app.audio.queue.qsize())
 
     log.debug(
         "ASR step=%s queue_size=%d raw_text_len=%d chunk_rms=%.4f gain=%.1f",
         app.asr.debug_step_num,
         app.audio.queue.qsize(),
         len(text),
-        audio_rms(to_process),
+        chunk_rms,
         state.utterance_gain,
     )
 
