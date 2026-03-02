@@ -34,7 +34,7 @@ def _validate_candidate(raw: dict[str, Any]) -> None:
     if not has_explicit_mode and has_legacy_flag:
         legacy_flag = flat.get("use_clipboard_for_final")
         if isinstance(legacy_flag, bool):
-            flat["typing_final_injection_mode"] = "clipboard" if legacy_flag else "direct"
+            flat["typing_final_injection_mode"] = "auto" if legacy_flag else "direct"
 
     valid_fields = Config.config_field_names()
     filtered = {k: v for k, v in flat.items() if k in valid_fields}

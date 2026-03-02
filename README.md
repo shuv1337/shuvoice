@@ -505,7 +505,7 @@ Final text injection behavior is controlled under `[typing]`:
 - `typing_final_injection_mode = "clipboard"`: always use clipboard paste (`wl-copy` + `Ctrl+V`).
 - `typing_final_injection_mode = "direct"`: always use direct `wtype` typing.
 - `typing_clipboard_settle_delay_ms = 40`: delay between `wl-copy` and paste in clipboard mode (helps compositor/clipboard-manager timing races).
-- `use_clipboard_for_final` is soft-deprecated; if `typing_final_injection_mode` is omitted, legacy `true` maps to `clipboard` and `false` maps to `direct`.
+- `use_clipboard_for_final` is soft-deprecated; if `typing_final_injection_mode` is omitted, legacy `true` now maps to `auto` (safer watcher-aware behavior) and `false` maps to `direct`.
 
 Quick toggle from CLI (without manually editing TOML):
 

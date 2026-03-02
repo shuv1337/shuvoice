@@ -556,14 +556,25 @@ class Config:
         # Legacy compatibility: if users only set the historical
         # `use_clipboard_for_final` flag, derive the new mode from it.
         # Explicit `typing_final_injection_mode` always wins.
+        #
+        # Safety default for legacy `true`: map to "auto" (watcher-aware)
+        # instead of forcing clipboard mode.
+        derived_mode_from_legacy = False
         has_explicit_mode = "typing_final_injection_mode" in flat
         has_legacy_flag = "use_clipboard_for_final" in flat
         if not has_explicit_mode and has_legacy_flag:
             legacy_flag = flat.get("use_clipboard_for_final")
             if isinstance(legacy_flag, bool):
-                flat["typing_final_injection_mode"] = (
-                    "clipboard" if legacy_flag else "direct"
-                )
+                derived_mode = "auto" if legacy_flag else "direct"
+                flat["typing_final_injection_mode"] = derived_mode
+
+                typing_table = migrated.get("typing")
+                if not isinstance(typing_table, dict):
+                    typing_table = {}
+                    migrated["typing"] = typing_table
+                if typing_table.get("typing_final_injection_mode") != derived_mode:
+                    typing_table["typing_final_injection_mode"] = derived_mode
+                    derived_mode_from_legacy = True
 
         valid_fields = {
             f.name for f in cls.__dataclass_fields__.values() if not f.name.startswith("_")
@@ -575,14 +586,22 @@ class Config:
         filtered = {k: v for k, v in flat.items() if k in valid_fields}
         cfg = cls(**filtered)
 
-        if config_file.exists() and report.to_version != report.from_version:
+        should_persist = report.to_version != report.from_version or derived_mode_from_legacy
+        if config_file.exists() and should_persist:
             try:
                 write_atomic(config_file, migrated)
-                log.info(
-                    "Migrated config schema v%d -> v%d",
-                    report.from_version,
-                    report.to_version,
-                )
+                if report.to_version != report.from_version:
+                    log.info(
+                        "Migrated config schema v%d -> v%d",
+                        report.from_version,
+                        report.to_version,
+                    )
+                if derived_mode_from_legacy:
+                    log.info(
+                        "Migrated legacy use_clipboard_for_final to "
+                        "typing_final_injection_mode=%s",
+                        flat.get("typing_final_injection_mode"),
+                    )
             except Exception:  # noqa: BLE001
                 log.warning("Failed to persist migrated config file", exc_info=True)
 

@@ -141,7 +141,7 @@ foo = "bar"
     assert cfg.font_size == 28
     assert cfg.font_family == "JetBrains Mono"
     assert cfg.output_mode == "streaming_partial"
-    assert cfg.typing_final_injection_mode == "clipboard"
+    assert cfg.typing_final_injection_mode == "auto"
     assert cfg.use_clipboard_for_final is True
     assert cfg.preserve_clipboard is True
     assert cfg.typing_retry_attempts == 3
@@ -180,6 +180,29 @@ use_clipboard_for_final = false
 
     assert cfg.use_clipboard_for_final is False
     assert cfg.typing_final_injection_mode == "direct"
+
+
+def test_load_legacy_clipboard_flag_true_maps_to_auto_and_persists(monkeypatch, tmp_path: Path):
+    cfg_home = tmp_path / "cfg"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg_home))
+
+    cfg_dir = cfg_home / "shuvoice"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    config_file = cfg_dir / "config.toml"
+    config_file.write_text(
+        """
+[typing]
+use_clipboard_for_final = true
+""".strip()
+    )
+
+    cfg = Config.load()
+
+    assert cfg.use_clipboard_for_final is True
+    assert cfg.typing_final_injection_mode == "auto"
+
+    persisted = config_file.read_text(encoding="utf-8")
+    assert 'typing_final_injection_mode = "auto"' in persisted
 
 
 def test_load_explicit_typing_mode_wins_over_legacy_flag(monkeypatch, tmp_path: Path):
