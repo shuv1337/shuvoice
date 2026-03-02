@@ -52,6 +52,9 @@ except (ImportError, ValueError):
     mock_gtk.StyleContext = MagicMock
     mock_gtk.AccessibleProperty.LABEL = "label"
 
+    # Mock GLib constants
+    mock_glib.SOURCE_REMOVE = 0
+
     # Make them importable from gi.repository
     mock_repo.Gtk = mock_gtk
     mock_repo.GLib = mock_glib
