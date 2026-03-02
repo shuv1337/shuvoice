@@ -67,20 +67,64 @@ class MetricsCollector:
     def observe_recovery_reset(self) -> None:
         self.increment("recovery_resets")
 
+    # -- TTS telemetry helpers ------------------------------------------------
+
+    def observe_tts_speak(self) -> None:
+        self.increment("tts_speak_count")
+
+    def observe_tts_interrupt(self) -> None:
+        self.increment("tts_interrupt_count")
+
+    def observe_tts_synth_failure(self) -> None:
+        self.increment("tts_synth_failures")
+
+    def observe_tts_playback_completion(self) -> None:
+        self.increment("tts_playback_completions")
+
+    def observe_tts_pause(self) -> None:
+        self.increment("tts_pause_count")
+
+    def observe_tts_selection_failure(self) -> None:
+        self.increment("tts_selection_failures")
+
+    def observe_tts_synth_latency(self, seconds: float) -> None:
+        self.observe_timing("tts_synth_latency_sec", seconds)
+
+    def observe_tts_playback_duration(self, seconds: float) -> None:
+        self.observe_timing("tts_playback_duration_sec", seconds)
+
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             counters = dict(self._counters)
             timings = {k: list(v) for k, v in self._timings.items()}
 
+        timing_summary: dict[str, dict[str, float]] = {
+            name: {
+                "count": len(values),
+                "avg": fmean(values) if values else 0.0,
+                "max": max(values) if values else 0.0,
+            }
+            for name, values in timings.items()
+        }
+
         summary: dict[str, Any] = {
             "counters": counters,
-            "timings": {
-                name: {
-                    "count": len(values),
-                    "avg": fmean(values) if values else 0.0,
-                    "max": max(values) if values else 0.0,
-                }
-                for name, values in timings.items()
+            "timings": timing_summary,
+            "tts": {
+                "speak_count": counters.get("tts_speak_count", 0),
+                "interrupt_count": counters.get("tts_interrupt_count", 0),
+                "synth_failures": counters.get("tts_synth_failures", 0),
+                "playback_completions": counters.get("tts_playback_completions", 0),
+                "pause_count": counters.get("tts_pause_count", 0),
+                "selection_failures": counters.get("tts_selection_failures", 0),
+                "synth_latency_sec": timing_summary.get(
+                    "tts_synth_latency_sec",
+                    {"count": 0, "avg": 0.0, "max": 0.0},
+                ),
+                "playback_duration_sec": timing_summary.get(
+                    "tts_playback_duration_sec",
+                    {"count": 0, "avg": 0.0, "max": 0.0},
+                ),
             },
         }
         return summary
@@ -97,6 +141,8 @@ class MetricsCollector:
             f"stops={counters.get('recording_stop_count', 0)} "
             f"partials={counters.get('partial_updates', 0)} "
             f"commits={counters.get('final_commits', 0)} "
+            f"tts_speaks={counters.get('tts_speak_count', 0)} "
+            f"tts_done={counters.get('tts_playback_completions', 0)} "
             f"queue_max={counters.get('queue_depth_max', 0)} "
             f"utt_avg={timings.get('utterance_duration_sec', {}).get('avg', 0.0):.2f}s"
         )

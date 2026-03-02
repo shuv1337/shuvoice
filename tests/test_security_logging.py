@@ -76,3 +76,30 @@ def test_moonshine_repetition_logs_pattern_size_not_words(caplog):
     messages = [record.getMessage() for record in caplog.records]
     assert all(secret not in message for message in messages)
     assert any("word pattern repeated" in message for message in messages)
+
+
+def test_tts_speak_logs_length_not_raw_selection(caplog, monkeypatch):
+    caplog.set_level(logging.INFO, logger="shuvoice.app")
+
+    secret_text = "super secret selected sentence"
+    monkeypatch.setattr("shuvoice.app.capture_selection", lambda: secret_text)
+
+    app = SimpleNamespace(
+        _tts_runtime_ready=lambda: True,
+        _recording=SimpleNamespace(is_set=lambda: False),
+        _processing=SimpleNamespace(is_set=lambda: False),
+        _on_recording_stop=Mock(),
+        _wait_for_stt_processing_clear=lambda timeout_sec=5.0: True,
+        config=SimpleNamespace(tts_max_chars=5000, tts_model_id="model", tts_backend="elevenlabs"),
+        _tts_voice_id="voice",
+        tts_player=SimpleNamespace(speak=Mock(return_value=False)),
+        metrics=SimpleNamespace(observe_tts_interrupt=Mock(), observe_tts_speak=Mock()),
+        tts_overlay=None,
+        _tts_last_preview_text="",
+    )
+
+    ShuVoiceApp._tts_speak_selection(app)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert all(secret_text not in message for message in messages)
+    assert any("text_len=" in message for message in messages)

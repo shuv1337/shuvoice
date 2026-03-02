@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import shutil
 import sys
 from ctypes import CDLL
@@ -10,6 +11,7 @@ from typing import Callable
 
 from ...asr import get_backend_class
 from ...config import Config
+from ...tts import get_tts_backend_class
 
 
 def run_preflight(config: Config) -> bool:
@@ -67,6 +69,49 @@ def run_preflight(config: Config) -> bool:
         sd.check_input_settings(device=config.audio_device, samplerate=config.sample_rate)
         return str(config.audio_device)
 
+    def check_tts_output_device() -> str:
+        if not config.tts_enabled:
+            return "disabled"
+        if config.tts_playback_device is None:
+            return "default"
+
+        import sounddevice as sd
+
+        # PCM output is currently 24k for ElevenLabs and local backend contract.
+        sd.check_output_settings(device=config.tts_playback_device, samplerate=24000)
+        return str(config.tts_playback_device)
+
+    def check_tts_api_key() -> str:
+        if not config.tts_enabled:
+            return "disabled"
+        if config.tts_backend != "elevenlabs":
+            return "not required"
+
+        env_name = str(config.tts_api_key_env).strip()
+        value = os.environ.get(env_name, "").strip()
+        if not value:
+            raise RuntimeError(f"Environment variable {env_name} is not set")
+
+        # Guardrail: users occasionally paste keys into the config key-name field.
+        if env_name.startswith("sk_") or env_name.startswith("xi_"):
+            raise RuntimeError(
+                "tts_api_key_env looks like a raw API key value, expected an environment variable name"
+            )
+
+        return f"{env_name} is set"
+
+    def check_tts_backend_stack() -> str:
+        if not config.tts_enabled:
+            return "disabled"
+        backend_cls = get_tts_backend_class(config.tts_backend)
+        errors = backend_cls.dependency_errors()
+        if config.tts_backend == "elevenlabs":
+            # API key presence is validated via check_tts_api_key using the configured env name.
+            errors = [err for err in errors if "API key" not in err and "ELEVENLABS_API_KEY" not in err]
+        if errors:
+            raise RuntimeError("; ".join(errors))
+        return f"{config.tts_backend} deps OK"
+
     def check_asr_stack() -> str:
         backend_cls = get_backend_class(config.asr_backend)
         errors = backend_cls.dependency_errors()
@@ -122,13 +167,16 @@ def run_preflight(config: Config) -> bool:
     add_check("Import sounddevice", check_import("sounddevice"))
     add_check("Import gi", check_import("gi"))
     add_check("Audio input device", check_audio_device)
+    add_check("Audio output device (TTS)", check_tts_output_device)
     add_check("ASR dependencies", check_asr_stack)
+    add_check("TTS dependencies", check_tts_backend_stack)
+    add_check("TTS API key", check_tts_api_key)
     add_check("wtype binary", check_binary("wtype"))
     add_check("wl-copy binary", check_binary("wl-copy"))
-    if config.preserve_clipboard:
+    if config.preserve_clipboard or config.tts_enabled:
         add_check("wl-paste binary", check_binary("wl-paste"))
     else:
-        checks.append(("wl-paste binary", True, "skipped (preserve_clipboard=false)"))
+        checks.append(("wl-paste binary", True, "skipped (preserve_clipboard=false, tts_enabled=false)"))
     add_check("gtk4-layer-shell library", check_layer_shell)
     add_check("Output mode", check_output_mode)
 

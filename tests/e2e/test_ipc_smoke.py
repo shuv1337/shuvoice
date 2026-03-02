@@ -43,7 +43,18 @@ def ipc_server(tmp_path: Path):
     runtime_dir.mkdir(parents=True, exist_ok=True)
 
     socket_path = runtime_dir / "shuvoice" / "control.sock"
-    state = {"recording": False}
+    state = {"recording": False, "tts": "idle"}
+
+    def handle_tts(command: str) -> str:
+        if command == "tts_speak":
+            state["tts"] = "playing"
+            return "OK tts speaking"
+        if command == "tts_stop":
+            state["tts"] = "idle"
+            return "OK tts stopped"
+        if command == "tts_status":
+            return f"OK {state['tts']}"
+        return "ERROR unsupported tts command"
 
     server = ControlServer(
         socket_path=str(socket_path),
@@ -51,6 +62,7 @@ def ipc_server(tmp_path: Path):
         on_stop=lambda: state.__setitem__("recording", False),
         on_toggle=lambda: state.__setitem__("recording", not state["recording"]),
         on_status=lambda: "recording" if state["recording"] else "idle",
+        on_tts_command=handle_tts,
     )
     server.start()
 
@@ -115,6 +127,28 @@ def test_control_cli_toggle_and_ping_flow(ipc_server):
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "OK toggled"
     assert state["recording"] is False
+
+
+def test_control_cli_tts_round_trip(ipc_server):
+    socket_path, state, runtime_dir = ipc_server
+
+    env = dict(os.environ)
+    env["XDG_RUNTIME_DIR"] = str(runtime_dir)
+    env["XDG_CONFIG_HOME"] = str(runtime_dir / "xdg-config")
+
+    result = _run_control_cli("tts_status", socket_path, env)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "OK idle"
+
+    result = _run_control_cli("tts_speak", socket_path, env)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "OK tts speaking"
+    assert state["tts"] == "playing"
+
+    result = _run_control_cli("tts_stop", socket_path, env)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "OK tts stopped"
+    assert state["tts"] == "idle"
 
 
 def test_control_cli_returns_error_when_socket_not_running(tmp_path: Path):

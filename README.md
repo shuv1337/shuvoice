@@ -24,6 +24,7 @@ Core pipeline + production hardening are implemented:
 - Pluggable ASR backend layer (`nemo`, `sherpa`, `moonshine`) with Sherpa streaming + offline-instant modes
 - GTK4 layer-shell overlay
 - Hyprland IPC controls via local Unix socket
+- Hyprland-first selected-text TTS workflow with ElevenLabs + interactive TTS overlay
 - `wtype` / clipboard text injection with retry + fallback
 
 ## Current backend models & providers
@@ -120,6 +121,10 @@ uv sync --extra asr-nemo
 uv sync --extra asr-sherpa
 uv sync --extra asr-moonshine
 
+# TTS backend extras:
+uv sync --extra tts-elevenlabs
+uv sync --extra tts-local
+
 # NeMo convenience alias:
 uv sync --extra asr
 ```
@@ -156,7 +161,10 @@ Checks include:
 - Python version compatibility
 - importability of key Python modules
 - audio input device validity
+- TTS output device validity (when configured)
 - ASR backend dependencies for selected `asr_backend`
+- TTS backend dependencies for selected `tts_backend`
+- ElevenLabs API key env validation (when `tts_backend = "elevenlabs"`)
 - Sherpa decode diagnostics (resolved `sherpa_decode_mode`, provider requested→effective, Parakeet runnability)
 - required binaries (`wtype`, `wl-copy`, `wl-paste`)
 - `libgtk4-layer-shell.so`
@@ -256,6 +264,15 @@ python -m shuvoice control toggle
 python -m shuvoice control status
 python -m shuvoice control metrics
 
+# TTS commands
+python -m shuvoice control tts_speak
+python -m shuvoice control tts_pause
+python -m shuvoice control tts_resume
+python -m shuvoice control tts_toggle_pause
+python -m shuvoice control tts_restart
+python -m shuvoice control tts_stop
+python -m shuvoice control tts_status
+
 # legacy form (still supported):
 python -m shuvoice --control status
 ```
@@ -264,12 +281,17 @@ Notes:
 - `start`/`stop` is recommended for push-to-talk flows (`bind` + `bindr`).
 - `status` may report `processing` briefly after `stop`/`toggle` while final text is being flushed/typed.
 - CLI waits up to 2s after `stop` (or a stop-side `toggle`) for processing to finish; adjust with `--control-wait-sec`.
+- TTS commands do not use post-stop processing wait.
 
 Hyprland example:
 
 ```ini
-bind = , Insert, exec, shuvoice --control start
-bindr = , Insert, exec, shuvoice --control stop
+# Push-to-talk (STT)
+bind = , Insert, exec, shuvoice control start --control-wait-sec 0
+bindr = , Insert, exec, shuvoice control stop --control-wait-sec 0
+
+# Speak selected text (TTS)
+bind = SUPER CTRL, S, exec, shuvoice control tts_speak --control-wait-sec 0
 ```
 
 ## Waybar module (tray-style status icon)
@@ -347,10 +369,13 @@ Example CSS:
 Hyprland blur/transparency for the overlay layer surface:
 
 ```ini
-# ShuVoice uses layer-shell namespace: stt-overlay
+# ShuVoice uses layer-shell namespaces: stt-overlay, tts-overlay
 layerrule = blur, stt-overlay
 layerrule = ignorealpha 0.20, stt-overlay
 layerrule = xray 1, stt-overlay
+
+layerrule = blur, tts-overlay
+layerrule = ignorealpha 0.20, tts-overlay
 ```
 
 Then tune overlay styling in `~/.config/shuvoice/config.toml`:
@@ -482,6 +507,26 @@ This applies backend-specific behavior:
 - Moonshine: forces `moonshine_model_name = "moonshine/tiny"`, caps `moonshine_max_window_sec` to `3.0`, and caps `moonshine_max_tokens` to `48`
 
 `right_context` applies to NeMo only.
+
+TTS settings live under `[tts]`:
+
+```toml
+[tts]
+tts_enabled = true
+tts_backend = "elevenlabs" # elevenlabs | local
+tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"
+tts_model_id = "eleven_multilingual_v2"
+tts_api_key_env = "ELEVENLABS_API_KEY"
+tts_output_format = "pcm_24000"
+tts_max_chars = 5000
+tts_request_timeout_sec = 30.0
+# tts_playback_device = 3 # optional name/index
+```
+
+Key behavior:
+- `tts_speak` captures selected text with `wl-paste --primary` first, then clipboard fallback.
+- Re-triggering `tts_speak` while already speaking interrupts current playback and starts new speech.
+- STT recording and TTS playback are mutually exclusive.
 
 ShuVoice includes built-in brand corrections for common ASR variants of
 `ShuVoice` and `Hyprland` (for example: `shove voice`, `shu voice`,
@@ -642,6 +687,14 @@ ShuVoice is released under the MIT License. See `LICENSE`.
   - Or use a Python 3.13 virtualenv for ASR installs.
 - `espeak-ng not found` when running `scripts/tts_roundtrip.py`
   - Install with: `sudo pacman -S espeak-ng`.
+- `tts_speak` says no selected text
+  - Highlight text in the target app first. ShuVoice checks primary selection then clipboard fallback.
+  - Verify `wl-paste` is installed and working.
+- ElevenLabs auth errors (`401`) or missing API key
+  - Export your API key in the env var named by `[tts].tts_api_key_env` (default `ELEVENLABS_API_KEY`).
+  - Run `shuvoice preflight` to validate TTS key/env wiring.
+- TTS playback device errors
+  - Leave `tts_playback_device` unset to use default, or set a valid output device name/index.
 - `Control socket not found ...`
   - Start ShuVoice first (`python -m shuvoice` or `python -m shuvoice run`) before sending `control` commands.
 - `libgtk4-layer-shell.so not found`

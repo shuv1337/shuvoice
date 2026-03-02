@@ -19,6 +19,9 @@
   - [NeMo](#nemo-backend)
   - [Sherpa ONNX](#sherpa-onnx-backend)
   - [Moonshine](#moonshine-backend)
+- [TTS Backends](#tts-backends)
+  - [ElevenLabs](#elevenlabs-backend)
+  - [Local (Piper scaffold)](#local-piper-scaffold)
 - [Model Locations](#model-locations)
 - [Build Artifacts](#build-artifacts)
 - [System Prerequisites](#system-prerequisites)
@@ -114,7 +117,7 @@ WantedBy=default.target
 Top-level schema marker: `config_version = 1` (legacy unversioned files are treated as v0 and auto-migrated).
 
 Config sections map to `shuvoice/config.py::Config`:
-`[audio]`, `[asr]`, `[overlay]`, `[control]`, `[typing]`, `[streaming]`, `[feedback]`.
+`[audio]`, `[asr]`, `[overlay]`, `[control]`, `[tts]`, `[typing]`, `[streaming]`, `[feedback]`.
 Nested table: `[typing.text_replacements]` for custom phrase corrections.
 
 **Example config**: `examples/config.toml`.
@@ -131,6 +134,14 @@ This applies backend-specific tuning at runtime:
 - Sherpa (offline_instant mode): uses one-shot utterance decode on key release
 - Moonshine: forces `moonshine_model_name = "moonshine/tiny"`, caps
   `moonshine_max_window_sec` to `3.0`, caps `moonshine_max_tokens` to `48`
+
+### TTS trigger + selection behavior
+
+- Primary command: `shuvoice control tts_speak`
+- Recommended Hyprland bind: `SUPER + CTRL + S`
+- Selection capture order: `wl-paste --primary --no-newline` first, then
+  clipboard fallback (`wl-paste --no-newline`)
+- STT and TTS are mutually exclusive at runtime (starting one stops the other)
 
 ### Audio gain tuning (app-side)
 
@@ -391,6 +402,59 @@ uv sync --extra asr-moonshine
 
 ---
 
+## TTS Backends
+
+### ElevenLabs Backend
+
+**Status**: ✅ Production-ready (streaming path)  
+**Backend key**: `tts_backend = "elevenlabs"`  
+**Modules**: `shuvoice/tts_elevenlabs.py`, `shuvoice/tts_player.py`, `shuvoice/tts_overlay.py`
+
+#### Config
+
+```toml
+[tts]
+tts_enabled = true
+tts_backend = "elevenlabs"
+tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"
+tts_model_id = "eleven_multilingual_v2"
+tts_api_key_env = "ELEVENLABS_API_KEY"
+tts_output_format = "pcm_24000"
+tts_max_chars = 5000
+tts_request_timeout_sec = 30.0
+```
+
+#### Notes
+
+- API key value is **env-only** (named by `tts_api_key_env`), never stored in config.
+- `tts_speak` captures selected text using primary selection first, clipboard fallback second.
+- Overlay namespace: `tts-overlay` (interactive controls, keyboard mode on-demand).
+
+### Local (Piper scaffold)
+
+**Status**: ⚠️ Scaffold / experimental  
+**Backend key**: `tts_backend = "local"`  
+**Module**: `shuvoice/tts_local.py`
+
+#### Config
+
+```toml
+[tts]
+tts_backend = "local"
+tts_local_model_path = "/path/to/piper-model.onnx" # file or directory with .onnx voices
+tts_local_voice = "en_US-amy-medium"                # optional voice/model stem
+tts_local_device = 3                                 # optional output device hint
+```
+
+#### Dependencies
+
+```bash
+uv sync --extra tts-local
+# requires `piper` binary in PATH
+```
+
+---
+
 ## Model Locations
 
 | Backend | Model | Location |
@@ -398,6 +462,8 @@ uv sync --extra asr-moonshine
 | NeMo | `nvidia/nemotron-speech-streaming-en-0.6b` | Hugging Face cache (`~/.cache/huggingface/...`) |
 | Sherpa | `sherpa_model_name` (default `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06`) | `~/.local/share/shuvoice/models/sherpa/<sherpa_model_name>/` or custom `sherpa_model_dir` |
 | Moonshine | `UsefulSensors/moonshine` | Hugging Face cache (`~/.cache/huggingface/...`) |
+| ElevenLabs TTS | `tts_default_voice_id` + `tts_model_id` | Remote API (`api.elevenlabs.io`); key in env (`tts_api_key_env`) |
+| Local TTS | `tts_local_model_path` / `tts_local_voice` | Local filesystem path (Piper `.onnx` model file(s)) |
 
 ---
 
@@ -619,13 +685,14 @@ uv run shuvoice wizard
 
 Update when you:
 
-1. Change backend config keys/defaults (`shuvoice/config.py`).
-2. Upgrade runtime dependencies (torch, nemo, sherpa-onnx, onnxruntime, CUDA).
-3. Move/add model files or model download defaults.
+1. Change backend config keys/defaults (`shuvoice/config.py`) — including `[tts]` keys.
+2. Upgrade runtime dependencies (torch, nemo, sherpa-onnx, onnxruntime, CUDA, Piper/TTS tools).
+3. Move/add model files or model download defaults (ASR or local TTS).
 4. Change Sherpa GPU build/rebuild steps.
-5. Add a backend.
+5. Add a backend (ASR or TTS).
 6. Resolve/discover major issues.
 7. Change required system packages.
+8. Change Hyprland keybind defaults or control command conventions (`tts_*`, `start/stop`).
 
 ### How to update
 

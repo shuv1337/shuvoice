@@ -529,3 +529,65 @@ def test_apply_utterance_gain_returns_input_when_gain_near_unity():
     result = ShuVoiceApp._apply_utterance_gain(SimpleNamespace(), audio, 1.01)
 
     assert result is audio
+
+
+def test_recording_start_stops_active_tts_first(monkeypatch):
+    called = {"started": False}
+
+    monkeypatch.setattr(
+        "shuvoice.app.on_recording_start",
+        lambda _app: called.__setitem__("started", True),
+    )
+
+    tts_player = SimpleNamespace(is_active=lambda: True, stop=Mock())
+    app = SimpleNamespace(tts_player=tts_player, tts_overlay=SimpleNamespace(hide=Mock()))
+
+    ShuVoiceApp._on_recording_start(app)
+
+    tts_player.stop.assert_called_once()
+    app.tts_overlay.hide.assert_called_once()
+    assert called["started"] is True
+
+
+def test_tts_speak_selection_stops_recording_and_starts_player(monkeypatch):
+    monkeypatch.setattr("shuvoice.app.capture_selection", lambda: "selected text")
+
+    recording = threading.Event()
+    recording.set()
+
+    app = SimpleNamespace(
+        _tts_runtime_ready=lambda: True,
+        _recording=recording,
+        _processing=threading.Event(),
+        _on_recording_stop=Mock(side_effect=lambda: recording.clear()),
+        _wait_for_stt_processing_clear=lambda timeout_sec=5.0: True,
+        config=SimpleNamespace(tts_max_chars=5000, tts_model_id="model", tts_backend="elevenlabs"),
+        _tts_voice_id="voice",
+        tts_player=SimpleNamespace(speak=Mock(return_value=False)),
+        metrics=SimpleNamespace(observe_tts_interrupt=Mock(), observe_tts_speak=Mock()),
+        tts_overlay=SimpleNamespace(set_state=Mock()),
+        _tts_last_preview_text="",
+    )
+
+    ShuVoiceApp._tts_speak_selection(app)
+
+    app._on_recording_stop.assert_called_once()
+    app.tts_player.speak.assert_called_once_with("selected text", "voice", "model")
+    app.metrics.observe_tts_speak.assert_called_once()
+    app.metrics.observe_tts_interrupt.assert_not_called()
+
+
+def test_handle_tts_command_returns_disabled_error_when_config_disabled():
+    app = SimpleNamespace(config=SimpleNamespace(tts_enabled=False))
+
+    assert ShuVoiceApp._handle_tts_command(app, "tts_status") == "ERROR tts disabled"
+
+
+def test_handle_tts_status_command_reports_player_state():
+    app = SimpleNamespace(
+        config=SimpleNamespace(tts_enabled=True),
+        _tts_runtime_ready=lambda: True,
+        tts_player=SimpleNamespace(state="playing"),
+    )
+
+    assert ShuVoiceApp._handle_tts_command(app, "tts_status") == "OK playing"

@@ -20,7 +20,21 @@ from typing import Callable
 
 log = logging.getLogger(__name__)
 
-VALID_COMMANDS = {"start", "stop", "toggle", "status", "ping", "metrics"}
+VALID_COMMANDS = {
+    "start",
+    "stop",
+    "toggle",
+    "status",
+    "ping",
+    "metrics",
+    "tts_speak",
+    "tts_pause",
+    "tts_resume",
+    "tts_toggle_pause",
+    "tts_restart",
+    "tts_stop",
+    "tts_status",
+}
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -93,6 +107,7 @@ class ControlServer:
         on_toggle: Callable[[], None],
         on_status: Callable[[], str],
         on_metrics: Callable[[], str] | None = None,
+        on_tts_command: Callable[[str], str] | None = None,
     ):
         self.socket_path = resolve_control_socket_path(socket_path)
         self._on_start = on_start
@@ -100,6 +115,7 @@ class ControlServer:
         self._on_toggle = on_toggle
         self._on_status = on_status
         self._on_metrics = on_metrics or (lambda: "metrics unavailable")
+        self._on_tts_command = on_tts_command
 
         self._running = threading.Event()
         self._thread: threading.Thread | None = None
@@ -204,6 +220,10 @@ class ControlServer:
             return f"OK {self._on_metrics()}"
         if command == "ping":
             return "OK pong"
+        if command.startswith("tts_"):
+            if self._on_tts_command is None:
+                return "ERROR tts not available"
+            return self._on_tts_command(command)
         return f"ERROR unknown command: {command}"
 
 

@@ -103,6 +103,13 @@ def test_subcommand_control_maps_without_legacy_warning():
     assert warnings == []
 
 
+def test_subcommand_control_accepts_tts_commands():
+    _parser, args, route, warnings = _parse(["control", "tts_speak"])
+    assert route == "control"
+    assert args.control_action == "tts_speak"
+    assert warnings == []
+
+
 def test_subcommand_config_effective_route():
     _parser, _args, route, _warnings = _parse(["config", "effective"])
     assert route == "config_effective"

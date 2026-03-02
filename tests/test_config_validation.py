@@ -98,3 +98,13 @@ def test_typing_retry_validation():
 
     with pytest.raises(ValueError, match="typing_retry_delay_ms"):
         Config(typing_retry_delay_ms=-1)
+
+
+def test_tts_timeout_validation():
+    with pytest.raises(ValueError, match="tts_request_timeout_sec"):
+        Config(tts_request_timeout_sec=0)
+
+
+def test_tts_backend_enum_validation():
+    with pytest.raises(ValueError, match="tts_backend"):
+        Config(tts_backend="azure")

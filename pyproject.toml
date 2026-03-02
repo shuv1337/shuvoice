@@ -40,6 +40,8 @@ asr-sherpa = [
 asr-moonshine = [
     "useful-moonshine-onnx",
 ]
+tts-elevenlabs = []
+tts-local = []
 dev = [
     "pytest>=8.0",
     "pytest-cov>=7.0",
@@ -94,6 +96,7 @@ select = ["E4", "E7", "E9", "F", "I"]
 [tool.ruff.lint.per-file-ignores]
 "shuvoice/app.py" = ["E402"]
 "shuvoice/overlay.py" = ["E402"]
+"shuvoice/tts_overlay.py" = ["E402", "I001"]
 "shuvoice/splash.py" = ["E402"]
 "shuvoice/wizard/__init__.py" = ["E402", "I001"]
 "shuvoice/wizard/ui.py" = ["E402"]

@@ -12,6 +12,15 @@ def test_metrics_collector_counts_and_timings():
     metrics.observe_final_commit()
     metrics.recording_stopped()
 
+    metrics.observe_tts_speak()
+    metrics.observe_tts_interrupt()
+    metrics.observe_tts_pause()
+    metrics.observe_tts_selection_failure()
+    metrics.observe_tts_synth_failure()
+    metrics.observe_tts_playback_completion()
+    metrics.observe_tts_synth_latency(0.42)
+    metrics.observe_tts_playback_duration(1.23)
+
     snap = metrics.snapshot()
 
     assert snap["counters"]["recording_start_count"] == 1
@@ -20,6 +29,15 @@ def test_metrics_collector_counts_and_timings():
     assert snap["counters"]["partial_updates"] == 1
     assert snap["counters"]["final_commits"] == 1
     assert snap["timings"]["utterance_duration_sec"]["count"] >= 1
+
+    assert snap["tts"]["speak_count"] == 1
+    assert snap["tts"]["interrupt_count"] == 1
+    assert snap["tts"]["pause_count"] == 1
+    assert snap["tts"]["selection_failures"] == 1
+    assert snap["tts"]["synth_failures"] == 1
+    assert snap["tts"]["playback_completions"] == 1
+    assert snap["tts"]["synth_latency_sec"]["count"] == 1
+    assert snap["tts"]["playback_duration_sec"]["count"] == 1
 
 
 def test_metrics_summary_line_has_no_transcript_content():

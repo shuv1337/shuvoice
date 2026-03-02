@@ -10,6 +10,22 @@ if TYPE_CHECKING:
 
 LEGACY_FLAG_WARNING = "This legacy flag is deprecated and will be removed in a future release."
 
+CONTROL_COMMAND_CHOICES = [
+    "start",
+    "stop",
+    "toggle",
+    "status",
+    "ping",
+    "metrics",
+    "tts_speak",
+    "tts_pause",
+    "tts_resume",
+    "tts_toggle_pause",
+    "tts_restart",
+    "tts_stop",
+    "tts_status",
+]
+
 
 def _add_runtime_overrides(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
@@ -164,7 +180,7 @@ def create_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--control",
-        choices=["start", "stop", "toggle", "status", "ping", "metrics"],
+        choices=CONTROL_COMMAND_CHOICES,
         default=None,
         help=f"[legacy] Equivalent to `shuvoice control <cmd>`. {LEGACY_FLAG_WARNING}",
     )
@@ -190,7 +206,7 @@ def create_parser() -> argparse.ArgumentParser:
     )
     control_parser.add_argument(
         "control_command",
-        choices=["start", "stop", "toggle", "status", "ping", "metrics"],
+        choices=CONTROL_COMMAND_CHOICES,
         help="Control command",
     )
     control_parser.add_argument(

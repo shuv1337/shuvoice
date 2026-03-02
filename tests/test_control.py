@@ -189,3 +189,50 @@ def test_control_server_metrics_command(tmp_path: Path):
         assert response == 'OK {"chunks": 12}'
     finally:
         server.stop()
+
+
+def test_control_server_routes_tts_commands(tmp_path: Path):
+    socket_path = tmp_path / "control.sock"
+    server = ControlServer(
+        socket_path=str(socket_path),
+        on_start=noop,
+        on_stop=noop,
+        on_toggle=noop,
+        on_status=lambda: "ok",
+        on_tts_command=lambda command: f"OK handled:{command}",
+    )
+
+    server.start()
+    try:
+        for _ in range(50):
+            if socket_path.exists():
+                break
+            time.sleep(0.05)
+
+        response = send_control_command("tts_status", str(socket_path), timeout=1.0)
+        assert response == "OK handled:tts_status"
+    finally:
+        server.stop()
+
+
+def test_control_server_tts_commands_without_callback_return_error(tmp_path: Path):
+    socket_path = tmp_path / "control.sock"
+    server = ControlServer(
+        socket_path=str(socket_path),
+        on_start=noop,
+        on_stop=noop,
+        on_toggle=noop,
+        on_status=lambda: "ok",
+    )
+
+    server.start()
+    try:
+        for _ in range(50):
+            if socket_path.exists():
+                break
+            time.sleep(0.05)
+
+        with pytest.raises(RuntimeError, match="tts not available"):
+            send_control_command("tts_status", str(socket_path), timeout=1.0)
+    finally:
+        server.stop()

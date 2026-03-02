@@ -245,6 +245,7 @@ def test_preflight_reports_sherpa_decode_mode_status(capsys, monkeypatch):
         sherpa_decode_mode="auto",
         instant_mode=True,
         sherpa_provider="cuda",
+        tts_enabled=False,
     )
 
     ready = preflight_cmd.run_preflight(cfg)

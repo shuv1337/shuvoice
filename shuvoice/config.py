@@ -68,6 +68,21 @@ CONFIG_SECTION_FIELDS: dict[str, tuple[str, ...]] = {
         "bottom_margin",
     ),
     "control": ("control_socket",),
+    "tts": (
+        "tts_enabled",
+        "tts_backend",
+        "tts_default_voice_id",
+        "tts_model_id",
+        "tts_api_key_env",
+        "tts_output_format",
+        "tts_max_chars",
+        "tts_request_timeout_sec",
+        "tts_playback_device",
+        "tts_overlay_auto_hide_sec",
+        "tts_local_model_path",
+        "tts_local_voice",
+        "tts_local_device",
+    ),
     "typing": (
         "output_mode",
         "typing_final_injection_mode",
@@ -209,6 +224,21 @@ class Config:
 
     # Control socket (Hyprland bind/bindr integration)
     control_socket: str | None = None  # default: $XDG_RUNTIME_DIR/shuvoice/control.sock
+
+    # Text-to-speech
+    tts_enabled: bool = True
+    tts_backend: str = "elevenlabs"  # elevenlabs | local
+    tts_default_voice_id: str = "zNsotODqUhvbJ5wMG7Ei"
+    tts_model_id: str = "eleven_multilingual_v2"
+    tts_api_key_env: str = "ELEVENLABS_API_KEY"
+    tts_output_format: str = "pcm_24000"
+    tts_max_chars: int = 5000
+    tts_request_timeout_sec: float = 30.0
+    tts_playback_device: str | int | None = None
+    tts_overlay_auto_hide_sec: float = 2.0
+    tts_local_model_path: str | None = None
+    tts_local_voice: str | None = None
+    tts_local_device: str | int | None = None
 
     # Text injection
     output_mode: str = "final_only"  # final_only | streaming_partial
@@ -366,6 +396,74 @@ class Config:
         if int(self.bottom_margin) < 0:
             raise ValueError("bottom_margin must be >= 0")
         self.bottom_margin = int(self.bottom_margin)
+
+        # Validate TTS configs
+        if not isinstance(self.tts_enabled, bool):
+            raise ValueError("tts_enabled must be true or false")
+
+        self.tts_backend = str(self.tts_backend).strip().lower()
+        if self.tts_backend not in {"elevenlabs", "local"}:
+            raise ValueError("tts_backend must be one of: elevenlabs, local")
+
+        self.tts_default_voice_id = str(self.tts_default_voice_id).strip()
+        if not self.tts_default_voice_id:
+            raise ValueError("tts_default_voice_id must not be empty")
+
+        self.tts_model_id = str(self.tts_model_id).strip()
+        if not self.tts_model_id:
+            raise ValueError("tts_model_id must not be empty")
+
+        self.tts_api_key_env = str(self.tts_api_key_env).strip()
+        if not self.tts_api_key_env:
+            raise ValueError("tts_api_key_env must not be empty")
+
+        self.tts_output_format = str(self.tts_output_format).strip()
+        if not self.tts_output_format:
+            raise ValueError("tts_output_format must not be empty")
+
+        if int(self.tts_max_chars) < 1:
+            raise ValueError("tts_max_chars must be >= 1")
+        self.tts_max_chars = int(self.tts_max_chars)
+
+        if float(self.tts_request_timeout_sec) <= 0:
+            raise ValueError("tts_request_timeout_sec must be > 0")
+        self.tts_request_timeout_sec = float(self.tts_request_timeout_sec)
+
+        if float(self.tts_overlay_auto_hide_sec) < 0:
+            raise ValueError("tts_overlay_auto_hide_sec must be >= 0")
+        self.tts_overlay_auto_hide_sec = float(self.tts_overlay_auto_hide_sec)
+
+        if self.tts_playback_device is not None and not isinstance(
+            self.tts_playback_device, (str, int)
+        ):
+            raise ValueError("tts_playback_device must be a string, integer, or null")
+        if isinstance(self.tts_playback_device, str):
+            normalized_playback_device = self.tts_playback_device.strip()
+            if not normalized_playback_device:
+                self.tts_playback_device = None
+            elif normalized_playback_device.isdigit():
+                self.tts_playback_device = int(normalized_playback_device)
+            else:
+                self.tts_playback_device = normalized_playback_device
+
+        if self.tts_local_device is not None and not isinstance(self.tts_local_device, (str, int)):
+            raise ValueError("tts_local_device must be a string, integer, or null")
+        if isinstance(self.tts_local_device, str):
+            normalized_local_device = self.tts_local_device.strip()
+            if not normalized_local_device:
+                self.tts_local_device = None
+            elif normalized_local_device.isdigit():
+                self.tts_local_device = int(normalized_local_device)
+            else:
+                self.tts_local_device = normalized_local_device
+
+        if self.tts_local_model_path is not None:
+            local_model_path = str(self.tts_local_model_path).strip()
+            self.tts_local_model_path = local_model_path or None
+
+        if self.tts_local_voice is not None:
+            local_voice = str(self.tts_local_voice).strip()
+            self.tts_local_voice = local_voice or None
 
         # Validate typing configs
         self.typing_final_injection_mode = str(self.typing_final_injection_mode).strip().lower()

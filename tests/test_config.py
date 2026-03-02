@@ -40,6 +40,16 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     assert cfg.moonshine_max_tokens == 64
     assert cfg.moonshine_provider == "cpu"
     assert cfg.moonshine_onnx_threads == 0
+    assert cfg.tts_enabled is True
+    assert cfg.tts_backend == "elevenlabs"
+    assert cfg.tts_default_voice_id == "zNsotODqUhvbJ5wMG7Ei"
+    assert cfg.tts_model_id == "eleven_multilingual_v2"
+    assert cfg.tts_api_key_env == "ELEVENLABS_API_KEY"
+    assert cfg.tts_output_format == "pcm_24000"
+    assert cfg.tts_max_chars == 5000
+    assert cfg.tts_request_timeout_sec == 30.0
+    assert cfg.tts_playback_device is None
+    assert cfg.tts_overlay_auto_hide_sec == 2.0
 
 
 def test_load_flattens_sections_and_ignores_unknown(monkeypatch, tmp_path: Path):
@@ -84,6 +94,21 @@ moonshine_max_tokens = 160
 [overlay]
 font_size = 28
 font_family = "JetBrains Mono"
+
+[tts]
+tts_enabled = true
+tts_backend = "local"
+tts_default_voice_id = "voice-test"
+tts_model_id = "model-test"
+tts_api_key_env = "TEST_TTS_KEY"
+tts_output_format = "pcm_24000"
+tts_max_chars = 1234
+tts_request_timeout_sec = 12.5
+tts_playback_device = "2"
+tts_overlay_auto_hide_sec = 3.5
+tts_local_model_path = "/tmp/piper-models"
+tts_local_voice = "amy"
+tts_local_device = "3"
 
 [typing]
 output_mode = "streaming_partial"
@@ -140,6 +165,19 @@ foo = "bar"
     assert cfg.moonshine_max_tokens == 160
     assert cfg.font_size == 28
     assert cfg.font_family == "JetBrains Mono"
+    assert cfg.tts_enabled is True
+    assert cfg.tts_backend == "local"
+    assert cfg.tts_default_voice_id == "voice-test"
+    assert cfg.tts_model_id == "model-test"
+    assert cfg.tts_api_key_env == "TEST_TTS_KEY"
+    assert cfg.tts_output_format == "pcm_24000"
+    assert cfg.tts_max_chars == 1234
+    assert cfg.tts_request_timeout_sec == 12.5
+    assert cfg.tts_playback_device == 2
+    assert cfg.tts_overlay_auto_hide_sec == 3.5
+    assert cfg.tts_local_model_path == "/tmp/piper-models"
+    assert cfg.tts_local_voice == "amy"
+    assert cfg.tts_local_device == 3
     assert cfg.output_mode == "streaming_partial"
     assert cfg.typing_final_injection_mode == "auto"
     assert cfg.use_clipboard_for_final is True
@@ -239,6 +277,31 @@ def test_config_helpers_create_dirs(monkeypatch, tmp_path: Path):
 def test_asr_backend_validation():
     with pytest.raises(ValueError, match="asr_backend"):
         Config(asr_backend="bad-backend")
+
+
+def test_tts_backend_validation():
+    with pytest.raises(ValueError, match="tts_backend"):
+        Config(tts_backend="bad-backend")
+
+
+def test_tts_validation():
+    with pytest.raises(ValueError, match="tts_enabled"):
+        Config(tts_enabled="yes")
+
+    with pytest.raises(ValueError, match="tts_api_key_env"):
+        Config(tts_api_key_env="   ")
+
+    with pytest.raises(ValueError, match="tts_max_chars"):
+        Config(tts_max_chars=0)
+
+    with pytest.raises(ValueError, match="tts_request_timeout_sec"):
+        Config(tts_request_timeout_sec=0)
+
+    with pytest.raises(ValueError, match="tts_overlay_auto_hide_sec"):
+        Config(tts_overlay_auto_hide_sec=-0.1)
+
+    with pytest.raises(ValueError, match="tts_playback_device"):
+        Config(tts_playback_device=object())
 
 
 def test_instant_mode_validation():
@@ -543,8 +606,12 @@ def test_to_nested_dict_includes_sherpa_decode_mode():
         asr_backend="sherpa",
         sherpa_decode_mode="offline_instant",
         sherpa_enable_parakeet_streaming=True,
+        tts_backend="local",
+        tts_local_model_path="/tmp/models",
     )
 
     data = cfg.to_nested_dict()
     assert data["asr"]["sherpa_decode_mode"] == "offline_instant"
     assert data["asr"]["sherpa_enable_parakeet_streaming"] is True
+    assert data["tts"]["tts_backend"] == "local"
+    assert data["tts"]["tts_local_model_path"] == "/tmp/models"

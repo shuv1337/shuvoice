@@ -42,12 +42,16 @@ from .runtime import (
     transcribe_native_chunk,
     update_noise_floor,
 )
+from .selection import SelectionError, capture_selection
 from .transcript import prefer_transcript
+from .tts import create_tts_backend
+from .tts_player import TTSPlayer
 from .typer import StreamingTyper
 from .utterance_state import _UtteranceState
 
 if TYPE_CHECKING:
     from .overlay import CaptionOverlay
+    from .tts_overlay import TTSOverlay
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +84,37 @@ class ShuVoiceApp(Gtk.Application):
         )
         self.metrics = MetricsCollector()
 
+        self.tts_backend = None
+        self.tts_player: TTSPlayer | None = None
+        self.tts_overlay: TTSOverlay | None = None
+        self._tts_voice_id = str(config.tts_default_voice_id).strip()
+        self._tts_last_preview_text = ""
+
+        if config.tts_enabled:
+            try:
+                self.tts_backend = create_tts_backend(config)
+                self.tts_player = TTSPlayer(
+                    self.tts_backend,
+                    output_device=config.tts_playback_device,
+                    output_format=config.tts_output_format,
+                    on_state_change=self._on_tts_player_state_change,
+                )
+
+                backend_errors = self.tts_backend.dependency_errors()
+                if config.tts_backend == "elevenlabs":
+                    backend_errors = [
+                        error
+                        for error in backend_errors
+                        if "API key" not in error and "ELEVENLABS_API_KEY" not in error
+                    ]
+                if backend_errors:
+                    for error in backend_errors:
+                        log.warning("TTS dependency warning: %s", error)
+            except Exception:  # noqa: BLE001
+                log.exception("Failed to initialize TTS subsystem")
+                self.tts_backend = None
+                self.tts_player = None
+
         if config.output_mode not in {"final_only", "streaming_partial"}:
             raise ValueError(
                 f"Invalid output_mode '{config.output_mode}'. "
@@ -93,6 +128,7 @@ class ShuVoiceApp(Gtk.Application):
             on_toggle=self._on_recording_toggle,
             on_status=self._recording_status,
             on_metrics=self._metrics_status,
+            on_tts_command=self._handle_tts_command,
         )
 
         self.overlay: CaptionOverlay | None = None
@@ -257,6 +293,20 @@ class ShuVoiceApp(Gtk.Application):
 
         self.overlay = CaptionOverlay(self, self.config)
 
+        if self.tts_player is not None:
+            from .tts_overlay import TTSOverlay
+
+            self.tts_overlay = TTSOverlay(
+                self,
+                self.config,
+                on_pause=self._tts_pause,
+                on_resume=self._tts_resume,
+                on_restart=self._tts_restart,
+                on_stop=self._tts_stop,
+                on_voice_selected=self._tts_select_voice,
+            )
+            threading.Thread(target=self._load_tts_voices, name="tts-voices", daemon=True).start()
+
         self.audio.start()
         self.control.start()
 
@@ -270,6 +320,12 @@ class ShuVoiceApp(Gtk.Application):
         self._running.clear()
         self._recording.clear()
         self._processing.clear()
+
+        if self.tts_player is not None:
+            self.tts_player.stop()
+        if self.tts_overlay is not None:
+            self.tts_overlay.hide()
+
         self.control.stop()
         self.audio.stop()
         Gtk.Application.do_shutdown(self)
@@ -409,6 +465,13 @@ class ShuVoiceApp(Gtk.Application):
         )
 
     def _on_recording_start(self):
+        tts_player = getattr(self, "tts_player", None)
+        if tts_player is not None and tts_player.is_active():
+            log.info("Stopping TTS playback before recording start")
+            tts_player.stop()
+            tts_overlay = getattr(self, "tts_overlay", None)
+            if tts_overlay is not None:
+                tts_overlay.hide()
         return on_recording_start(self)
 
     def _on_recording_stop(self):
@@ -422,6 +485,207 @@ class ShuVoiceApp(Gtk.Application):
 
     def _metrics_status(self) -> str:
         return metrics_to_json(self.metrics.snapshot())
+
+    # -- TTS control surface (called from control socket threads) -----------
+
+    def _tts_runtime_ready(self) -> bool:
+        return bool(self.config.tts_enabled and self.tts_player is not None and self.tts_backend)
+
+    def _tts_select_voice(self, voice_id: str) -> None:
+        selected = str(voice_id).strip()
+        if not selected:
+            return
+        self._tts_voice_id = selected
+        log.info("TTS voice updated: voice_id=%s", selected)
+
+    def _wait_for_stt_processing_clear(self, timeout_sec: float = 5.0) -> bool:
+        if not self._processing.is_set():
+            return True
+
+        deadline = time.monotonic() + max(0.0, timeout_sec)
+        while self._processing.is_set() and time.monotonic() < deadline:
+            time.sleep(0.02)
+
+        return not self._processing.is_set()
+
+    def _tts_speak_selection(self) -> None:
+        if not self._tts_runtime_ready():
+            raise RuntimeError("tts not available")
+
+        if self._recording.is_set():
+            self._on_recording_stop()
+
+        if self._processing.is_set() and not self._wait_for_stt_processing_clear():
+            raise RuntimeError("Timed out waiting for STT processing to finish")
+
+        text = capture_selection()
+        text_len = len(text)
+        if text_len > int(self.config.tts_max_chars):
+            raise ValueError(
+                f"Selected text exceeds tts_max_chars ({text_len} > {self.config.tts_max_chars})"
+            )
+
+        assert self.tts_player is not None
+
+        interrupted = self.tts_player.speak(text, self._tts_voice_id, self.config.tts_model_id)
+        if interrupted:
+            self.metrics.observe_tts_interrupt()
+
+        self.metrics.observe_tts_speak()
+        self._tts_last_preview_text = text
+
+        log.info(
+            "TTS speak: backend=%s voice=%s text_len=%d",
+            self.config.tts_backend,
+            self._tts_voice_id,
+            text_len,
+        )
+
+        if self.tts_overlay is not None:
+            self.tts_overlay.set_state("synthesizing", preview_text=text)
+
+    def _tts_pause(self) -> bool:
+        if not self._tts_runtime_ready():
+            return False
+        assert self.tts_player is not None
+        ok = self.tts_player.pause()
+        if ok:
+            self.metrics.observe_tts_pause()
+        return ok
+
+    def _tts_resume(self) -> bool:
+        if not self._tts_runtime_ready():
+            return False
+        assert self.tts_player is not None
+        return self.tts_player.resume()
+
+    def _tts_restart(self) -> bool:
+        if not self._tts_runtime_ready():
+            return False
+        assert self.tts_player is not None
+        return self.tts_player.restart()
+
+    def _tts_stop(self) -> bool:
+        if not self._tts_runtime_ready():
+            return False
+        assert self.tts_player is not None
+        return self.tts_player.stop()
+
+    def _on_tts_player_state_change(self, state: str, info: dict[str, object]) -> None:
+        if state == "playing":
+            latency = info.get("synth_latency_sec")
+            if isinstance(latency, (int, float)):
+                self.metrics.observe_tts_synth_latency(float(latency))
+                log.info("TTS synth: latency=%.2fs", float(latency))
+        elif state == "idle":
+            duration = info.get("playback_duration_sec")
+            if isinstance(duration, (int, float)):
+                self.metrics.observe_tts_playback_duration(float(duration))
+                self.metrics.observe_tts_playback_completion()
+        elif state == "error":
+            self.metrics.observe_tts_synth_failure()
+            error_class = str(info.get("error_class") or "unknown")
+            log.warning("TTS synth failed: error_class=%s", error_class)
+
+        GLib.idle_add(self._apply_tts_overlay_state, state, dict(info))
+
+    def _apply_tts_overlay_state(self, state: str, info: dict[str, object]):
+        if self.tts_overlay is None:
+            return GLib.SOURCE_REMOVE
+
+        if state == "error":
+            message = str(info.get("message") or "TTS failed")
+            self.tts_overlay.set_state("error", error_message=message)
+            return GLib.SOURCE_REMOVE
+
+        if state == "synthesizing":
+            self.tts_overlay.set_state("synthesizing", preview_text=self._tts_last_preview_text)
+        elif state == "playing":
+            self.tts_overlay.set_state("playing", preview_text=self._tts_last_preview_text)
+        elif state == "paused":
+            self.tts_overlay.set_state("paused", preview_text=self._tts_last_preview_text)
+        else:
+            self.tts_overlay.set_state("idle", preview_text=self._tts_last_preview_text)
+
+        return GLib.SOURCE_REMOVE
+
+    def _load_tts_voices(self) -> None:
+        if not self._tts_runtime_ready() or self.tts_overlay is None:
+            return
+
+        assert self.tts_backend is not None
+
+        try:
+            voices = self.tts_backend.list_voices()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("TTS voice list unavailable: %s", type(exc).__name__)
+            return
+
+        if not voices:
+            return
+
+        available = {voice.id for voice in voices}
+        if self._tts_voice_id not in available:
+            self._tts_voice_id = voices[0].id
+
+        self.tts_overlay.set_voices(voices, selected_voice_id=self._tts_voice_id)
+
+    def _handle_tts_command(self, command: str) -> str:
+        if not self.config.tts_enabled:
+            return "ERROR tts disabled"
+        if not self._tts_runtime_ready():
+            return "ERROR tts not available"
+
+        try:
+            if command == "tts_speak":
+                self._tts_speak_selection()
+                return "OK tts speaking"
+
+            if command == "tts_pause":
+                if not self._tts_pause():
+                    return "ERROR tts not playing"
+                return "OK tts paused"
+
+            if command == "tts_resume":
+                if not self._tts_resume():
+                    return "ERROR tts not paused"
+                return "OK tts resumed"
+
+            if command == "tts_toggle_pause":
+                assert self.tts_player is not None
+                toggled = self.tts_player.toggle_pause()
+                if not toggled:
+                    return "ERROR tts not playing"
+                if self.tts_player.state == "paused":
+                    self.metrics.observe_tts_pause()
+                    return "OK tts paused"
+                return "OK tts resumed"
+
+            if command == "tts_restart":
+                if not self._tts_restart():
+                    return "ERROR tts no previous text"
+                return "OK tts restarted"
+
+            if command == "tts_stop":
+                if self._tts_stop():
+                    return "OK tts stopped"
+                return "OK tts already idle"
+
+            if command == "tts_status":
+                assert self.tts_player is not None
+                return f"OK {self.tts_player.state}"
+        except SelectionError as exc:
+            self.metrics.observe_tts_selection_failure()
+            log.info("TTS selection capture failed")
+            if self.tts_overlay is not None:
+                self.tts_overlay.set_state("error", error_message=str(exc))
+            return f"ERROR {exc}"
+        except Exception as exc:  # noqa: BLE001
+            if self.tts_overlay is not None:
+                self.tts_overlay.set_state("error", error_message=str(exc))
+            return f"ERROR {exc}"
+
+        return f"ERROR unknown tts command: {command}"
 
     def _on_transcript_update(self, text: str):
         rendered_text = self._render_transcript_text(text)

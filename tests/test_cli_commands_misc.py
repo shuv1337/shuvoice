@@ -200,6 +200,27 @@ def test_run_control_toggle_waits_only_when_pre_state_is_recording(monkeypatch):
     assert calls.count("status") >= 2
 
 
+def test_run_control_tts_command_skips_processing_wait(monkeypatch, capsys):
+    calls: list[str] = []
+
+    def fake_send(command: str, _socket: str | None, timeout: float | None = None) -> str:
+        calls.append(command)
+        if command == "tts_stop":
+            return "OK tts stopped"
+        if command == "status":
+            return "OK idle"
+        raise AssertionError(f"unexpected command {command}")
+
+    monkeypatch.setattr(control_cmd, "send_control_command", fake_send)
+
+    cfg = Config()
+    assert control_cmd.run_control("tts_stop", cfg, wait_sec=1.0) == 0
+
+    out = capsys.readouterr().out
+    assert "OK tts stopped" in out
+    assert calls == ["tts_stop"]
+
+
 def test_run_control_error(monkeypatch, capsys):
     monkeypatch.setattr(
         control_cmd,

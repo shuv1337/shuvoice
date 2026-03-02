@@ -79,6 +79,26 @@ bottom_margin = 60
 # Optional control socket override (defaults to "$XDG_RUNTIME_DIR/shuvoice/control.sock")
 # control_socket = "/path/to/control.sock"
 
+[tts]
+# true | false
+# tts_enabled = true
+# elevenlabs | local
+# tts_backend = "elevenlabs"
+# ElevenLabs defaults
+# tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"
+# tts_model_id = "eleven_multilingual_v2"
+# tts_api_key_env = "ELEVENLABS_API_KEY"
+# tts_output_format = "pcm_24000"
+# tts_max_chars = 5000
+# tts_request_timeout_sec = 30.0
+# Optional output device name/index for TTS playback
+# tts_playback_device = 3
+# tts_overlay_auto_hide_sec = 2.0
+# Local backend scaffold (tts_backend = "local")
+# tts_local_model_path = "/path/to/piper-model.onnx"
+# tts_local_voice = "en_US-amy-medium"
+# tts_local_device = 3
+
 [typing]
 # final_only | streaming_partial
 output_mode = "final_only"
