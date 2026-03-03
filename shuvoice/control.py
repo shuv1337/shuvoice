@@ -183,11 +183,15 @@ class ControlServer:
                     break
 
                 with conn:
+                    conn.settimeout(1.0)
                     response = "ERROR invalid request"
                     try:
                         payload = conn.recv(1024)
                         command = payload.decode("utf-8", errors="replace").strip().lower()
                         response = self._handle_command(command)
+                    except socket.timeout:
+                        log.warning("Control command timed out")
+                        response = "ERROR timeout"
                     except Exception:
                         log.exception("Error handling control command")
                         response = "ERROR internal error"
