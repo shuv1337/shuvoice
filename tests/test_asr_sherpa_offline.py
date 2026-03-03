@@ -455,7 +455,8 @@ class TestSherpaOnlineRecognizerInit:
         self, tmp_path: Path
     ):
         from unittest.mock import MagicMock, patch
-        with patch.dict('sys.modules', {'sherpa_onnx': MagicMock()}):
+
+        with patch.dict("sys.modules", {"sherpa_onnx": MagicMock()}):
             model_dir = tmp_path / "sherpa-model"
             model_dir.mkdir(parents=True, exist_ok=True)
             (model_dir / "tokens.txt").write_text("<blk>\na\n")
