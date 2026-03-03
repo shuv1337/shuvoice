@@ -107,7 +107,9 @@ def run_preflight(config: Config) -> bool:
         errors = backend_cls.dependency_errors()
         if config.tts_backend == "elevenlabs":
             # API key presence is validated via check_tts_api_key using the configured env name.
-            errors = [err for err in errors if "API key" not in err and "ELEVENLABS_API_KEY" not in err]
+            errors = [
+                err for err in errors if "API key" not in err and "ELEVENLABS_API_KEY" not in err
+            ]
         if errors:
             raise RuntimeError("; ".join(errors))
         return f"{config.tts_backend} deps OK"
@@ -176,7 +178,9 @@ def run_preflight(config: Config) -> bool:
     if config.preserve_clipboard or config.tts_enabled:
         add_check("wl-paste binary", check_binary("wl-paste"))
     else:
-        checks.append(("wl-paste binary", True, "skipped (preserve_clipboard=false, tts_enabled=false)"))
+        checks.append(
+            ("wl-paste binary", True, "skipped (preserve_clipboard=false, tts_enabled=false)")
+        )
     add_check("gtk4-layer-shell library", check_layer_shell)
     add_check("Output mode", check_output_mode)
 

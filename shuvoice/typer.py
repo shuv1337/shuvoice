@@ -68,10 +68,7 @@ class StreamingTyper:
 
     @staticmethod
     def _backspace_args(count: int) -> list[str]:
-        args = ["wtype"]
-        for _ in range(count):
-            args.extend(["-k", "BackSpace"])
-        return args
+        return ["wtype"] + ["-k", "BackSpace"] * count
 
     def _send_backspaces(self, count: int, op: str) -> bool:
         if count <= 0:

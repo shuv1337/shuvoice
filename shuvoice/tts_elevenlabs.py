@@ -129,7 +129,9 @@ class ElevenLabsTTSBackend(TTSBackend):
         except TimeoutError as exc:
             raise RuntimeError("ElevenLabs voice list request timed out") from exc
         except OSError as exc:
-            raise RuntimeError(f"ElevenLabs voice list request failed: {type(exc).__name__}") from exc
+            raise RuntimeError(
+                f"ElevenLabs voice list request failed: {type(exc).__name__}"
+            ) from exc
         except json.JSONDecodeError as exc:
             raise RuntimeError("Invalid ElevenLabs voice list response") from exc
 
