@@ -410,7 +410,7 @@ class MoonshineBackend(ASRBackend):
         ``_NORM_TARGET_RMS``, capped at ``_NORM_MAX_GAIN`` to avoid
         amplifying silence.
         """
-        rms = float(np.sqrt(np.mean(buf * buf)))
+        rms = float(np.sqrt(np.dot(buf, buf) / buf.size))
         if rms < cls._NORM_MIN_RMS:
             return buf  # pure silence — nothing to normalize
         gain = min(cls._NORM_TARGET_RMS / rms, cls._NORM_MAX_GAIN)
