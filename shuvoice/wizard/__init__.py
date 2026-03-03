@@ -192,6 +192,7 @@ class WelcomeWizard(Gtk.Application):
             desc_label.add_css_class("wizard-radio-desc")
             desc_label.set_halign(Gtk.Align.START)
             page.append(desc_label)
+            self._set_accessible_description(radio, description)
 
         self._sherpa_profile_title = Gtk.Label(label="Sherpa profile")
         self._sherpa_profile_title.add_css_class("wizard-subtitle")
@@ -222,15 +223,15 @@ class WelcomeWizard(Gtk.Application):
         )
         page.append(self._sherpa_streaming_radio)
 
-        self._sherpa_streaming_desc = Gtk.Label(
-            label=(
-                "Shows incremental transcript updates in the overlay while you hold the key. "
-                "Final text is committed on key release."
-            )
+        sherpa_streaming_desc = (
+            "Shows incremental transcript updates in the overlay while you hold the key. "
+            "Final text is committed on key release."
         )
+        self._sherpa_streaming_desc = Gtk.Label(label=sherpa_streaming_desc)
         self._sherpa_streaming_desc.add_css_class("wizard-radio-desc")
         self._sherpa_streaming_desc.set_halign(Gtk.Align.START)
         page.append(self._sherpa_streaming_desc)
+        self._set_accessible_description(self._sherpa_streaming_radio, sherpa_streaming_desc)
 
         self._sherpa_parakeet_radio = Gtk.CheckButton(
             label="Instant (Parakeet TDT v3 int8 model, recommended)"
@@ -244,15 +245,15 @@ class WelcomeWizard(Gtk.Application):
         )
         page.append(self._sherpa_parakeet_radio)
 
-        self._sherpa_parakeet_desc = Gtk.Label(
-            label=(
-                "Stable default profile. Emits one final transcript on key release and "
-                "auto-enables instant_mode + sherpa_decode_mode=offline_instant."
-            )
+        sherpa_parakeet_desc = (
+            "Stable default profile. Emits one final transcript on key release and "
+            "auto-enables instant_mode + sherpa_decode_mode=offline_instant."
         )
+        self._sherpa_parakeet_desc = Gtk.Label(label=sherpa_parakeet_desc)
         self._sherpa_parakeet_desc.add_css_class("wizard-radio-desc")
         self._sherpa_parakeet_desc.set_halign(Gtk.Align.START)
         page.append(self._sherpa_parakeet_desc)
+        self._set_accessible_description(self._sherpa_parakeet_radio, sherpa_parakeet_desc)
 
         self._sync_sherpa_model_controls()
 
@@ -304,6 +305,7 @@ class WelcomeWizard(Gtk.Application):
             desc_label.add_css_class("wizard-radio-desc")
             desc_label.set_halign(Gtk.Align.START)
             page.append(desc_label)
+            self._set_accessible_description(radio, description)
 
         self._auto_add_last_non_custom = True
         self._auto_add_keybind = Gtk.CheckButton(
@@ -373,6 +375,7 @@ class WelcomeWizard(Gtk.Application):
             mode_desc_label.add_css_class("wizard-radio-desc")
             mode_desc_label.set_halign(Gtk.Align.START)
             page.append(mode_desc_label)
+            self._set_accessible_description(mode_radio, mode_desc)
 
         nav = self._make_nav_row(
             back_page="asr",
@@ -963,6 +966,14 @@ class WelcomeWizard(Gtk.Application):
                 ),
             )
         )
+
+    @staticmethod
+    def _set_accessible_description(widget: Gtk.Widget, description: str) -> None:
+        setter = getattr(widget, "set_accessible_description", None)
+        if callable(setter):
+            setter(description)
+            return
+        widget.update_property([Gtk.AccessibleProperty.DESCRIPTION], [description])
 
     @staticmethod
     def _add_text_title(box: Gtk.Box, text: str):
