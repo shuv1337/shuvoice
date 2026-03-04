@@ -8,70 +8,95 @@
   </picture>
 </p>
 
-Streaming speech-to-text overlay for Hyprland with pluggable ASR backends.
+<p align="center">
+  <strong>Push-to-talk speech-to-text for Hyprland/Wayland.</strong><br>
+  Hold a key, speak, release — your words are typed into the focused window.
+</p>
 
-[![CI](https://github.com/shuv1337/shuvoice/actions/workflows/ci.yml/badge.svg)](https://github.com/shuv1337/shuvoice/actions/workflows/ci.yml)
+<p align="center">
+  <a href="https://github.com/shuv1337/shuvoice/actions/workflows/ci.yml"><img src="https://github.com/shuv1337/shuvoice/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://aur.archlinux.org/packages/shuvoice-git"><img src="https://img.shields.io/aur/version/shuvoice-git" alt="AUR"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+</p>
 
 <p align="center">
   <img src="./docs/assets/screenshots/splash-overlay.png" alt="ShuVoice splash overlay on Hyprland" width="760">
 </p>
 
-## Status
+## Features
 
-Core pipeline + production hardening are implemented:
+- **Push-to-talk dictation** — hold a key, speak, release. Text appears in your focused app.
+- **Pluggable ASR backends** — choose between NeMo (highest accuracy), Sherpa-ONNX (fast, CPU-friendly), or Moonshine (lightweight).
+- **Text-to-speech** — highlight text and hear it read aloud via ElevenLabs or local Piper.
+- **Native Wayland overlay** — GTK4 layer-shell overlay with blur, transparency, and live transcription feedback.
+- **Waybar integration** — tray-style status icon with tooltip, state colors, and click actions.
+- **Guided setup wizard** — interactive GTK wizard walks you through backend, keybind, and model selection.
+- **Zero root access** — runs entirely in userspace via Hyprland IPC; no `/dev/input` needed.
 
-- PipeWire capture (`sounddevice`)
-- Pluggable ASR backend layer (`nemo`, `sherpa`, `moonshine`) with Sherpa streaming + offline-instant modes
-- GTK4 layer-shell overlay
-- Hyprland IPC controls via local Unix socket
-- Hyprland-first selected-text TTS workflow with ElevenLabs + interactive TTS overlay
-- `wtype` / clipboard text injection with retry + fallback
+---
 
-## Current backend models & providers
+## Quick Start
 
-| Backend (`asr_backend`) | Current model(s) | Provider setting | Supported providers |
-|---|---|---|---|
-| `nemo` | `nvidia/nemotron-speech-streaming-en-0.6b` | `device` | `cuda` (default), `cpu` |
-| `sherpa` | `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06` (streaming default), `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8` (offline instant) | `sherpa_provider` | `cpu` (default), `cuda` |
-| `moonshine` | `moonshine/tiny` (default, also `moonshine/base`) | `moonshine_provider` | `cpu` (default), `cuda` |
+The fastest path from zero to working dictation:
 
-Model locations in this repo/runtime:
+```bash
+# 1. Install from AUR (Arch Linux)
+yay -S shuvoice-git
 
-- NeMo model ID: `nvidia/nemotron-speech-streaming-en-0.6b` (downloaded to Hugging Face cache)
-- Sherpa model dir: auto-download selected `sherpa_model_name` to `~/.local/share/shuvoice/models/sherpa/<sherpa_model_name>/` (or custom `sherpa_model_dir`)
-- Moonshine models: Hugging Face `UsefulSensors/moonshine` (`base`/`tiny`)
+# 2. Run the setup wizard (picks backend, keybind, downloads model)
+shuvoice wizard
 
-> Note: Sherpa CUDA requires a source-built `sherpa-onnx` GPU wheel plus CUDA 12 compatibility libs on this host stack.
->
-> Note: Parakeet TDT (`sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8`) is supported via Sherpa offline instant mode (`instant_mode=true` + `sherpa_decode_mode="offline_instant"`, or `sherpa_decode_mode="auto"` with instant mode on). Streaming Parakeet is opt-in: set `sherpa_decode_mode="streaming"` plus `sherpa_enable_parakeet_streaming=true`.
+# 3. Enable and start the background service
+systemctl --user enable --now shuvoice.service
 
-## Backend accuracy/performance snapshot (manual regression suite)
+# 4. Use it! Hold your push-to-talk key, speak, release.
+```
 
-Results below were measured on 2026-02-22 using `scripts/tts_roundtrip.py` with the
-same 10-utterance phrase set used by `tests/integration/test_roundtrip_regression.py`
-(2 phrases × 5 repeats, `--flush-chunks 5`).
+That's it. The wizard handles backend selection, model downloads, and Hyprland keybind setup.
 
-| Model/profile | Median similarity | Mean similarity | Empty ratio | Wall time (10 utt) | RTF (wall/audio, lower is faster) |
-|---|---:|---:|---:|---:|---:|
-| NeMo `nvidia/nemotron-speech-streaming-en-0.6b` (`device=cuda`) | 0.776 | 0.775 | 0.000 | 8.33s | 0.26 |
-| Sherpa `...kroko-2025-08-06` (`provider=cuda`) | 0.720 | 0.720 | 0.000 | 2.52s | 0.08 |
-| Sherpa `...kroko-2025-08-06` (`provider=cpu`) | 0.720 | 0.720 | 0.000 | 1.62s | 0.05 |
-| Moonshine `moonshine/base` | 0.625 | 0.625 | 0.000 | 21.93s | 0.68 |
-| Moonshine `moonshine/tiny` | 0.795 | 0.795 | 0.000 | 10.03s | 0.31 |
+> **Not on Arch?** See [Manual Installation](#manual-installation-from-source) below.
 
-Notes:
-- This is a **regression stress fixture**, not a universal quality ranking.
-- Numbers include model load + full roundtrip harness runtime.
-- Moonshine throughput improved via deferred chunk-buffer coalescing in `MoonshineBackend.process_chunk()`.
-- For day-to-day dictation quality, run your own workload-specific benchmark before choosing defaults.
+---
 
-## Requirements
+## Installation
 
-### Python
+### Option A: AUR Package (recommended)
 
-- Python `>=3.10`
+ShuVoice is available on the AUR as [`shuvoice-git`](https://aur.archlinux.org/packages/shuvoice-git):
 
-### System packages (Arch)
+```bash
+# Using yay
+yay -S shuvoice-git
+
+# Or using paru
+paru -S shuvoice-git
+```
+
+The AUR package includes Sherpa-ONNX runtime support out of the box. If your
+AUR helper asks which provider to use for `python-sherpa-onnx`, pick
+**`python-sherpa-onnx-bin`** (recommended, prebuilt):
+
+```bash
+yay -S --needed python-sherpa-onnx-bin shuvoice-git
+```
+
+NeMo and Moonshine backends are optional and can be installed separately if needed.
+
+### Option B: Manual Installation (from source)
+
+<details>
+<summary><strong>Expand for manual/venv setup instructions</strong></summary>
+
+#### Prerequisites
+
+| Component | Requirement |
+|---|---|
+| OS | Linux with Wayland (Hyprland recommended) |
+| Python | 3.10 or newer |
+| Package manager | [uv](https://docs.astral.sh/uv/getting-started/installation/) (recommended) |
+| GPU | Optional (recommended for NeMo / Sherpa CUDA) |
+
+#### 1. Install system dependencies (Arch Linux)
 
 ```bash
 sudo pacman -S \
@@ -80,238 +105,427 @@ sudo pacman -S \
   wtype wl-clipboard espeak-ng
 ```
 
-### Installation (AUR)
-
-ShuVoice is available on the AUR as [`shuvoice-git`](https://aur.archlinux.org/packages/shuvoice-git):
+#### 2. Clone and set up the project
 
 ```bash
-# Using yay
-yay -S shuvoice-git
+git clone https://github.com/shuv1337/shuvoice.git
+cd shuvoice
 
-# Using paru
-paru -S shuvoice-git
+# Create venv and install base dependencies
+uv sync
 ```
 
-After installation, enable the user service:
+#### 3. Install your chosen ASR backend
+
+Pick **one** (or more) backend to install:
 
 ```bash
-systemctl --user enable --now shuvoice.service
-```
-
-`shuvoice-git` includes Sherpa runtime support via dependency
-`python-sherpa-onnx`.
-
-If your AUR helper asks which provider to use, pick
-`python-sherpa-onnx-bin` (recommended fast path):
-
-```bash
-yay -S --needed python-sherpa-onnx-bin shuvoice-git
-```
-
-NeMo and Moonshine remain optional.
-
-### Python packages
-
-```bash
-# Install base + dev tooling (creates venv automatically):
-uv sync --dev
-
-# ASR backend extras:
-uv sync --extra asr-nemo
+# Sherpa-ONNX (fast, CPU-friendly — recommended starting point)
 uv sync --extra asr-sherpa
+
+# NeMo (highest accuracy, requires NVIDIA GPU + CUDA)
+uv sync --extra asr-nemo
+
+# Moonshine (lightweight, low resource usage)
 uv sync --extra asr-moonshine
+```
 
-# TTS backend extras:
+> **Python 3.14 + NeMo note:** use the override file to avoid build issues:
+> ```bash
+> uv sync --extra asr-nemo --override packaging/constraints/py314-overrides.txt
+> ```
+
+#### 4. Optional: install TTS extras
+
+```bash
+# ElevenLabs TTS (cloud, high quality)
 uv sync --extra tts-elevenlabs
+
+# Local TTS (Piper, experimental)
 uv sync --extra tts-local
-
-# NeMo convenience alias:
-uv sync --extra asr
 ```
 
-For Python 3.14 + NeMo, prefer the repo override file to avoid
-`kaldialign` source-build issues:
+</details>
+
+---
+
+## First Run
+
+### Setup Wizard (recommended)
+
+The interactive wizard walks you through everything:
 
 ```bash
-uv sync --extra asr-nemo --override packaging/constraints/py314-overrides.txt
+shuvoice wizard
 ```
 
-If NeMo wheels are unavailable for your environment:
+<p align="center">
+  <img src="./docs/assets/screenshots/wizard-welcome.png" alt="Setup wizard welcome" width="760">
+</p>
+
+The wizard will:
+
+1. **Select your ASR backend** — Sherpa-ONNX, NeMo, or Moonshine
+2. **Choose a Sherpa profile** (if applicable) — Streaming (Zipformer) or Instant (Parakeet)
+3. **Pick your push-to-talk key** — Right Ctrl, Insert, F9, Super+V, or custom
+4. **Download model files** — with progress indicator and cancel support
+5. **Auto-configure Hyprland keybinds** — adds `bind`/`bindr` lines if the key isn't already used
+
+<p align="center">
+  <img src="./docs/assets/screenshots/wizard-asr-selection.png" alt="ASR backend selection" width="760">
+  <br><br>
+  <img src="./docs/assets/screenshots/wizard-keybind-selection.png" alt="Keybind selection" width="760">
+</p>
+
+### Alternative: CLI Setup
+
+If you prefer a non-interactive approach:
 
 ```bash
-uv pip install "git+https://github.com/NVIDIA/NeMo.git@main#egg=nemo_toolkit[asr]"
-```
-
-## Permissions
-
-ShuVoice uses IPC control commands (no `/dev/input` access required).
-Trigger start/stop via Hyprland `bind` / `bindr` commands.
-
-## Preflight
-
-Run before first launch:
-
-```bash
-python -m shuvoice preflight
-# legacy (still supported): python -m shuvoice --preflight
-```
-
-Checks include:
-
-- Python version compatibility
-- importability of key Python modules
-- audio input device validity
-- TTS output device validity (when configured)
-- ASR backend dependencies for selected `asr_backend`
-- TTS backend dependencies for selected `tts_backend`
-- ElevenLabs API key env validation (when `tts_backend = "elevenlabs"`)
-- Sherpa decode diagnostics (resolved `sherpa_decode_mode`, provider requested→effective, Parakeet runnability)
-- required binaries (`wtype`, `wl-copy`, `wl-paste`)
-- `libgtk4-layer-shell.so`
-- output mode validity
-
-## Setup (recommended)
-
-Run the setup workflow once after install to verify backend deps, ensure model
-artifacts are ready, and run preflight checks:
-
-```bash
+# Check dependencies, download models, run preflight
 shuvoice setup
-```
 
-Useful setup flags:
-
-```bash
-# Try to install missing backend deps automatically (when supported)
+# Auto-install missing dependencies (when possible)
 shuvoice setup --install-missing
 
-# Skip model download and preflight (quick dependency check only)
+# Quick dependency check only (skip model download + preflight)
 shuvoice setup --skip-model-download --skip-preflight
 ```
 
-For Sherpa, `setup` now reports resolved decode mode, provider requested→effective,
-and whether a selected Parakeet model is runnable with the current config/runtime.
+### Preflight Check
 
-## Run
+Verify everything is ready before first launch:
 
 ```bash
-python -m shuvoice
+shuvoice preflight
 ```
 
-Useful commands:
+This checks Python version, required modules, audio devices, ASR/TTS backend
+dependencies, required binaries (`wtype`, `wl-copy`, `wl-paste`), and GTK
+layer-shell availability.
+
+---
+
+## Starting ShuVoice
+
+### As a systemd user service (recommended)
 
 ```bash
-python -m shuvoice --help
-python -m shuvoice setup
-python -m shuvoice run --asr-backend nemo --right-context 13
-python -m shuvoice run --asr-backend sherpa --sherpa-model-dir /path/to/model
-# Parakeet offline instant example (set in config.toml):
-# [asr]
-# asr_backend = "sherpa"
-# sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
-# instant_mode = true
-# sherpa_decode_mode = "offline_instant"
-python -m shuvoice run --asr-backend moonshine --moonshine-model-name moonshine/tiny
-python -m shuvoice run --asr-backend moonshine --moonshine-provider cuda
-python -m shuvoice run --output-mode streaming_partial
-python -m shuvoice audio list-devices
-python -m shuvoice run --audio-device 2 --input-gain 1.5
-python -m shuvoice model download
-python -m shuvoice config effective
-python -m shuvoice config validate
-python -m shuvoice config set typing_final_injection_mode direct
+# Enable and start (will auto-start on login)
+systemctl --user enable --now shuvoice.service
+
+# Check status
+systemctl --user status shuvoice.service
+
+# View logs
+journalctl --user -u shuvoice.service -f
 ```
 
-Legacy top-level flags (`--download-model`, `--list-audio-devices`, `--preflight`, `--wizard`, `--control`) remain available for one compatibility cycle and emit deprecation warnings.
+<details>
+<summary><strong>Setting up the service for venv/source installs</strong></summary>
 
-`model download` supports NeMo and Sherpa. Moonshine downloads lazily on first load via useful-moonshine-onnx.
-
-## systemd user service
-
-Repo-managed unit template:
-
-- `packaging/systemd/user/shuvoice.service`
-
-Install and start (from this repo):
+The default service unit expects `/usr/bin/shuvoice` (AUR install path).
+For venv workflows, create an override:
 
 ```bash
+# Copy the unit file
 mkdir -p ~/.config/systemd/user
-cp packaging/systemd/user/shuvoice.service ~/.config/systemd/user/shuvoice.service
+cp packaging/systemd/user/shuvoice.service ~/.config/systemd/user/
 
-# Optional for repo/venv workflows (default template uses /usr/bin/shuvoice)
+# Override the ExecStart for your venv
 systemctl --user edit shuvoice.service
-# [Service]
-# ExecStart=
-# ExecStart=%h/.venv/bin/shuvoice
+```
 
+Add this override:
+
+```ini
+[Service]
+ExecStart=
+ExecStart=%h/repos/shuvoice/.venv/bin/shuvoice
+```
+
+Then reload and start:
+
+```bash
 systemctl --user daemon-reload
 systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_RUNTIME_DIR HYPRLAND_INSTANCE_SIGNATURE DBUS_SESSION_BUS_ADDRESS XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
 systemctl --user enable --now shuvoice.service
-systemctl --user status shuvoice.service
 ```
 
-Packaged unit files include `RestartPreventExitStatus=78` so missing backend
-dependencies do not cause endless restart loops.
+</details>
 
-## Control socket commands (IPC backend)
-
-When ShuVoice is running, send control commands from another terminal:
+### Manual launch (foreground)
 
 ```bash
-python -m shuvoice control start
-python -m shuvoice control stop
-python -m shuvoice control toggle
-python -m shuvoice control status
-python -m shuvoice control metrics
+# AUR install
+shuvoice
 
-# TTS commands
-python -m shuvoice control tts_speak
-python -m shuvoice control tts_pause
-python -m shuvoice control tts_resume
-python -m shuvoice control tts_toggle_pause
-python -m shuvoice control tts_restart
-python -m shuvoice control tts_stop
-python -m shuvoice control tts_status
-
-# legacy form (still supported):
-python -m shuvoice --control status
+# Source/venv install
+shuvoice run
 ```
 
-Notes:
-- `start`/`stop` is recommended for push-to-talk flows (`bind` + `bindr`).
-- `status` may report `processing` briefly after `stop`/`toggle` while final text is being flushed/typed.
-- CLI waits up to 2s after `stop` (or a stop-side `toggle`) for processing to finish; adjust with `--control-wait-sec`.
-- TTS commands do not use post-stop processing wait.
+---
 
-Hyprland example:
+## Usage
+
+### Push-to-Talk (STT)
+
+Hold your configured push-to-talk key, speak, and release. The transcribed
+text is typed into your focused window.
+
+#### Hyprland Keybinds
+
+The wizard configures these automatically, but you can set them manually in
+`~/.config/hypr/hyprland.conf`:
 
 ```ini
-# Push-to-talk (STT)
-bind = , Insert, exec, shuvoice control start --control-wait-sec 0
-bindr = , Insert, exec, shuvoice control stop --control-wait-sec 0
+# Push-to-talk (STT) — example using Right Ctrl
+bind = , Control_R, exec, shuvoice control start --control-wait-sec 0
+bindr = , Control_R, exec, shuvoice control stop --control-wait-sec 0
+bindr = CTRL, Control_R, exec, shuvoice control stop --control-wait-sec 0
 
 # Speak selected text (TTS)
 bind = SUPER CTRL, S, exec, shuvoice control tts_speak --control-wait-sec 0
 ```
 
-## Waybar module (tray-style status icon)
+### Text-to-Speech (TTS)
 
-<p align="center">
-  <img src="./docs/assets/screenshots/waybar-tooltip.png" alt="Waybar tooltip showing backend, model, device, and keybind" width="420">
-</p>
+Highlight text in any app, then press your TTS keybind (default: `Super+Ctrl+S`).
+ShuVoice reads the selected text aloud using your configured TTS backend.
 
-ShuVoice ships a Waybar helper command (`shuvoice-waybar`) that outputs JSON
-for a `custom/*` module and can handle click actions.
+- Uses primary selection first, then clipboard fallback
+- STT and TTS are mutually exclusive (starting one stops the other)
+- Re-triggering while speaking interrupts and starts fresh
 
-Quick checks:
+### Control Commands
+
+Send commands to a running ShuVoice instance:
 
 ```bash
-shuvoice-waybar status
-shuvoice-waybar menu
-shuvoice-waybar launch-wizard
+shuvoice control start       # Begin recording
+shuvoice control stop        # Stop recording and type result
+shuvoice control toggle      # Toggle recording on/off
+shuvoice control status      # Show current state
+shuvoice control metrics     # Show runtime metrics
+
+# TTS commands
+shuvoice control tts_speak   # Read selected text aloud
+shuvoice control tts_stop    # Stop TTS playback
+shuvoice control tts_status  # Show TTS state
 ```
 
-Waybar config example:
+### Useful CLI Commands
+
+```bash
+shuvoice --help              # Show all commands
+shuvoice audio list-devices  # List audio input devices
+shuvoice config effective    # Print merged effective config
+shuvoice config validate     # Validate your config file
+shuvoice model download      # Download model for active backend
+shuvoice diagnostics         # Show runtime diagnostics
+shuvoice wizard              # Re-run the setup wizard
+```
+
+---
+
+## Configuration
+
+Config file location: **`~/.config/shuvoice/config.toml`**
+
+The wizard creates this for you. To edit manually, see the full reference at
+[`examples/config.toml`](examples/config.toml).
+
+### Switching ASR Backends
+
+```toml
+[asr]
+asr_backend = "sherpa"     # sherpa | nemo | moonshine
+```
+
+Restart the service after changing:
+
+```bash
+systemctl --user restart shuvoice.service
+```
+
+### Backend Comparison
+
+| Backend | Best For | GPU Required? | Accuracy | Speed |
+|---|---|---|---|---|
+| **Sherpa-ONNX** | General use, CPU systems | No (optional CUDA) | Good | Fast |
+| **NeMo** | Maximum accuracy | Yes (CUDA) | Best | Medium |
+| **Moonshine** | Low-resource systems | No (optional CUDA) | Fair | Varies |
+
+<details>
+<summary><strong>Detailed backend configuration</strong></summary>
+
+#### Sherpa-ONNX
+
+Default backend. Two profiles available:
+
+- **Streaming** (Zipformer) — live partial transcription as you speak
+- **Instant** (Parakeet) — transcribes on key release for higher accuracy
+
+```toml
+[asr]
+asr_backend = "sherpa"
+sherpa_provider = "cpu"              # cpu | cuda
+sherpa_model_name = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
+sherpa_decode_mode = "auto"          # auto | streaming | offline_instant
+```
+
+Parakeet offline instant mode (recommended for Parakeet models):
+
+```toml
+[asr]
+asr_backend = "sherpa"
+sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+instant_mode = true
+sherpa_decode_mode = "offline_instant"
+```
+
+Models auto-download to `~/.local/share/shuvoice/models/sherpa/` when
+`sherpa_model_dir` is unset.
+
+#### NeMo
+
+Highest accuracy. Requires NVIDIA GPU with CUDA.
+
+```toml
+[asr]
+asr_backend = "nemo"
+model_name = "nvidia/nemotron-speech-streaming-en-0.6b"
+device = "cuda"                      # cuda | cpu
+right_context = 13                   # 0-13; higher = more accurate, more latency
+```
+
+#### Moonshine
+
+Lightweight, CPU-friendly. Best for short utterances.
+
+```toml
+[asr]
+asr_backend = "moonshine"
+moonshine_model_name = "moonshine/tiny"    # moonshine/tiny (fast) | moonshine/base (slower)
+moonshine_provider = "cpu"                 # cpu | cuda
+moonshine_max_window_sec = 5.0
+```
+
+</details>
+
+### Text Injection Mode
+
+Controls how transcribed text is typed into your focused app:
+
+```toml
+[typing]
+typing_final_injection_mode = "auto"   # auto | clipboard | direct
+```
+
+| Mode | Behavior |
+|---|---|
+| `auto` (default) | Detects clipboard watchers and chooses the safest method automatically |
+| `clipboard` | Copies text to clipboard and pastes with `Ctrl+V` |
+| `direct` | Types text directly via `wtype` (avoids clipboard) |
+
+Quick toggle from CLI:
+
+```bash
+shuvoice config set typing_final_injection_mode direct
+```
+
+### Text Replacements
+
+Add custom word/phrase corrections applied to transcribed text:
+
+```toml
+[typing.text_replacements]
+"speech to text" = "speech-to-text"
+"um" = ""                              # empty value deletes the word
+```
+
+Matches are case-insensitive, whole-word/phrase only (longest first). ShuVoice
+includes built-in corrections for common ASR variants of "ShuVoice" and
+"Hyprland".
+
+### Instant Mode
+
+Set `instant_mode = true` for low-latency tuning across all backends:
+
+```toml
+[asr]
+instant_mode = true
+```
+
+Effects per backend:
+- **NeMo:** forces `right_context = 0`
+- **Sherpa streaming:** caps `sherpa_chunk_ms` at 80
+- **Sherpa offline:** enables one-shot release-to-final decode
+- **Moonshine:** forces `moonshine/tiny`, caps window to 3s and tokens to 48
+
+### Overlay Appearance
+
+```toml
+[overlay]
+font_size = 24
+font_family = "JetBrains Mono"   # optional
+bg_opacity = 0.55
+```
+
+Hyprland blur/transparency for the overlay:
+
+```ini
+# In hyprland.conf — ShuVoice uses layer-shell namespaces: stt-overlay, tts-overlay
+layerrule = blur, stt-overlay
+layerrule = ignorealpha 0.20, stt-overlay
+layerrule = xray 1, stt-overlay
+
+layerrule = blur, tts-overlay
+layerrule = ignorealpha 0.20, tts-overlay
+```
+
+### TTS Configuration
+
+```toml
+[tts]
+tts_enabled = true
+tts_backend = "elevenlabs"                      # elevenlabs | local
+tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"
+tts_model_id = "eleven_multilingual_v2"
+tts_api_key_env = "ELEVENLABS_API_KEY"          # env var name (not the key itself)
+```
+
+Set your API key in `~/.config/shuvoice/local.dev`:
+
+```bash
+ELEVENLABS_API_KEY=sk-your-key-here
+```
+
+### Example Configs
+
+Pre-built config files for common setups:
+
+| File | Description |
+|---|---|
+| [`examples/config.toml`](examples/config.toml) | Full reference with all options |
+| [`examples/config-sherpa-cpu.toml`](examples/config-sherpa-cpu.toml) | Sherpa on CPU |
+| [`examples/config-sherpa-cuda.toml`](examples/config-sherpa-cuda.toml) | Sherpa on GPU |
+| [`examples/config-sherpa-parakeet-offline.toml`](examples/config-sherpa-parakeet-offline.toml) | Parakeet instant mode |
+| [`examples/config-nemo-cuda.toml`](examples/config-nemo-cuda.toml) | NeMo on GPU |
+| [`examples/config-nemo-cpu.toml`](examples/config-nemo-cpu.toml) | NeMo on CPU |
+| [`examples/config-moonshine-cpu.toml`](examples/config-moonshine-cpu.toml) | Moonshine on CPU |
+
+---
+
+## Waybar Integration
+
+<p align="center">
+  <img src="./docs/assets/screenshots/waybar-tooltip.png" alt="Waybar tooltip" width="420">
+</p>
+
+ShuVoice ships a Waybar helper (`shuvoice-waybar`) for a tray-style status icon.
+
+Add to your Waybar config:
 
 ```jsonc
 "custom/shuvoice": {
@@ -325,393 +539,158 @@ Waybar config example:
 }
 ```
 
-Right-click menu uses one of: `omarchy-launch-walker`, `walker`, `wofi`, `rofi`, `bemenu`, or `dmenu`.
-
-If Waybar cannot find the command from your shell PATH, point to the full
-venv path (for example `$HOME/.venv/bin/shuvoice-waybar`) or use the wrapper
-script in this repo: `scripts/shuvoice-waybar.sh`.
-
-Wrapper quick check:
-
-```bash
-./scripts/shuvoice-waybar.sh status
-```
-
-Optional: install a PATH symlink (default: `~/.local/bin/shuvoice-waybar`):
-
-```bash
-./scripts/install-waybar-wrapper.sh
-```
-
-Optional: remove that symlink later:
-
-```bash
-./scripts/uninstall-waybar-wrapper.sh
-```
-
-If your user unit has a different name, set `SHUVOICE_SERVICE` in Waybar's
-exec/on-click commands.
-
-State classes exported by the module:
-`recording`, `processing`, `idle`, `starting`, `stopped`, `error`.
-
-Example CSS:
+State-based CSS styling:
 
 ```css
-#custom-shuvoice.recording { color: #f38ba8; }
+#custom-shuvoice.recording  { color: #f38ba8; }
 #custom-shuvoice.processing { color: #fab387; }
-#custom-shuvoice.idle { color: #a6e3a1; }
-#custom-shuvoice.starting { color: #f9e2af; }
-#custom-shuvoice.stopped { color: #7f849c; }
-#custom-shuvoice.error { color: #f38ba8; }
+#custom-shuvoice.idle       { color: #a6e3a1; }
+#custom-shuvoice.starting   { color: #f9e2af; }
+#custom-shuvoice.stopped    { color: #7f849c; }
+#custom-shuvoice.error      { color: #f38ba8; }
 ```
 
-Hyprland blur/transparency for the overlay layer surface:
+<details>
+<summary><strong>Waybar setup details</strong></summary>
 
-```ini
-# ShuVoice uses layer-shell namespaces: stt-overlay, tts-overlay
-layerrule = blur, stt-overlay
-layerrule = ignorealpha 0.20, stt-overlay
-layerrule = xray 1, stt-overlay
-
-layerrule = blur, tts-overlay
-layerrule = ignorealpha 0.20, tts-overlay
-```
-
-Then tune overlay styling in `~/.config/shuvoice/config.toml`:
-
-```toml
-[overlay]
-font_size = 24
-font_family = "JetBrains Mono" # optional
-bg_opacity = 0.55
-```
-
-## Configuration
-
-Relaunch setup wizard at any time:
+Available commands:
 
 ```bash
-shuvoice wizard
-# legacy: shuvoice --wizard
+shuvoice-waybar status          # JSON output for Waybar
+shuvoice-waybar menu            # Right-click menu
+shuvoice-waybar toggle-record   # Toggle recording
+shuvoice-waybar service-toggle  # Start/stop systemd service
+shuvoice-waybar launch-wizard   # Open setup wizard
 ```
 
-The wizard can optionally auto-add Hyprland push-to-talk binds when the
-selected key is not already used (default presets include **Insert** and
-**Right Control**).
+Right-click menu uses one of: `omarchy-launch-walker`, `walker`, `wofi`,
+`rofi`, `bemenu`, or `dmenu`.
 
-When Sherpa is selected, the wizard lets you choose:
-- Profile: Streaming (Zipformer) or Instant (Parakeet)
-- Compute device: CPU or GPU (CUDA)
-
-If GPU (CUDA) is selected, the finish step now attempts a best-effort
-CUDA-capable Sherpa runtime install before model download.
-
-Wizard now maps typing/output behavior to safer overlay-only defaults:
-- Streaming profiles -> `output_mode = "final_only"`
-- Instant profile -> `output_mode = "final_only"`
-
-(If you explicitly want live partial typing into the focused app, set
-`output_mode = "streaming_partial"` manually.)
-
-It also shows download progress in the finish screen (with a cancel button),
-and attempts to auto-download the selected model at finish.
-
-Wizard screens:
-
-<p align="center">
-  <img src="./docs/assets/screenshots/wizard-welcome.png" alt="ShuVoice setup wizard welcome screen" width="760">
-</p>
-
-<p align="center">
-  <img src="./docs/assets/screenshots/wizard-asr-selection.png" alt="ShuVoice setup wizard ASR backend selection screen" width="760">
-</p>
-
-<p align="center">
-  <img src="./docs/assets/screenshots/wizard-keybind-selection.png" alt="ShuVoice setup wizard keybind selection screen" width="760">
-</p>
-
-(From Waybar, map an action to `shuvoice-waybar launch-wizard`.)
-
-Config file path:
-
-- `~/.config/shuvoice/config.toml`
-- include top-level `config_version = 1` (added automatically on migration/write)
-
-Example config:
-
-- `examples/config.toml` (full reference)
-- `examples/config-nemo-cuda.toml`
-- `examples/config-nemo-cpu.toml`
-- `examples/config-sherpa-cuda.toml`
-- `examples/config-sherpa-cpu.toml`
-- `examples/config-sherpa-parakeet-offline.toml`
-- `examples/config-sherpa-parakeet-streaming.toml`
-- `examples/config-moonshine-cpu.toml`
-- `examples/waybar-custom-shuvoice.jsonc` (Waybar custom module snippet)
-- `examples/waybar-custom-shuvoice-wrapper.jsonc` (wrapper-script variant)
-- `examples/waybar-shuvoice.css` (Waybar state color classes)
-
-Backend selection is controlled by `asr_backend`:
-
-- `asr_backend = "sherpa"` (default): uses `sherpa_*` settings; if `sherpa_model_dir` is unset, ShuVoice auto-downloads `sherpa_model_name` (default: `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06`)
-- `asr_backend = "nemo"`: uses `model_name`, `right_context`, `device`
-- `asr_backend = "moonshine"`: uses `moonshine_*` settings (16k sample rate expected)
-
-Sherpa decode mode controls whether ShuVoice uses streaming chunk decode or
-one-shot offline utterance decode:
-
-```toml
-[asr]
-asr_backend = "sherpa"
-sherpa_decode_mode = "auto"  # auto | streaming | offline_instant
-```
-
-Resolution rules:
-- `streaming`: always use the existing streaming chunk path.
-- `offline_instant`: accumulate audio while PTT is held, decode once on release,
-  and commit only the final transcript.
-- `auto`: resolves to `offline_instant` for Parakeet model names when
-  `instant_mode = true`; otherwise resolves to `streaming`.
-
-Parakeet safety gate:
-- `sherpa_enable_parakeet_streaming = false` (default): block Parakeet + streaming.
-- `sherpa_enable_parakeet_streaming = true`: allow Parakeet + streaming.
-
-Parakeet TDT v3 stable/default path (offline instant):
-
-```toml
-[asr]
-asr_backend = "sherpa"
-sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
-instant_mode = true
-sherpa_decode_mode = "offline_instant"
-```
-
-Parakeet streaming is available as an explicit opt-in safety override:
-
-```toml
-[asr]
-asr_backend = "sherpa"
-sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
-sherpa_decode_mode = "streaming"
-sherpa_enable_parakeet_streaming = true
-```
-
-Without `sherpa_enable_parakeet_streaming = true`, startup guards still block
-Parakeet + streaming combinations with an actionable error (exit code 78).
-
-Optional: set `instant_mode = true` under `[asr]` for low-latency tuning.
-This applies backend-specific behavior:
-
-- NeMo: forces `right_context = 0`
-- Sherpa streaming mode: caps `sherpa_chunk_ms` at `80`
-- Sherpa offline mode: enables one-shot release-to-final decode behavior
-- Moonshine: forces `moonshine_model_name = "moonshine/tiny"`, caps `moonshine_max_window_sec` to `3.0`, and caps `moonshine_max_tokens` to `48`
-
-`right_context` applies to NeMo only.
-
-TTS settings live under `[tts]`:
-
-```toml
-[tts]
-tts_enabled = true
-tts_backend = "elevenlabs" # elevenlabs | local
-tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"
-tts_model_id = "eleven_multilingual_v2"
-tts_api_key_env = "ELEVENLABS_API_KEY"
-tts_output_format = "pcm_24000"
-tts_max_chars = 5000
-tts_request_timeout_sec = 30.0
-# tts_playback_device = 3 # optional name/index
-```
-
-Key behavior:
-- `tts_speak` captures selected text with `wl-paste --primary` first, then clipboard fallback.
-- Re-triggering `tts_speak` while already speaking interrupts current playback and starts new speech.
-- STT recording and TTS playback are mutually exclusive.
-
-ShuVoice includes built-in brand corrections for common ASR variants of
-`ShuVoice` and `Hyprland` (for example: `shove voice`, `shu voice`,
-`show voice`, `hyper land`, `hyperland`, `high per land`).
-
-You can add/override corrections with `[typing.text_replacements]`:
-
-```toml
-[typing.text_replacements]
-# Add your own replacements (or override a built-in one)
-"speech to text" = "speech-to-text"
-"um" = ""
-```
-
-Matches are case-insensitive and only apply to whole words/phrases (longest
-source phrases first). Empty values delete the matched word/phrase.
-
-Final text injection behavior is controlled under `[typing]`:
-
-- `typing_final_injection_mode = "auto"` (default): detect known clipboard watchers (`wl-paste --watch`, `wl-clip-persist`, `elephant`) and prefer direct final typing.
-- `typing_final_injection_mode = "clipboard"`: always use clipboard paste (`wl-copy` + `Ctrl+V`).
-- `typing_final_injection_mode = "direct"`: always use direct `wtype` typing.
-- `typing_clipboard_settle_delay_ms = 40`: delay between `wl-copy` and paste in clipboard mode (helps compositor/clipboard-manager timing races).
-- `use_clipboard_for_final` is soft-deprecated; if `typing_final_injection_mode` is omitted, legacy `true` now maps to `auto` (safer watcher-aware behavior) and `false` maps to `direct`.
-
-Quick toggle from CLI (without manually editing TOML):
+If Waybar can't find `shuvoice-waybar` in PATH, use the wrapper script:
 
 ```bash
-shuvoice config set typing_final_injection_mode auto
-shuvoice config set typing_final_injection_mode clipboard
-shuvoice config set typing_final_injection_mode direct
+# Install a PATH symlink (default: ~/.local/bin/shuvoice-waybar)
+./scripts/install-waybar-wrapper.sh
+
+# Or point Waybar to the full path
+# exec: "/home/you/.venv/bin/shuvoice-waybar status"
 ```
 
-If you hit RNNT CUDA-graph decoder issues on your driver/toolkit combo,
-keep this setting disabled (default):
+See [`examples/waybar-custom-shuvoice.jsonc`](examples/waybar-custom-shuvoice.jsonc)
+and [`examples/waybar-shuvoice.css`](examples/waybar-shuvoice.css) for
+complete examples.
 
-```toml
-use_cuda_graph_decoder = false
-```
+</details>
 
-## Smoke test script
+---
 
-```bash
-./scripts/smoke-test.sh
-```
+## Troubleshooting
+
+<details>
+<summary><strong>Missing Python modules</strong></summary>
+
+| Error | Fix |
+|---|---|
+| `No module named 'torch'` or `'nemo'` | `uv sync --extra asr-nemo` or install `python-pytorch-cuda` (Arch) |
+| `No module named 'sherpa_onnx'` | AUR: `yay -S python-sherpa-onnx-bin` · venv: `uv sync --extra asr-sherpa` |
+| `No module named 'moonshine_onnx'` | `uv sync --extra asr-moonshine` |
+| `No module named 'gi'` | `sudo pacman -S python-gobject gtk4 gtk4-layer-shell` |
+
+</details>
+
+<details>
+<summary><strong>Sherpa / Parakeet errors</strong></summary>
+
+| Error | Fix |
+|---|---|
+| Missing `encoder/decoder/joiner` artifacts | Point `sherpa_model_dir` to a valid model directory, or unset it to auto-download |
+| `Parakeet requires offline instant mode` | Use `sherpa_decode_mode = "offline_instant"` with `instant_mode = true` |
+| `window_size does not exist in the metadata` | Use `sherpa_decode_mode = "offline_instant"` for that model, or switch to Zipformer |
+| `CUDAExecutionProvider` not found | Install CUDA-enabled sherpa-onnx, or use `sherpa_provider = "cpu"` |
+
+</details>
+
+<details>
+<summary><strong>Audio and recognition issues</strong></summary>
+
+| Problem | Fix |
+|---|---|
+| Wrong microphone | Run `shuvoice audio list-devices`, then set `audio_device` by **name** (not index) in config |
+| Mic too quiet | Increase `input_gain` (try `1.3` to `1.8`) |
+| Phantom text on silent presses | Raise `silence_rms_threshold` (try `0.010`→`0.015`) or `silence_rms_multiplier` (try `2.0`) |
+| Long phrases cut out | Keep `streaming_stall_guard = true` (default); tune `streaming_stall_chunks` (3–6) |
+| Clipboard pollution | Set `typing_final_injection_mode = "auto"` (detects clipboard managers automatically) |
+
+</details>
+
+<details>
+<summary><strong>System/runtime errors</strong></summary>
+
+| Error | Fix |
+|---|---|
+| `libgtk4-layer-shell.so not found` | `sudo pacman -S gtk4-layer-shell` |
+| `wtype not found in PATH` | `sudo pacman -S wtype` |
+| `Control socket not found` | Start ShuVoice first before sending control commands |
+| `espeak-ng not found` | `sudo pacman -S espeak-ng` (only needed for roundtrip test scripts) |
+| `tts_speak` says no selected text | Highlight text first; verify `wl-paste` works |
+| ElevenLabs 401 errors | Export API key in env var named by `tts_api_key_env`; run `shuvoice preflight` |
+| `Failed to build kaldialign` (Python 3.14) | Use `uv sync --extra asr-nemo --override packaging/constraints/py314-overrides.txt` |
+
+</details>
+
+---
 
 ## Development
 
-Install development tooling and run local quality checks:
-
 ```bash
+# Clone and install with dev tooling
+git clone https://github.com/shuv1337/shuvoice.git
+cd shuvoice
 uv sync --dev
+
+# Run checks
 uv run ruff check shuvoice tests
 uv run ruff format --check shuvoice tests
 uv run pytest -m "not gui" -v
 ```
 
-IPC end-to-end smoke tests (CLI -> control socket):
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
+
+<details>
+<summary><strong>Advanced test suites</strong></summary>
 
 ```bash
+# IPC end-to-end smoke tests
 pytest -m e2e -k ipc_smoke -v
-```
 
-Manual phrase regression (opt-in integration test harness):
-
-```bash
-# Runs deterministic TTS->STT regression checks for the two manual phrases
-# (quick brown fox + moonshine sentence), repeated multiple times.
+# Manual phrase regression (opt-in)
 SHUVOICE_RUN_ROUNDTRIP=1 \
 SHUVOICE_ROUNDTRIP_BACKEND=nemo \
 SHUVOICE_ROUNDTRIP_DEVICE=cuda \
 pytest -m integration -k roundtrip_regression -v
-```
 
-Sherpa GPU low-noise regression suite (from field notes):
-
-```bash
-SHUVOICE_RUN_SHERPA_LOW_NOISE=1 \
-SHUVOICE_SHERPA_PROVIDER=cuda \
-pytest -m integration -k sherpa_gpu_low_noise_phrase_regression -v
-```
-
-To remove local build/test artifacts generated during development:
-
-```bash
-rm -rf build dist *.egg-info .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage* coverage.xml
-```
-
-## Long-phrase round-trip harness (TTS -> STT)
-
-Use this to reproduce truncation/cut-out behavior with deterministic inputs.
-
-```bash
-# Uses built-in defaults (writes WAV + CSV under build/tts-roundtrip)
+# Long-phrase round-trip harness (TTS → STT)
 python scripts/tts_roundtrip.py --asr-backend nemo --device cuda
 
-# Moonshine backend
-python scripts/tts_roundtrip.py --asr-backend moonshine --moonshine-model-name moonshine/tiny
-
-# Use fixed phrase fixtures
-python scripts/tts_roundtrip.py \
-  --phrases-file examples/tts_roundtrip_phrases.txt \
-  --asr-backend nemo \
-  --device cuda
+# Smoke test script
+./scripts/smoke-test.sh
 ```
 
-The script:
-- generates WAV files via `espeak-ng`
-- streams each file through ShuVoice ASR chunking logic
-- prints reference vs hypothesis similarity
-- writes `build/tts-roundtrip/roundtrip.csv`
+</details>
 
-## Open source project docs
+---
 
-- Contribution guidelines: `CONTRIBUTING.md`
-- Code of Conduct: `CODE_OF_CONDUCT.md`
-- Security policy: `SECURITY.md`
-- Brand assets: `docs/BRANDING.md`
+## Project Links
+
+| | |
+|---|---|
+| **Repository** | [github.com/shuv1337/shuvoice](https://github.com/shuv1337/shuvoice) |
+| **AUR Package** | [shuvoice-git](https://aur.archlinux.org/packages/shuvoice-git) |
+| **Contributing** | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| **Code of Conduct** | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) |
+| **Security** | [SECURITY.md](SECURITY.md) |
+| **Brand Assets** | [docs/BRANDING.md](docs/BRANDING.md) |
 
 ## License
 
-ShuVoice is released under the MIT License. See `LICENSE`.
-
-## Troubleshooting
-
-- `No module named 'torch'` or `No module named 'nemo'`
-  - Install NeMo ASR deps (`uv sync --extra asr-nemo` or `--extra asr`) or Arch CUDA torch package.
-- `No module named 'sherpa_onnx'`
-  - AUR: `yay -S --needed python-sherpa-onnx-bin` (or another provider for `python-sherpa-onnx`).
-  - venv: `uv sync --extra asr-sherpa`.
-- `No module named 'moonshine_onnx'`
-  - Install Moonshine deps (`uv sync --extra asr-moonshine`).
-- `sherpa_model_dir` exists but is missing `encoder/decoder/joiner` artifacts
-  - Point `sherpa_model_dir` to a valid transducer model directory containing
-    `tokens.txt` and ONNX files for encoder/decoder/joiner.
-  - If `sherpa_model_dir` is unset, ShuVoice will auto-download `sherpa_model_name`.
-- `Parakeet requires offline instant mode` startup error
-  - Stable path: use `sherpa_decode_mode = "offline_instant"`, or set
-    `instant_mode = true` with `sherpa_decode_mode = "auto"`.
-  - Streaming override: set both `sherpa_decode_mode = "streaming"` and
-    `sherpa_enable_parakeet_streaming = true`.
-- `window_size does not exist in the metadata` when using Parakeet streaming
-  - Your Parakeet model is incompatible with Sherpa online decoder metadata
-    requirements on this runtime.
-  - Use `sherpa_decode_mode = "offline_instant"` for that model, or switch to
-    a streaming-native model (Zipformer).
-- `sherpa_provider='cuda' requested, but runtime does not expose CUDAExecutionProvider`
-  - Install a CUDA-enabled sherpa-onnx runtime, or run with `sherpa_provider = "cpu"`.
-  - `setup`/`preflight` now report requested vs effective provider and decode mode.
-- `moonshine_model_dir` missing `encoder_model.onnx` / `decoder_model_merged.onnx`
-  - Point `moonshine_model_dir` to a valid local Moonshine ONNX export, or unset it
-    and let useful-moonshine-onnx fetch weights from Hugging Face.
-- `No module named 'gi'`
-  - Install GTK Python bindings (`uv sync` now includes `PyGObject`).
-  - If build fails, install system deps: `sudo pacman -S python-gobject gtk4 gtk4-layer-shell`.
-- `Failed to build kaldialign` when installing NeMo extras on Python 3.14
-  - Use: `uv sync --extra asr-nemo --override packaging/constraints/py314-overrides.txt`.
-  - Or use a Python 3.13 virtualenv for ASR installs.
-- `espeak-ng not found` when running `scripts/tts_roundtrip.py`
-  - Install with: `sudo pacman -S espeak-ng`.
-- `tts_speak` says no selected text
-  - Highlight text in the target app first. ShuVoice checks primary selection then clipboard fallback.
-  - Verify `wl-paste` is installed and working.
-- ElevenLabs auth errors (`401`) or missing API key
-  - Export your API key in the env var named by `[tts].tts_api_key_env` (default `ELEVENLABS_API_KEY`).
-  - Run `shuvoice preflight` to validate TTS key/env wiring.
-- TTS playback device errors
-  - Leave `tts_playback_device` unset to use default, or set a valid output device name/index.
-- `Control socket not found ...`
-  - Start ShuVoice first (`python -m shuvoice` or `python -m shuvoice run`) before sending `control` commands.
-- `libgtk4-layer-shell.so not found`
-  - `sudo pacman -S gtk4-layer-shell`
-- `wtype not found in PATH`
-  - `sudo pacman -S wtype`
-- Clipboard history is polluted with transcription fragments / text not pasting (Omarchy/Walker/Elephant)
-  - Set `typing_final_injection_mode = "auto"` in your config (the new default). This detects clipboard managers and uses direct typing to prevent conflicts.
-- Recognition quality is poor / start-stop triggers repeatedly
-  - Increase ASR context for accuracy (eg. `right_context=13`, with higher latency).
-  - Select the correct mic (`python -m shuvoice audio list-devices`, then set `audio_device`). Prefer device *name* over numeric index, because indices can change between runs.
-  - Increase `input_gain` moderately (eg. `1.3` to `1.8`) if your mic is too quiet.
-  - If silent presses still produce phantom text (eg. "thank you"), raise `silence_rms_threshold` slightly (eg. `0.010` to `0.015`) and/or increase `silence_rms_multiplier` (eg. `2.0`) in config.
-- Long phrases plateau or cut out mid-sentence
-  - Keep `streaming_stall_guard = true` (default) to inject a tiny silent flush when transcript stalls despite speech energy.
-  - Tune `streaming_stall_chunks` (try `3` to `6`) and `streaming_stall_rms_ratio` (try `0.6` to `0.9`) in config.
-  - Run `python scripts/tts_roundtrip.py --phrases-file examples/tts_roundtrip_phrases.txt --asr-backend nemo --device cuda` to compare before/after behavior.
+ShuVoice is released under the [MIT License](LICENSE).
