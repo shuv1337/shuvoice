@@ -192,9 +192,7 @@ def run_setup(
 
     # Evaluate startup diagnostics on a copy so we can report effective runtime
     # values (for example provider fallback) without mutating caller config.
-    cfg_for_checks = Config(
-        **{name: getattr(config, name) for name in Config.config_field_names()}
-    )
+    cfg_for_checks = Config(**{name: getattr(config, name) for name in Config.config_field_names()})
 
     startup_warnings = backend_cls.startup_warnings(cfg_for_checks, apply_fixes=True)
     if startup_warnings:
@@ -217,10 +215,7 @@ def run_setup(
             looks_like_parakeet = bool(detector(cfg_for_checks))
         print(f"[INFO] Sherpa Parakeet model: {'yes' if looks_like_parakeet else 'no'}")
         if looks_like_parakeet:
-            print(
-                "[INFO] Sherpa Parakeet runnable: "
-                f"{'yes' if not startup_errors else 'no'}"
-            )
+            print(f"[INFO] Sherpa Parakeet runnable: {'yes' if not startup_errors else 'no'}")
 
     if startup_errors:
         print("\n[FAIL] Backend runtime compatibility")

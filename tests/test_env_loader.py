@@ -19,7 +19,7 @@ def test_load_local_dev_env_loads_keys_and_export_lines(tmp_path, monkeypatch):
             [
                 "# comment",
                 "ELEVENLABS_API_KEY=abc123",
-                "export OPENAI_API_KEY=\"xyz\"",
+                'export OPENAI_API_KEY="xyz"',
             ]
         ),
         encoding="utf-8",

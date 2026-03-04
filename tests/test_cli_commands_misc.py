@@ -35,7 +35,9 @@ def test_list_audio_devices_success_filters_input_devices(monkeypatch, capsys):
 
 
 def test_list_audio_devices_error(monkeypatch, capsys):
-    fake_sd = types.SimpleNamespace(query_devices=lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    fake_sd = types.SimpleNamespace(
+        query_devices=lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
     monkeypatch.setitem(sys.modules, "sounddevice", fake_sd)
 
     assert audio_cmd.list_audio_devices() == 1
@@ -99,7 +101,9 @@ def test_config_validate_success(monkeypatch, capsys):
 
 
 def test_config_validate_error(monkeypatch, capsys):
-    monkeypatch.setattr(config_cmd, "load_raw", lambda _path: (_ for _ in ()).throw(RuntimeError("bad")))
+    monkeypatch.setattr(
+        config_cmd, "load_raw", lambda _path: (_ for _ in ()).throw(RuntimeError("bad"))
+    )
 
     assert config_cmd.config_validate() == 1
     err = capsys.readouterr().err
@@ -129,7 +133,7 @@ def test_config_effective_error(monkeypatch, capsys):
 
 def test_config_set_updates_typing_final_injection_mode(monkeypatch, tmp_path, capsys):
     config_file = tmp_path / "config.toml"
-    config_file.write_text("[typing]\ntyping_final_injection_mode = \"auto\"\n", encoding="utf-8")
+    config_file.write_text('[typing]\ntyping_final_injection_mode = "auto"\n', encoding="utf-8")
 
     monkeypatch.setattr(config_cmd.Config, "config_path", classmethod(lambda cls: config_file))
 

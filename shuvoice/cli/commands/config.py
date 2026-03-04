@@ -55,8 +55,7 @@ def config_set(key: str, value: str) -> int:
     if value_norm not in _ALLOWED_FINAL_INJECTION_MODES:
         allowed = ", ".join(sorted(_ALLOWED_FINAL_INJECTION_MODES))
         print(
-            "ERROR: typing_final_injection_mode must be one of: "
-            f"{allowed}",
+            f"ERROR: typing_final_injection_mode must be one of: {allowed}",
             file=sys.stderr,
         )
         return 1

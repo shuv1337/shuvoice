@@ -146,7 +146,11 @@ class SherpaBackend(ASRBackend):
         model_name = str(getattr(config, "sherpa_model_name", "")).strip().lower()
         model_dir = str(getattr(config, "sherpa_model_dir", "") or "").strip().lower()
         candidates = [model_name, model_dir]
-        return any(marker in candidate for candidate in candidates for marker in cls._PARAKEET_MODEL_MARKERS)
+        return any(
+            marker in candidate
+            for candidate in candidates
+            for marker in cls._PARAKEET_MODEL_MARKERS
+        )
 
     @staticmethod
     def _cuda_provider_available() -> tuple[bool, str]:
@@ -523,7 +527,9 @@ class SherpaBackend(ASRBackend):
 
         configured = getattr(config, "sherpa_model_dir", None)
         model_name = str(getattr(config, "sherpa_model_name", "") or "").strip() or None
-        model_dir = Path(configured).expanduser() if configured else cls._default_model_dir(model_name)
+        model_dir = (
+            Path(configured).expanduser() if configured else cls._default_model_dir(model_name)
+        )
 
         if not model_dir.is_dir():
             return True, f"model directory not present yet ({model_dir})"
