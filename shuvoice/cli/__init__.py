@@ -7,6 +7,7 @@ import os
 import sys
 from typing import Sequence
 
+from ..env_loader import load_local_dev_env, local_dev_env_path
 from .commands.audio import list_audio_devices
 from .commands.common import load_effective_config
 from .commands.config import config_effective, config_path, config_set, config_validate
@@ -49,6 +50,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     _configure_logging(args.verbose)
+    loaded_env_vars = load_local_dev_env()
+    if loaded_env_vars:
+        logging.debug(
+            "Loaded %d environment variable(s) from %s",
+            loaded_env_vars,
+            local_dev_env_path(),
+        )
 
     resolved, legacy_warnings = resolve_command(args, parser)
     for message in legacy_warnings:

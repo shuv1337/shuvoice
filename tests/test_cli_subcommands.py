@@ -7,18 +7,21 @@ from shuvoice.config import Config
 
 
 def test_cli_main_dispatches_default_run(monkeypatch):
+    monkeypatch.setattr("shuvoice.cli.load_local_dev_env", lambda: 0)
     monkeypatch.setattr("shuvoice.cli.run_app", lambda args: 7)
 
     assert cli_main([]) == 7
 
 
 def test_cli_main_dispatches_wizard(monkeypatch):
+    monkeypatch.setattr("shuvoice.cli.load_local_dev_env", lambda: 0)
     monkeypatch.setattr("shuvoice.cli.run_wizard_command", lambda: 0)
 
     assert cli_main(["wizard"]) == 0
 
 
 def test_cli_main_dispatches_audio_list_devices(monkeypatch):
+    monkeypatch.setattr("shuvoice.cli.load_local_dev_env", lambda: 0)
     monkeypatch.setattr("shuvoice.cli.list_audio_devices", lambda: 0)
 
     assert cli_main(["audio", "list-devices"]) == 0
@@ -26,6 +29,7 @@ def test_cli_main_dispatches_audio_list_devices(monkeypatch):
 
 def test_cli_main_dispatches_config_path_without_loading_config(monkeypatch):
     called = {"path": False, "load": False}
+    monkeypatch.setattr("shuvoice.cli.load_local_dev_env", lambda: 0)
 
     def fake_path() -> int:
         called["path"] = True
@@ -45,6 +49,7 @@ def test_cli_main_dispatches_config_path_without_loading_config(monkeypatch):
 
 def test_cli_main_dispatches_config_set_without_loading_config(monkeypatch):
     called = {"set": False, "load": False}
+    monkeypatch.setattr("shuvoice.cli.load_local_dev_env", lambda: 0)
 
     def fake_set(key: str, value: str) -> int:
         called["set"] = True
@@ -67,6 +72,7 @@ def test_cli_main_dispatches_config_set_without_loading_config(monkeypatch):
 
 
 def test_cli_main_dispatches_preflight(monkeypatch):
+    monkeypatch.setattr("shuvoice.cli.load_local_dev_env", lambda: 0)
     monkeypatch.setattr("shuvoice.cli._load_config_or_exit", lambda _args: Config())
     monkeypatch.setattr("shuvoice.cli.run_preflight", lambda _cfg: True)
 
@@ -74,6 +80,7 @@ def test_cli_main_dispatches_preflight(monkeypatch):
 
 
 def test_cli_main_dispatches_setup(monkeypatch):
+    monkeypatch.setattr("shuvoice.cli.load_local_dev_env", lambda: 0)
     monkeypatch.setattr("shuvoice.cli._load_config_or_exit", lambda _args: Config())
 
     called: dict[str, bool] = {}
@@ -97,6 +104,7 @@ def test_cli_main_dispatches_setup(monkeypatch):
 
 
 def test_cli_main_legacy_control_logs_warning_and_dispatches(monkeypatch, caplog):
+    monkeypatch.setattr("shuvoice.cli.load_local_dev_env", lambda: 0)
     monkeypatch.setattr("shuvoice.cli._load_config_or_exit", lambda _args: Config())
 
     called: dict[str, object] = {}
@@ -115,3 +123,17 @@ def test_cli_main_legacy_control_logs_warning_and_dispatches(monkeypatch, caplog
     assert called["command"] == "status"
     assert called["wait_sec"] == 2.0
     assert any("deprecated" in record.message.lower() for record in caplog.records)
+
+
+def test_cli_main_loads_local_dev_env(monkeypatch):
+    seen: dict[str, int] = {}
+
+    def fake_load_local_dev_env() -> int:
+        seen["loaded"] = seen.get("loaded", 0) + 1
+        return 1
+
+    monkeypatch.setattr("shuvoice.cli.load_local_dev_env", fake_load_local_dev_env)
+    monkeypatch.setattr("shuvoice.cli.run_app", lambda _args: 0)
+
+    assert cli_main([]) == 0
+    assert seen["loaded"] == 1
