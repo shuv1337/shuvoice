@@ -13,12 +13,24 @@ from .hyprland import setup_keybind
 log = logging.getLogger(__name__)
 
 
+def _attempt_auto_install_backend(backend: str, *, prefer_cuda: bool) -> bool:
+    """Attempt backend dependency auto-install via setup command helpers."""
+    try:
+        from ..cli.commands import setup as setup_cmd
+
+        return bool(setup_cmd._attempt_auto_install(backend, prefer_cuda=prefer_cuda))
+    except Exception:  # noqa: BLE001
+        log.exception("Wizard dependency auto-install failed")
+        return False
+
+
 def maybe_download_model(
     asr_backend: str,
     *,
     sherpa_model_name: str | None = None,
     progress_callback: Callable[[float | None, str], None] | None = None,
     cancel_requested: Callable[[], bool] | None = None,
+    auto_install_missing: bool = False,
 ) -> tuple[str, str]:
     """Best-effort model download for wizard-selected backend/model.
 
@@ -34,6 +46,10 @@ def maybe_download_model(
     ``0.0..1.0`` when known, or ``None`` for indeterminate progress.
 
     ``cancel_requested`` can be provided to abort long downloads.
+
+    When ``auto_install_missing`` is true, wizard will attempt a best-effort
+    dependency install before model download (including CUDA-capable Sherpa
+    runtime paths when ``sherpa_provider = "cuda"`` is selected).
     """
 
     def _emit(fraction: float | None, message: str) -> None:
@@ -115,6 +131,54 @@ def maybe_download_model(
 
         backend_cls = get_backend_class(cfg.asr_backend)
 
+        auto_install_attempted = False
+        requested_cuda_runtime = cfg.asr_backend == "sherpa" and cfg.sherpa_provider == "cuda"
+
+        missing = backend_cls.dependency_errors()
+        needs_cuda_runtime_fix = False
+        if requested_cuda_runtime:
+            startup_warnings_probe = getattr(backend_cls, "startup_warnings", None)
+            probe_warnings = (
+                startup_warnings_probe(cfg, apply_fixes=False)
+                if callable(startup_warnings_probe)
+                else []
+            )
+            needs_cuda_runtime_fix = bool(probe_warnings)
+
+        if auto_install_missing and (missing or needs_cuda_runtime_fix):
+            auto_install_attempted = True
+            if requested_cuda_runtime:
+                _emit(None, "Installing Sherpa CUDA runtime dependencies…")
+            else:
+                _emit(None, "Installing backend dependencies…")
+
+            installed = _attempt_auto_install_backend(
+                cfg.asr_backend,
+                prefer_cuda=requested_cuda_runtime,
+            )
+            if installed:
+                _emit(None, "Dependency install completed; rechecking runtime…")
+            else:
+                _emit(None, "Dependency install unavailable or failed; continuing")
+
+            backend_cls = get_backend_class(cfg.asr_backend)
+            missing = backend_cls.dependency_errors()
+
+        if missing:
+            _emit(1.0, "Model download skipped (missing dependencies)")
+            install_note = (
+                " Automatic install was attempted but dependencies are still missing."
+                if auto_install_attempted
+                else ""
+            )
+            return (
+                "skipped_missing_deps",
+                _with_provider_note(
+                    "Dependencies for selected backend are missing."
+                    f"{install_note} Run `shuvoice setup` to install them."
+                ),
+            )
+
         if cfg.asr_backend == "sherpa":
             requested_provider = cfg.sherpa_provider
             startup_warnings = getattr(backend_cls, "startup_warnings", None)
@@ -177,16 +241,6 @@ def maybe_download_model(
             "Selected backend downloads models lazily at runtime."
         )
 
-    missing = backend_cls.dependency_errors()
-    if missing:
-        _emit(1.0, "Model download skipped (missing dependencies)")
-        return (
-            "skipped_missing_deps",
-            _with_provider_note(
-                "Dependencies for selected backend are missing. Run `shuvoice setup` to install them."
-            ),
-        )
-
     kwargs: dict[str, object] = {}
     if cfg.asr_backend == "nemo":
         kwargs["model_name"] = cfg.model_name
@@ -237,6 +291,7 @@ def finish_setup(
     overwrite_existing: bool,
     sherpa_model_name: str | None = None,
     sherpa_enable_parakeet_streaming: bool = False,
+    sherpa_provider: str | None = None,
     typing_final_injection_mode: str = "auto",
     auto_download_model: bool = True,
 ) -> tuple[str, str, str, str]:
@@ -246,6 +301,7 @@ def finish_setup(
         overwrite_existing=overwrite_existing,
         sherpa_model_name=sherpa_model_name,
         sherpa_enable_parakeet_streaming=sherpa_enable_parakeet_streaming,
+        sherpa_provider=sherpa_provider,
         typing_final_injection_mode=typing_final_injection_mode,
     )
 
@@ -260,6 +316,7 @@ def finish_setup(
         model_status, model_message = maybe_download_model(
             asr_backend,
             sherpa_model_name=sherpa_model_name,
+            auto_install_missing=True,
         )
 
     if model_status == "incompatible_streaming" and asr_backend == "sherpa":
@@ -268,6 +325,7 @@ def finish_setup(
             overwrite_existing=True,
             sherpa_model_name=DEFAULT_SHERPA_MODEL_NAME,
             sherpa_enable_parakeet_streaming=False,
+            sherpa_provider=sherpa_provider,
             typing_final_injection_mode=typing_final_injection_mode,
         )
         model_message = (

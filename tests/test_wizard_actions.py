@@ -84,6 +84,19 @@ class _PostDownloadIncompatibleParakeetBackend(_DownloadCapableBackend):
         return False, "encoder metadata missing window_size"
 
 
+class _CudaWarningBackend(_DownloadCapableBackend):
+    @staticmethod
+    def startup_warnings(cfg: Config, *, apply_fixes: bool = False) -> list[str]:
+        if cfg.sherpa_provider != "cuda":
+            return []
+
+        warning = "CUDAExecutionProvider missing"
+        if apply_fixes:
+            cfg.sherpa_provider = "cpu"
+            return [f"{warning}; falling back to CPU"]
+        return [warning]
+
+
 def test_maybe_download_model_sherpa_uses_selected_model_name(monkeypatch):
     monkeypatch.setattr(
         "shuvoice.wizard.actions.Config.load",
@@ -254,6 +267,46 @@ def test_maybe_download_model_reports_progress(monkeypatch):
     assert any("Preparing" in text for _, text in events)
     assert any(text == "halfway" for _, text in events)
     assert any("completed" in text.lower() for _, text in events)
+
+
+def test_maybe_download_model_auto_install_attempts_missing_dependencies(monkeypatch):
+    monkeypatch.setattr("shuvoice.wizard.actions.Config.load", classmethod(lambda cls: Config()))
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions.get_backend_class", lambda _name: _MissingDepsBackend
+    )
+
+    calls: list[tuple[str, bool]] = []
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions._attempt_auto_install_backend",
+        lambda backend, *, prefer_cuda: calls.append((backend, prefer_cuda)) or False,
+    )
+
+    status, message = maybe_download_model("sherpa", auto_install_missing=True)
+
+    assert status == "skipped_missing_deps"
+    assert calls == [("sherpa", False)]
+    assert "attempted" in message.lower()
+
+
+def test_maybe_download_model_auto_install_prefers_cuda_runtime_path(monkeypatch):
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions.Config.load",
+        classmethod(lambda cls: Config(asr_backend="sherpa", sherpa_provider="cuda")),
+    )
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions.get_backend_class", lambda _name: _CudaWarningBackend
+    )
+
+    calls: list[tuple[str, bool]] = []
+    monkeypatch.setattr(
+        "shuvoice.wizard.actions._attempt_auto_install_backend",
+        lambda backend, *, prefer_cuda: calls.append((backend, prefer_cuda)) or False,
+    )
+
+    status, _message = maybe_download_model("sherpa", auto_install_missing=True)
+
+    assert status == "downloaded"
+    assert calls == [("sherpa", True)]
 
 
 def test_maybe_download_model_cancelled_before_start(monkeypatch):

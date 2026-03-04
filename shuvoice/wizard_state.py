@@ -579,6 +579,7 @@ def write_config(
     overwrite_existing: bool = False,
     sherpa_model_name: str | None = None,
     sherpa_enable_parakeet_streaming: bool = False,
+    sherpa_provider: str | None = None,
     typing_final_injection_mode: str = DEFAULT_FINAL_INJECTION_MODE,
 ):
     """Write wizard selections to config.toml.
@@ -606,8 +607,12 @@ def write_config(
     the wizard UI.
 
     Writes use the config I/O durability path (atomic write + backup).
-    For Sherpa, CUDA is selected only when the installed sherpa-onnx runtime
-    exposes a CUDA provider; otherwise it defaults to CPU.
+
+    Provider selection:
+    - If ``sherpa_provider`` is explicitly set, that value is written as-is
+      (``cpu`` or ``cuda``).
+    - Otherwise, Sherpa defaults to CUDA only when the installed sherpa-onnx
+      runtime already exposes CUDAExecutionProvider; falls back to CPU.
     """
     injection_mode = str(typing_final_injection_mode).strip().lower()
     if injection_mode not in _FINAL_INJECTION_MODE_SET:
@@ -615,12 +620,27 @@ def write_config(
         raise ValueError(f"typing_final_injection_mode must be one of: {allowed}")
 
     if asr_backend == "sherpa":
-        sherpa_cuda_available = _detect_sherpa_cuda_provider()
-        provider = "cuda" if sherpa_cuda_available else "cpu"
-        if not sherpa_cuda_available and _detect_cuda():
-            log.info(
-                "Sherpa runtime CUDAExecutionProvider not detected; defaulting to sherpa_provider='cpu'"
-            )
+        explicit_provider = None
+        if sherpa_provider is not None:
+            explicit_provider = str(sherpa_provider).strip().lower()
+            if explicit_provider not in {"cpu", "cuda"}:
+                raise ValueError("sherpa_provider must be one of: cpu, cuda")
+
+        if explicit_provider is not None:
+            provider = explicit_provider
+            if provider == "cuda" and not _detect_sherpa_cuda_provider():
+                log.info(
+                    "Sherpa CUDA explicitly selected in wizard, but current runtime does not yet "
+                    "expose CUDAExecutionProvider; setup will attempt runtime install."
+                )
+        else:
+            sherpa_cuda_available = _detect_sherpa_cuda_provider()
+            provider = "cuda" if sherpa_cuda_available else "cpu"
+            if not sherpa_cuda_available and _detect_cuda():
+                log.info(
+                    "Sherpa runtime CUDAExecutionProvider not detected; defaulting to "
+                    "sherpa_provider='cpu'"
+                )
     else:
         provider = "cuda" if _detect_cuda() else "cpu"
 
@@ -696,6 +716,7 @@ def format_summary(
     auto_add_keybind: bool = True,
     sherpa_model_name: str | None = None,
     sherpa_enable_parakeet_streaming: bool = False,
+    sherpa_provider: str | None = None,
     typing_final_injection_mode: str = DEFAULT_FINAL_INJECTION_MODE,
 ) -> str:
     """Build a human-readable summary of wizard selections."""
@@ -746,10 +767,14 @@ def format_summary(
             decode_label = "Streaming (auto)"
             output_mode_label = "final_only"
 
+        provider_value = str(sherpa_provider or "cpu").strip().lower()
+        provider_label = "GPU (CUDA)" if provider_value == "cuda" else "CPU"
+
         lines.insert(1, f"Sherpa profile: {profile_label}")
-        lines.insert(2, f"Sherpa model:   {model_label}")
-        lines.insert(3, f"Sherpa decode:  {decode_label}")
-        lines.insert(4, f"Output mode:    {output_mode_label}")
+        lines.insert(2, f"Sherpa device:  {provider_label}")
+        lines.insert(3, f"Sherpa model:   {model_label}")
+        lines.insert(4, f"Sherpa decode:  {decode_label}")
+        lines.insert(5, f"Output mode:    {output_mode_label}")
 
     if hypr_key:
         bind_lines = format_hyprland_bind_for_keybind(

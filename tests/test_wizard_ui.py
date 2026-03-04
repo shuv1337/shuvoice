@@ -50,12 +50,25 @@ def test_finish_status_text_maps_known_states():
     assert "already bound" in WelcomeWizard._finish_status_text("conflict")
 
 
+def test_starting_model_setup_status_text_includes_cuda_hint_for_sherpa():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard.__new__(WelcomeWizard)
+    wizard._asr_backend = "sherpa"
+    wizard._sherpa_provider = "cuda"
+
+    status = WelcomeWizard._starting_model_setup_status_text(wizard, "not_attempted").lower()
+    assert "cuda" in status
+    assert "before model download" in status
+
+
 def test_wizard_defaults_to_parakeet_instant_profile():
     from shuvoice.wizard import WelcomeWizard
 
     wizard = WelcomeWizard()
     assert wizard._sherpa_model_name == "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
     assert wizard._sherpa_enable_parakeet_streaming is False
+    assert wizard._sherpa_provider == "cpu"
 
 
 def test_asr_page_omits_parakeet_streaming_override_option():
@@ -66,6 +79,8 @@ def test_asr_page_omits_parakeet_streaming_override_option():
 
     assert hasattr(wizard, "_sherpa_streaming_radio")
     assert hasattr(wizard, "_sherpa_parakeet_radio")
+    assert hasattr(wizard, "_sherpa_provider_cpu_radio")
+    assert hasattr(wizard, "_sherpa_provider_cuda_radio")
     assert not hasattr(wizard, "_sherpa_parakeet_streaming_radio")
 
 
@@ -128,6 +143,7 @@ def test_on_finish_writes_config_releases_window_and_quits():
         "moonshine",
         sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
         progress_callback=None,
+        auto_install_missing=True,
     )
     write_marker.assert_called_once()
     wizard._release_input_and_destroy_window.assert_called_once()
@@ -142,6 +158,7 @@ def test_on_finish_passes_parakeet_streaming_profile_to_write_config():
     wizard._asr_backend = "sherpa"
     wizard._sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
     wizard._sherpa_enable_parakeet_streaming = True
+    wizard._sherpa_provider = "cuda"
     wizard._keybind = "f9"
     wizard.completed = False
     wizard._release_input_and_destroy_window = MagicMock()
@@ -159,6 +176,7 @@ def test_on_finish_passes_parakeet_streaming_profile_to_write_config():
         overwrite_existing=False,
         sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
         sherpa_enable_parakeet_streaming=True,
+        sherpa_provider="cuda",
         typing_final_injection_mode="auto",
     )
 
@@ -203,6 +221,7 @@ def test_complete_finish_applies_zipformer_fallback_for_incompatible_parakeet_st
     wizard._asr_backend = "sherpa"
     wizard._sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
     wizard._sherpa_enable_parakeet_streaming = True
+    wizard._sherpa_provider = "cuda"
     wizard._keybind = "insert"
     wizard._download_pulse_source_id = None
     wizard._finish_in_progress = True
@@ -232,6 +251,7 @@ def test_complete_finish_applies_zipformer_fallback_for_incompatible_parakeet_st
         overwrite_existing=True,
         sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
         sherpa_enable_parakeet_streaming=False,
+        sherpa_provider="cuda",
         typing_final_injection_mode="auto",
     )
     write_marker.assert_called_once()

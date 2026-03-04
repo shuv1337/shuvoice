@@ -71,6 +71,7 @@ class WelcomeWizard(Gtk.Application):
         self._asr_backend = "sherpa"
         self._sherpa_model_name = DEFAULT_WIZARD_SHERPA_MODEL_NAME
         self._sherpa_enable_parakeet_streaming = False
+        self._sherpa_provider = "cpu"
         self._typing_final_injection_mode = DEFAULT_FINAL_INJECTION_MODE
         self._keybind = DEFAULT_KEYBIND_ID
         self._finish_in_progress = False
@@ -252,6 +253,63 @@ class WelcomeWizard(Gtk.Application):
         self._sherpa_parakeet_desc.set_halign(Gtk.Align.START)
         page.append(self._sherpa_parakeet_desc)
         self._set_accessible_description(self._sherpa_parakeet_radio, sherpa_parakeet_desc)
+
+        self._sherpa_provider_title = Gtk.Label(label="Sherpa compute device")
+        self._sherpa_provider_title.add_css_class("wizard-subtitle")
+        self._sherpa_provider_title.set_halign(Gtk.Align.START)
+        self._sherpa_provider_title.set_margin_top(8)
+        page.append(self._sherpa_provider_title)
+
+        self._sherpa_provider_help = Gtk.Label(
+            label=(
+                "Pick CPU or GPU (CUDA). If GPU is selected, wizard will try to install "
+                "a CUDA-capable Sherpa runtime automatically."
+            )
+        )
+        self._sherpa_provider_help.add_css_class("wizard-desc")
+        self._sherpa_provider_help.set_halign(Gtk.Align.START)
+        self._sherpa_provider_help.set_justify(Gtk.Justification.LEFT)
+        self._sherpa_provider_help.set_margin_bottom(4)
+        page.append(self._sherpa_provider_help)
+
+        self._sherpa_provider_cpu_radio = Gtk.CheckButton(label="CPU")
+        self._sherpa_provider_cpu_radio.add_css_class("wizard-radio")
+        self._sherpa_provider_cpu_radio.connect(
+            "toggled",
+            self._on_sherpa_provider_toggled,
+            "cpu",
+        )
+        page.append(self._sherpa_provider_cpu_radio)
+
+        sherpa_provider_cpu_desc = "Best compatibility and lowest setup friction."
+        self._sherpa_provider_cpu_desc = Gtk.Label(label=sherpa_provider_cpu_desc)
+        self._sherpa_provider_cpu_desc.add_css_class("wizard-radio-desc")
+        self._sherpa_provider_cpu_desc.set_halign(Gtk.Align.START)
+        page.append(self._sherpa_provider_cpu_desc)
+        self._set_accessible_description(self._sherpa_provider_cpu_radio, sherpa_provider_cpu_desc)
+
+        self._sherpa_provider_cuda_radio = Gtk.CheckButton(label="GPU (CUDA)")
+        self._sherpa_provider_cuda_radio.add_css_class("wizard-radio")
+        self._sherpa_provider_cuda_radio.set_group(self._sherpa_provider_cpu_radio)
+        self._sherpa_provider_cuda_radio.connect(
+            "toggled",
+            self._on_sherpa_provider_toggled,
+            "cuda",
+        )
+        page.append(self._sherpa_provider_cuda_radio)
+
+        sherpa_provider_cuda_desc = (
+            "Higher throughput when CUDA runtime is available. "
+            "Wizard will attempt CUDA-capable Sherpa runtime install at finish."
+        )
+        self._sherpa_provider_cuda_desc = Gtk.Label(label=sherpa_provider_cuda_desc)
+        self._sherpa_provider_cuda_desc.add_css_class("wizard-radio-desc")
+        self._sherpa_provider_cuda_desc.set_halign(Gtk.Align.START)
+        page.append(self._sherpa_provider_cuda_desc)
+        self._set_accessible_description(
+            self._sherpa_provider_cuda_radio,
+            sherpa_provider_cuda_desc,
+        )
 
         self._sync_sherpa_model_controls()
 
@@ -481,6 +539,11 @@ class WelcomeWizard(Gtk.Application):
         self._sherpa_model_name = model_name
         self._sherpa_enable_parakeet_streaming = bool(enable_parakeet_streaming)
 
+    def _on_sherpa_provider_toggled(self, button: Gtk.CheckButton, provider: str):
+        if not button.get_active():
+            return
+        self._sherpa_provider = provider
+
     def _sync_sherpa_model_controls(self):
         title = getattr(self, "_sherpa_profile_title", None)
         help_text = getattr(self, "_sherpa_profile_help", None)
@@ -488,6 +551,14 @@ class WelcomeWizard(Gtk.Application):
         streaming_desc = getattr(self, "_sherpa_streaming_desc", None)
         parakeet_radio = getattr(self, "_sherpa_parakeet_radio", None)
         parakeet_desc = getattr(self, "_sherpa_parakeet_desc", None)
+
+        provider_title = getattr(self, "_sherpa_provider_title", None)
+        provider_help = getattr(self, "_sherpa_provider_help", None)
+        provider_cpu_radio = getattr(self, "_sherpa_provider_cpu_radio", None)
+        provider_cpu_desc = getattr(self, "_sherpa_provider_cpu_desc", None)
+        provider_cuda_radio = getattr(self, "_sherpa_provider_cuda_radio", None)
+        provider_cuda_desc = getattr(self, "_sherpa_provider_cuda_desc", None)
+
         if (
             title is None
             or help_text is None
@@ -495,6 +566,12 @@ class WelcomeWizard(Gtk.Application):
             or streaming_desc is None
             or parakeet_radio is None
             or parakeet_desc is None
+            or provider_title is None
+            or provider_help is None
+            or provider_cpu_radio is None
+            or provider_cpu_desc is None
+            or provider_cuda_radio is None
+            or provider_cuda_desc is None
         ):
             return
 
@@ -506,11 +583,19 @@ class WelcomeWizard(Gtk.Application):
             streaming_desc,
             parakeet_radio,
             parakeet_desc,
+            provider_title,
+            provider_help,
+            provider_cpu_radio,
+            provider_cpu_desc,
+            provider_cuda_radio,
+            provider_cuda_desc,
         ):
             widget.set_visible(is_sherpa)
 
         streaming_radio.set_sensitive(is_sherpa)
         parakeet_radio.set_sensitive(is_sherpa)
+        provider_cpu_radio.set_sensitive(is_sherpa)
+        provider_cuda_radio.set_sensitive(is_sherpa)
 
         if not is_sherpa:
             self._sherpa_model_name = DEFAULT_WIZARD_SHERPA_MODEL_NAME
@@ -528,6 +613,13 @@ class WelcomeWizard(Gtk.Application):
         else:
             self._sherpa_model_name = DEFAULT_SHERPA_MODEL_NAME
             self._sherpa_enable_parakeet_streaming = False
+
+        if str(getattr(self, "_sherpa_provider", "cpu")).strip().lower() == "cuda":
+            provider_cuda_radio.set_active(True)
+            self._sherpa_provider = "cuda"
+        else:
+            provider_cpu_radio.set_active(True)
+            self._sherpa_provider = "cpu"
 
     def _on_keybind_toggled(self, button: Gtk.CheckButton, kb_id: str):
         if button.get_active():
@@ -657,6 +749,7 @@ class WelcomeWizard(Gtk.Application):
         }
         if self._asr_backend == "sherpa":
             write_kwargs["sherpa_enable_parakeet_streaming"] = sherpa_enable_parakeet_streaming
+            write_kwargs["sherpa_provider"] = getattr(self, "_sherpa_provider", "cpu")
 
         write_config(
             self._asr_backend,
@@ -682,11 +775,17 @@ class WelcomeWizard(Gtk.Application):
         # If UI widgets are present, run model download in a worker thread so
         # progress can be rendered live in the done screen.
         if hasattr(self, "_download_progress") and self._download_progress is not None:
-            self._show_finish_status(self._finish_status_text(keybind_status))
+            self._show_finish_status(self._starting_model_setup_status_text(keybind_status))
             self._set_download_progress_visible(True)
             self._set_download_note_visible(self._asr_backend == "sherpa")
             self._set_cancel_download_visible(True)
-            self._apply_download_progress(0.0, "Preparing model download…")
+            initial_progress_text = "Preparing model download…"
+            if (
+                self._asr_backend == "sherpa"
+                and str(getattr(self, "_sherpa_provider", "cpu")).strip().lower() == "cuda"
+            ):
+                initial_progress_text = "Preparing Sherpa CUDA runtime setup…"
+            self._apply_download_progress(0.0, initial_progress_text)
 
             threading.Thread(
                 target=self._download_model_async,
@@ -701,6 +800,7 @@ class WelcomeWizard(Gtk.Application):
             self._asr_backend,
             sherpa_model_name=sherpa_model_name,
             progress_callback=None,
+            auto_install_missing=True,
         )
         self._complete_finish(
             keybind_status,
@@ -718,6 +818,7 @@ class WelcomeWizard(Gtk.Application):
             sherpa_model_name=sherpa_model_name,
             progress_callback=_progress,
             cancel_requested=self._is_download_cancelled,
+            auto_install_missing=True,
         )
 
         GLib.idle_add(
@@ -828,6 +929,7 @@ class WelcomeWizard(Gtk.Application):
                     overwrite_existing=True,
                     sherpa_model_name=DEFAULT_SHERPA_MODEL_NAME,
                     sherpa_enable_parakeet_streaming=False,
+                    sherpa_provider=getattr(self, "_sherpa_provider", "cpu"),
                     typing_final_injection_mode=getattr(
                         self,
                         "_typing_final_injection_mode",
@@ -864,9 +966,10 @@ class WelcomeWizard(Gtk.Application):
 
         write_marker()
         log.info(
-            "Wizard setup ready: asr_backend=%s sherpa_model=%s keybind=%s final_injection=%s keybind_setup=%s model_setup=%s",
+            "Wizard setup ready: asr_backend=%s sherpa_model=%s sherpa_provider=%s keybind=%s final_injection=%s keybind_setup=%s model_setup=%s",
             self._asr_backend,
             sherpa_model_name,
+            getattr(self, "_sherpa_provider", "cpu"),
             self._keybind,
             getattr(self, "_typing_final_injection_mode", DEFAULT_FINAL_INJECTION_MODE),
             keybind_status,
@@ -909,6 +1012,21 @@ class WelcomeWizard(Gtk.Application):
             "error": "⚠ Could not update Hyprland config; check logs.",
         }
         return messages.get(keybind_status, "⚠ Keybind setup status unknown; check logs.")
+
+    def _starting_model_setup_status_text(self, keybind_status: str) -> str:
+        status = self._finish_status_text(keybind_status)
+
+        if (
+            self._asr_backend == "sherpa"
+            and str(getattr(self, "_sherpa_provider", "cpu")).strip().lower() == "cuda"
+        ):
+            status = (
+                f"{status}\n"
+                "ℹ Sherpa GPU (CUDA) selected. Wizard will attempt CUDA runtime setup "
+                "before model download."
+            )
+
+        return status
 
     @staticmethod
     def _model_download_status_text(model_status: str) -> str:
@@ -955,6 +1073,7 @@ class WelcomeWizard(Gtk.Application):
                 sherpa_enable_parakeet_streaming=bool(
                     getattr(self, "_sherpa_enable_parakeet_streaming", False)
                 ),
+                sherpa_provider=getattr(self, "_sherpa_provider", "cpu"),
                 typing_final_injection_mode=getattr(
                     self,
                     "_typing_final_injection_mode",

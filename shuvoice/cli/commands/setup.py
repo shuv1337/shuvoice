@@ -139,9 +139,11 @@ def _auto_install_commands(backend: str, *, prefer_cuda: bool | None = None) -> 
     return commands
 
 
-def _attempt_auto_install(backend: str) -> bool:
-    prefer_cuda = backend == "sherpa" and _detect_cuda_gpu()
-    if prefer_cuda:
+def _attempt_auto_install(backend: str, *, prefer_cuda: bool | None = None) -> bool:
+    if prefer_cuda is None:
+        prefer_cuda = backend == "sherpa" and _detect_cuda_gpu()
+
+    if backend == "sherpa" and prefer_cuda:
         print("Detected CUDA GPU; preferring CUDA-capable Sherpa runtime install path.")
 
     for command in _auto_install_commands(backend, prefer_cuda=prefer_cuda):

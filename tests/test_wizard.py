@@ -109,6 +109,30 @@ def test_write_config_creates_toml_without_cuda(tmp_path):
         assert "use_clipboard_for_final = true" in content
 
 
+def test_write_config_sherpa_explicit_provider_overrides_detection(tmp_path):
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_sherpa_cuda_provider", return_value=True),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        write_config("sherpa", sherpa_provider="cpu")
+
+    content = (tmp_path / "config.toml").read_text()
+    assert 'sherpa_provider = "cpu"' in content
+
+
+def test_write_config_sherpa_explicit_cuda_persists_even_before_runtime_ready(tmp_path):
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_sherpa_cuda_provider", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        write_config("sherpa", sherpa_provider="cuda")
+
+    content = (tmp_path / "config.toml").read_text()
+    assert 'sherpa_provider = "cuda"' in content
+
+
 def test_write_config_sherpa_custom_model_name(tmp_path):
     """write_config persists selected Sherpa model name."""
     with (
@@ -185,6 +209,13 @@ def test_write_config_rejects_invalid_typing_mode(tmp_path):
         with patch("shuvoice.wizard_state._detect_cuda", return_value=False):
             with pytest.raises(ValueError, match="typing_final_injection_mode"):
                 write_config("nemo", typing_final_injection_mode="invalid")
+
+
+def test_write_config_rejects_invalid_sherpa_provider(tmp_path):
+    with patch("shuvoice.wizard_state.Config") as mock_config:
+        mock_config.config_dir.return_value = tmp_path
+        with pytest.raises(ValueError, match="sherpa_provider"):
+            write_config("sherpa", sherpa_provider="rocm")
 
 
 def test_write_config_does_not_overwrite_existing(tmp_path):
@@ -275,9 +306,19 @@ def test_format_summary_shows_selected_final_injection_mode():
 def test_format_summary_sherpa_default_model_shows_streaming_mode():
     result = format_summary("sherpa", sherpa_model_name=DEFAULT_SHERPA_MODEL_NAME)
     assert "Sherpa profile: Streaming" in result
+    assert "Sherpa device:  CPU" in result
     assert "Sherpa model:   Zipformer Kroko (default)" in result
     assert "Sherpa decode:  Streaming (auto)" in result
     assert "Output mode:    final_only" in result
+
+
+def test_format_summary_sherpa_cuda_provider_label():
+    result = format_summary(
+        "sherpa",
+        sherpa_model_name=DEFAULT_SHERPA_MODEL_NAME,
+        sherpa_provider="cuda",
+    )
+    assert "Sherpa device:  GPU (CUDA)" in result
 
 
 def test_format_summary_sherpa_parakeet_model_label():

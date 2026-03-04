@@ -400,9 +400,12 @@ The wizard can optionally auto-add Hyprland push-to-talk binds when the
 selected key is not already used (default presets include **Insert** and
 **Right Control**).
 
-When Sherpa is selected, the wizard lets you choose between:
-- Streaming (Zipformer)
-- Instant (Parakeet)
+When Sherpa is selected, the wizard lets you choose:
+- Profile: Streaming (Zipformer) or Instant (Parakeet)
+- Compute device: CPU or GPU (CUDA)
+
+If GPU (CUDA) is selected, the finish step now attempts a best-effort
+CUDA-capable Sherpa runtime install before model download.
 
 Wizard now maps typing/output behavior to safer overlay-only defaults:
 - Streaming profiles -> `output_mode = "final_only"`
