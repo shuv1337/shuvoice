@@ -38,37 +38,113 @@ def _running_in_venv() -> bool:
     return bool(getattr(sys, "base_prefix", sys.prefix) != sys.prefix)
 
 
-def _auto_install_commands(backend: str) -> list[list[str]]:
+def _detect_cuda_gpu() -> bool:
+    try:
+        import torch  # noqa: PLC0415
+
+        if torch.cuda.is_available():
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+
+    return shutil.which("nvidia-smi") is not None
+
+
+def _venv_install_commands(
+    packages: list[str],
+    *,
+    upgrade: bool = False,
+    no_binary: str | None = None,
+    env_var: str | None = None,
+) -> list[list[str]]:
+    commands: list[list[str]] = []
+
+    if shutil.which("uv"):
+        uv_cmd = ["uv", "pip", "install"]
+        if upgrade:
+            uv_cmd.append("--upgrade")
+        if no_binary:
+            uv_cmd.extend(["--no-binary", no_binary])
+        uv_cmd.extend(packages)
+        if env_var:
+            commands.append(["env", env_var, *uv_cmd])
+        else:
+            commands.append(uv_cmd)
+
+    pip_cmd = [sys.executable, "-m", "pip", "install"]
+    if upgrade:
+        pip_cmd.append("--upgrade")
+    if no_binary:
+        pip_cmd.extend(["--no-binary", no_binary])
+    pip_cmd.extend(packages)
+    if env_var:
+        commands.append(["env", env_var, *pip_cmd])
+    else:
+        commands.append(pip_cmd)
+
+    return commands
+
+
+def _auto_install_commands(backend: str, *, prefer_cuda: bool | None = None) -> list[list[str]]:
     commands: list[list[str]] = []
 
     if backend == "sherpa":
-        commands.extend(
-            [
-                ["yay", "-S", "--needed", "python-sherpa-onnx-bin"],
-                ["yay", "-S", "--needed", "python-sherpa-onnx"],
-                ["paru", "-S", "--needed", "python-sherpa-onnx-bin"],
-                ["paru", "-S", "--needed", "python-sherpa-onnx"],
-            ]
-        )
+        if prefer_cuda is None:
+            prefer_cuda = _detect_cuda_gpu()
+
+        if prefer_cuda:
+            commands.extend(
+                [
+                    # Prefer source provider first on CUDA hosts since it can
+                    # be built as a CUDA-capable runtime.
+                    ["yay", "-S", "--needed", "python-sherpa-onnx"],
+                    ["paru", "-S", "--needed", "python-sherpa-onnx"],
+                    ["yay", "-S", "--needed", "python-sherpa-onnx-bin"],
+                    ["paru", "-S", "--needed", "python-sherpa-onnx-bin"],
+                ]
+            )
+        else:
+            commands.extend(
+                [
+                    ["yay", "-S", "--needed", "python-sherpa-onnx-bin"],
+                    ["yay", "-S", "--needed", "python-sherpa-onnx"],
+                    ["paru", "-S", "--needed", "python-sherpa-onnx-bin"],
+                    ["paru", "-S", "--needed", "python-sherpa-onnx"],
+                ]
+            )
+
         if _running_in_venv():
-            commands.append([sys.executable, "-m", "pip", "install", "sherpa-onnx"])
+            if prefer_cuda:
+                commands.extend(
+                    _venv_install_commands(
+                        ["sherpa-onnx"],
+                        upgrade=True,
+                        no_binary="sherpa-onnx",
+                        env_var="SHERPA_ONNX_CMAKE_ARGS=-DSHERPA_ONNX_ENABLE_GPU=ON",
+                    )
+                )
+            commands.extend(_venv_install_commands(["sherpa-onnx"], upgrade=True))
         return commands
 
     if backend == "moonshine":
         if _running_in_venv():
-            commands.append([sys.executable, "-m", "pip", "install", "useful-moonshine-onnx"])
+            commands.extend(_venv_install_commands(["useful-moonshine-onnx"]))
         return commands
 
     if backend == "nemo":
         if _running_in_venv():
-            commands.append([sys.executable, "-m", "pip", "install", "nemo-toolkit[asr]", "torch"])
+            commands.extend(_venv_install_commands(["nemo-toolkit[asr]", "torch"]))
         return commands
 
     return commands
 
 
 def _attempt_auto_install(backend: str) -> bool:
-    for command in _auto_install_commands(backend):
+    prefer_cuda = backend == "sherpa" and _detect_cuda_gpu()
+    if prefer_cuda:
+        print("Detected CUDA GPU; preferring CUDA-capable Sherpa runtime install path.")
+
+    for command in _auto_install_commands(backend, prefer_cuda=prefer_cuda):
         executable = command[0]
         if executable not in {sys.executable} and not shutil.which(executable):
             continue
