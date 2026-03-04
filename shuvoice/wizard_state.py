@@ -71,6 +71,7 @@ _FINAL_INJECTION_MODE_SET = {mode for mode, _label, _desc in FINAL_INJECTION_MOD
 def _is_parakeet_sherpa_model_name(model_name: str) -> bool:
     return "parakeet" in str(model_name).strip().lower()
 
+
 # Keybind presets for push-to-talk setup.
 # (id, display_label, hyprland_bind_key_spec, description)
 # hyprland_bind_key_spec is the "MODS, KEY" portion for bind/bindr lines.
@@ -611,10 +612,7 @@ def write_config(
     injection_mode = str(typing_final_injection_mode).strip().lower()
     if injection_mode not in _FINAL_INJECTION_MODE_SET:
         allowed = ", ".join(sorted(_FINAL_INJECTION_MODE_SET))
-        raise ValueError(
-            "typing_final_injection_mode must be one of: "
-            f"{allowed}"
-        )
+        raise ValueError(f"typing_final_injection_mode must be one of: {allowed}")
 
     if asr_backend == "sherpa":
         sherpa_cuda_available = _detect_sherpa_cuda_provider()

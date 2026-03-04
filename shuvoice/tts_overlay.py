@@ -192,7 +192,9 @@ class TTSOverlay:
                 self._preview_label.set_text(self._preview_text)
 
         if self._pause_btn is not None:
-            self._pause_btn.set_label("▶ Resume" if self._state == TTS_OVERLAY_PAUSED else "⏸ Pause")
+            self._pause_btn.set_label(
+                "▶ Resume" if self._state == TTS_OVERLAY_PAUSED else "⏸ Pause"
+            )
 
     def _on_pause_clicked(self, _button: Gtk.Button) -> None:
         if self._state == TTS_OVERLAY_PAUSED:
@@ -229,7 +231,9 @@ class TTSOverlay:
     def hide(self) -> None:
         GLib.idle_add(self._do_hide)
 
-    def set_state(self, state: str, *, preview_text: str = "", error_message: str | None = None) -> None:
+    def set_state(
+        self, state: str, *, preview_text: str = "", error_message: str | None = None
+    ) -> None:
         GLib.idle_add(self._do_set_state, state, preview_text, error_message)
 
     def set_voices(self, voices: list[VoiceInfo], selected_voice_id: str | None = None) -> None:
