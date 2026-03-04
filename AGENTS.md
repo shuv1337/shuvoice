@@ -89,7 +89,8 @@ Matches `packaging/systemd/user/shuvoice.service`:
 [Unit]
 Description=ShuVoice speech-to-text overlay
 After=graphical-session.target
-Wants=graphical-session.target
+BindsTo=graphical-session.target
+PartOf=graphical-session.target
 
 [Service]
 Type=simple
@@ -105,7 +106,7 @@ RestartPreventExitStatus=78
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target
 ```
 
 ---
@@ -113,6 +114,12 @@ WantedBy=default.target
 ## Runtime Configuration
 
 **Config file**: `~/.config/shuvoice/config.toml`
+
+**Automatic local env file**: `~/.config/shuvoice/local.dev`
+- Loaded automatically on `shuvoice` CLI startup.
+- Supports `KEY=value` and `export KEY=value` lines.
+- Intended for local API keys (for example `ELEVENLABS_API_KEY`).
+- Existing process environment variables take precedence by default.
 
 Top-level schema marker: `config_version = 1` (legacy unversioned files are treated as v0 and auto-migrated).
 
@@ -316,6 +323,12 @@ uv sync --extra asr-sherpa
 yay -S --needed python-sherpa-onnx-bin
 # provides=('python-sherpa-onnx') for shuvoice-git dependency resolution
 ```
+
+`shuvoice setup --install-missing` default install behavior:
+- On CUDA-detected hosts, prefers a CUDA-capable Sherpa path first
+  (`python-sherpa-onnx` source provider before `python-sherpa-onnx-bin`).
+- In venv workflows, prefers `uv pip install ...` and falls back to
+  `python -m pip install ...`.
 
 #### Sherpa GPU (CUDA) support
 
