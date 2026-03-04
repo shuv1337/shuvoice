@@ -298,9 +298,7 @@ class Config:
 
         self.sherpa_decode_mode = str(self.sherpa_decode_mode).strip().lower()
         if self.sherpa_decode_mode not in {"auto", "streaming", "offline_instant"}:
-            raise ValueError(
-                "sherpa_decode_mode must be one of: auto, streaming, offline_instant"
-            )
+            raise ValueError("sherpa_decode_mode must be one of: auto, streaming, offline_instant")
 
         if not isinstance(self.sherpa_enable_parakeet_streaming, bool):
             raise ValueError("sherpa_enable_parakeet_streaming must be true or false")
@@ -560,8 +558,7 @@ class Config:
                 # audio is accumulated and decoded in one shot on key release.
                 # Log the resolved mode for diagnostics.
                 log.info(
-                    "instant_mode enabled with Sherpa offline_instant mode "
-                    "(model: %s)",
+                    "instant_mode enabled with Sherpa offline_instant mode (model: %s)",
                     self.sherpa_model_name,
                 )
             else:
@@ -696,8 +693,7 @@ class Config:
                     )
                 if derived_mode_from_legacy:
                     log.info(
-                        "Migrated legacy use_clipboard_for_final to "
-                        "typing_final_injection_mode=%s",
+                        "Migrated legacy use_clipboard_for_final to typing_final_injection_mode=%s",
                         flat.get("typing_final_injection_mode"),
                     )
             except Exception:  # noqa: BLE001

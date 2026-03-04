@@ -148,7 +148,4 @@ class LocalTTSBackend(TTSBackend):
             raise RuntimeError("Local TTS synthesis timed out") from exc
 
         if proc.returncode not in (0, None):
-            stderr_text = stderr.decode("utf-8", errors="replace").strip()
-            if stderr_text:
-                raise RuntimeError(f"Local TTS synthesis failed: {stderr_text}")
             raise RuntimeError(f"Local TTS synthesis failed with exit code {proc.returncode}")
