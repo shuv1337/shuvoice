@@ -17,7 +17,7 @@ except ValueError:
 def test_release_input_and_destroy_window_releases_keyboard_mode():
     from shuvoice.wizard import LayerShell, WelcomeWizard
 
-    wizard = WelcomeWizard.__new__(WelcomeWizard)
+    wizard = MagicMock(spec=WelcomeWizard)
     win = MagicMock()
     wizard._win = win
 
@@ -36,7 +36,7 @@ def test_release_input_and_destroy_window_releases_keyboard_mode():
 def test_release_input_and_destroy_window_is_idempotent():
     from shuvoice.wizard import WelcomeWizard
 
-    wizard = WelcomeWizard.__new__(WelcomeWizard)
+    wizard = MagicMock(spec=WelcomeWizard)
     wizard._win = None
 
     WelcomeWizard._release_input_and_destroy_window(wizard)
@@ -74,7 +74,7 @@ def test_wizard_defaults_to_parakeet_instant_profile():
 def test_asr_page_omits_parakeet_streaming_override_option():
     from shuvoice.wizard import WelcomeWizard
 
-    wizard = WelcomeWizard()
+    wizard = WelcomeWizard.__new__(WelcomeWizard)
     wizard._build_asr_page()
 
     assert hasattr(wizard, "_sherpa_streaming_radio")
@@ -101,7 +101,7 @@ def test_model_status_text_maps_incompatible_streaming_state():
 def test_cancel_download_sets_event_and_updates_button():
     from shuvoice.wizard import WelcomeWizard
 
-    wizard = WelcomeWizard.__new__(WelcomeWizard)
+    wizard = MagicMock(spec=WelcomeWizard)
     wizard._download_cancel_event = threading.Event()
     wizard._cancel_download_button = MagicMock()
     wizard._apply_download_progress = MagicMock()
@@ -117,7 +117,7 @@ def test_cancel_download_sets_event_and_updates_button():
 def test_on_finish_writes_config_releases_window_and_quits():
     from shuvoice.wizard import WelcomeWizard
 
-    wizard = WelcomeWizard.__new__(WelcomeWizard)
+    wizard = MagicMock(spec=WelcomeWizard)
     wizard._asr_backend = "moonshine"
     wizard._keybind = "f9"
     wizard.completed = False
@@ -154,7 +154,7 @@ def test_on_finish_writes_config_releases_window_and_quits():
 def test_on_finish_passes_parakeet_streaming_profile_to_write_config():
     from shuvoice.wizard import WelcomeWizard
 
-    wizard = WelcomeWizard.__new__(WelcomeWizard)
+    wizard = MagicMock(spec=WelcomeWizard)
     wizard._asr_backend = "sherpa"
     wizard._sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
     wizard._sherpa_enable_parakeet_streaming = True
@@ -217,7 +217,7 @@ def test_complete_finish_shows_launch_button_and_waits_for_click():
 def test_complete_finish_applies_zipformer_fallback_for_incompatible_parakeet_streaming():
     from shuvoice.wizard import WelcomeWizard
 
-    wizard = WelcomeWizard.__new__(WelcomeWizard)
+    wizard = MagicMock(spec=WelcomeWizard)
     wizard._asr_backend = "sherpa"
     wizard._sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
     wizard._sherpa_enable_parakeet_streaming = True
