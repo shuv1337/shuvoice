@@ -372,15 +372,15 @@ class WelcomeWizard(Gtk.Application):
         self._auto_add_keybind.connect("toggled", self._on_auto_add_keybind_toggled)
         page.append(self._auto_add_keybind)
 
-        auto_add_desc = Gtk.Label(
+        self._auto_add_desc = Gtk.Label(
             label=(
                 "Only applies when the selected key is not already used by another bind. "
                 "If there is a conflict, wizard will leave your Hyprland config unchanged."
             )
         )
-        auto_add_desc.add_css_class("wizard-radio-desc")
-        auto_add_desc.set_halign(Gtk.Align.START)
-        page.append(auto_add_desc)
+        self._auto_add_desc.add_css_class("wizard-radio-desc")
+        self._auto_add_desc.set_halign(Gtk.Align.START)
+        page.append(self._auto_add_desc)
 
         # Live preview of the Hyprland config lines
         self._keybind_preview = Gtk.Label()
@@ -652,10 +652,16 @@ class WelcomeWizard(Gtk.Application):
             self._auto_add_last_non_custom = self._auto_add_keybind.get_active()
             self._auto_add_keybind.set_sensitive(False)
             self._auto_add_keybind.set_active(False)
+            self._auto_add_keybind.set_tooltip_text("Not available for custom keybinds")
+            if hasattr(self, "_auto_add_desc"):
+                self._auto_add_desc.set_sensitive(False)
             return
 
         self._auto_add_keybind.set_sensitive(True)
         self._auto_add_keybind.set_active(getattr(self, "_auto_add_last_non_custom", True))
+        self._auto_add_keybind.set_tooltip_text("")
+        if hasattr(self, "_auto_add_desc"):
+            self._auto_add_desc.set_sensitive(True)
 
     def _auto_add_enabled(self) -> bool:
         return bool(
