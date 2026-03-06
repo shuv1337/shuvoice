@@ -16,7 +16,12 @@ def test_detect_keybind_uses_cache(monkeypatch):
                 "arg": "shuvoice --control start",
                 "key": "V",
                 "modmask": 64,
-            }
+            },
+            {
+                "arg": "shuvoice control tts_speak --control-wait-sec 0",
+                "key": "S",
+                "modmask": 68,
+            },
         ]
         return SimpleNamespace(returncode=0, stdout=json.dumps(payload))
 
@@ -25,7 +30,9 @@ def test_detect_keybind_uses_cache(monkeypatch):
 
     first = detect_keybind(ttl_sec=10.0)
     second = detect_keybind(ttl_sec=10.0)
+    tts = detect_keybind("tts_speak", ttl_sec=10.0)
 
     assert first == "Super + V"
     assert second == "Super + V"
+    assert tts == "Super + Ctrl + S"
     assert calls["count"] == 1

@@ -524,6 +524,8 @@ Pre-built config files for common setups:
 </p>
 
 ShuVoice ships a Waybar helper (`shuvoice-waybar`) for a tray-style status icon.
+When running on Hyprland, the tooltip also shows the detected push-to-talk and
+TTS keybinds.
 
 Add to your Waybar config:
 

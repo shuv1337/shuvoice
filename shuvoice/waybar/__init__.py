@@ -100,8 +100,8 @@ def config_info_lines(config: Config) -> list[str]:
     return _config_info_lines_impl(config)
 
 
-def detect_keybind() -> str | None:
-    return _detect_keybind_impl()
+def detect_keybind(command: str = "start") -> str | None:
+    return _detect_keybind_impl(command)
 
 
 def _sanitize_class(value: str) -> str:
@@ -330,9 +330,12 @@ def main(argv: list[str] | None = None) -> int:
         exit_code = 1
 
     info = config_info_lines(config)
-    keybind = detect_keybind()
-    if keybind:
-        info.append(f"Keybind:  {keybind}")
+    ptt_keybind = detect_keybind("start")
+    if ptt_keybind:
+        info.append(f"PTT Key:  {ptt_keybind}")
+    tts_keybind = detect_keybind("tts_speak")
+    if tts_keybind:
+        info.append(f"TTS Key:  {tts_keybind}")
 
     if os.environ.get("SHUVOICE_WAYBAR_DEBUG_METRICS", "").lower() in {"1", "true", "yes"}:
         try:

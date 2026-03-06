@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import json
+
 from shuvoice.config import Config
-from shuvoice.waybar import _action_menu, _perform_action, build_waybar_payload, config_info_lines
+from shuvoice.waybar import _action_menu, _perform_action, build_waybar_payload, config_info_lines, main
 
 
 def test_build_waybar_payload_recording_state():
@@ -66,6 +68,20 @@ def test_build_waybar_payload_without_config_lines_still_works():
     payload = build_waybar_payload("idle")
     assert "Left click:" in payload["tooltip"]
     assert "Right click: open action menu" in payload["tooltip"]
+
+
+def test_main_includes_ptt_and_tts_keybinds_in_tooltip(capsys):
+    with (
+        patch("shuvoice.waybar.Config.load", return_value=Config()),
+        patch("shuvoice.waybar._query_runtime_state", return_value=("idle", None, None)),
+        patch("shuvoice.waybar.detect_keybind", side_effect=["Super + V", "Super + Ctrl + S"]),
+    ):
+        exit_code = main(["status"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "PTT Key:  Super + V" in payload["tooltip"]
+    assert "TTS Key:  Super + Ctrl + S" in payload["tooltip"]
 
 
 def test_perform_action_launch_wizard_calls_detached_launcher():
