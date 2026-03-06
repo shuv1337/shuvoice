@@ -14,6 +14,8 @@ def summary_text(
     sherpa_enable_parakeet_streaming: bool = False,
     sherpa_provider: str | None = None,
     typing_final_injection_mode: str = "auto",
+    tts_backend: str = "elevenlabs",
+    tts_default_voice_id: str | None = None,
 ) -> str:
     return format_summary(
         asr_backend,
@@ -23,4 +25,6 @@ def summary_text(
         sherpa_enable_parakeet_streaming=sherpa_enable_parakeet_streaming,
         sherpa_provider=sherpa_provider,
         typing_final_injection_mode=typing_final_injection_mode,
+        tts_backend=tts_backend,
+        tts_default_voice_id=tts_default_voice_id,
     )

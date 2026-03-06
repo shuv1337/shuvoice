@@ -14,6 +14,8 @@ def test_waybar_format_config_info_lines():
     cfg = Config(asr_backend="moonshine", moonshine_model_name="moonshine/tiny")
     lines = config_info_lines(cfg)
     assert any("Moonshine" in line for line in lines)
+    assert any("TTS:" in line and "ElevenLabs" in line for line in lines)
+    assert any("Voice:" in line for line in lines)
 
 
 def test_waybar_format_instant_profile_line():
@@ -28,3 +30,16 @@ def test_waybar_format_sherpa_model_name_is_shown_when_auto_downloading():
     )
     lines = config_info_lines(cfg)
     assert any("parakeet-tdt-0.6b-v3-int8" in line for line in lines)
+
+
+def test_waybar_format_shows_openai_tts_voice_name():
+    cfg = Config(tts_backend="openai")
+    lines = config_info_lines(cfg)
+    assert "TTS:      OpenAI" in lines
+    assert "Voice:    Onyx" in lines
+
+
+def test_waybar_format_shows_tts_disabled_state():
+    cfg = Config(tts_enabled=False)
+    lines = config_info_lines(cfg)
+    assert "TTS:      Disabled" in lines

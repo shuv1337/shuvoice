@@ -171,8 +171,9 @@ The wizard will:
 1. **Select your ASR backend** — Sherpa-ONNX, NeMo, or Moonshine
 2. **Choose a Sherpa profile** (if applicable) — Streaming (Zipformer) or Instant (Parakeet)
 3. **Pick your push-to-talk key** — Right Ctrl, Insert, F9, Super+V, or custom
-4. **Download model files** — with progress indicator and cancel support
-5. **Auto-configure Hyprland keybinds** — adds `bind`/`bindr` lines if the key isn't already used
+4. **Choose your TTS provider + default voice** — ElevenLabs or OpenAI
+5. **Download model files** — with progress indicator and cancel support
+6. **Auto-configure Hyprland keybinds** — adds `bind`/`bindr` lines if the key isn't already used
 
 <p align="center">
   <img src="./docs/assets/screenshots/wizard-asr-selection.png" alt="ASR backend selection" width="760">
@@ -535,8 +536,8 @@ Pre-built config files for common setups:
 </p>
 
 ShuVoice ships a Waybar helper (`shuvoice-waybar`) for a tray-style status icon.
-When running on Hyprland, the tooltip also shows the detected push-to-talk and
-TTS keybinds.
+When running on Hyprland, the tooltip also shows the configured TTS provider /
+voice plus the detected push-to-talk and TTS keybinds.
 
 Add to your Waybar config:
 

@@ -30,8 +30,11 @@ from ..wizard_state import (
     DEFAULT_FINAL_INJECTION_MODE,
     DEFAULT_KEYBIND_ID,
     DEFAULT_SHERPA_MODEL_NAME,
+    DEFAULT_TTS_BACKEND,
     FINAL_INJECTION_MODES,
     PARAKEET_TDT_V3_INT8_MODEL_NAME,
+    TTS_BACKENDS,
+    default_tts_voice_for_backend,
 )
 from .actions import maybe_download_model, needs_wizard, write_config, write_marker
 from .flow import summary_text
@@ -73,6 +76,12 @@ class WelcomeWizard(Gtk.Application):
         self._sherpa_enable_parakeet_streaming = False
         self._sherpa_provider = "cpu"
         self._typing_final_injection_mode = DEFAULT_FINAL_INJECTION_MODE
+        self._tts_backend = DEFAULT_TTS_BACKEND
+        self._tts_voice_by_backend = {
+            "elevenlabs": default_tts_voice_for_backend("elevenlabs"),
+            "openai": default_tts_voice_for_backend("openai"),
+        }
+        self._tts_voice_id = self._tts_voice_by_backend[self._tts_backend]
         self._keybind = DEFAULT_KEYBIND_ID
         self._finish_in_progress = False
         self._download_pulse_source_id: int | None = None
@@ -433,6 +442,61 @@ class WelcomeWizard(Gtk.Application):
             page.append(mode_desc_label)
             self._set_accessible_description(mode_radio, mode_desc)
 
+        tts_title = Gtk.Label(label="Text-to-Speech provider")
+        tts_title.add_css_class("wizard-subtitle")
+        tts_title.set_halign(Gtk.Align.START)
+        tts_title.set_margin_top(12)
+        page.append(tts_title)
+
+        tts_help = Gtk.Label(
+            label=(
+                "Choose which backend handles the TTS keybind and set the default voice.\n"
+                "For ElevenLabs, paste a voice ID. For OpenAI, use built-in names like onyx or nova."
+            )
+        )
+        tts_help.add_css_class("wizard-desc")
+        tts_help.set_halign(Gtk.Align.START)
+        tts_help.set_justify(Gtk.Justification.LEFT)
+        page.append(tts_help)
+
+        tts_group: Gtk.CheckButton | None = None
+        self._tts_backend_radios: dict[str, Gtk.CheckButton] = {}
+        active_tts_backend = str(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)).strip().lower()
+
+        for backend_id, backend_label, backend_desc in TTS_BACKENDS:
+            backend_radio = Gtk.CheckButton(label=backend_label)
+            backend_radio.add_css_class("wizard-radio")
+            if tts_group is None:
+                tts_group = backend_radio
+            else:
+                backend_radio.set_group(tts_group)
+
+            if backend_id == active_tts_backend:
+                backend_radio.set_active(True)
+
+            backend_radio.connect("toggled", self._on_tts_backend_toggled, backend_id)
+            page.append(backend_radio)
+            self._tts_backend_radios[backend_id] = backend_radio
+
+            backend_desc_label = Gtk.Label(label=backend_desc)
+            backend_desc_label.add_css_class("wizard-radio-desc")
+            backend_desc_label.set_halign(Gtk.Align.START)
+            page.append(backend_desc_label)
+            self._set_accessible_description(backend_radio, backend_desc)
+
+        self._tts_voice_entry = Gtk.Entry()
+        self._tts_voice_entry.add_css_class("wizard-entry")
+        self._tts_voice_entry.set_halign(Gtk.Align.FILL)
+        self._tts_voice_entry.set_hexpand(True)
+        self._tts_voice_entry.connect("changed", self._on_tts_voice_changed)
+        page.append(self._tts_voice_entry)
+
+        self._tts_voice_help = Gtk.Label(label="")
+        self._tts_voice_help.add_css_class("wizard-radio-desc")
+        self._tts_voice_help.set_halign(Gtk.Align.START)
+        page.append(self._tts_voice_help)
+        self._sync_tts_voice_controls()
+
         nav = self._make_nav_row(
             back_page="asr",
             next_page="done",
@@ -462,7 +526,7 @@ class WelcomeWizard(Gtk.Application):
         page.append(self._summary_label)
 
         tip = Gtk.Label(
-            label="Edit ~/.config/shuvoice/config.toml to adjust ASR and overlay settings.\n"
+            label="Edit ~/.config/shuvoice/config.toml to adjust ASR, TTS, and overlay settings.\n"
             "If enabled, wizard will try to add your push-to-talk keybind in ~/.config/hypr/hyprland.conf.\n"
             "Model setup starts automatically on this screen."
         )
@@ -640,6 +704,65 @@ class WelcomeWizard(Gtk.Application):
             return
         self._typing_final_injection_mode = mode_id
 
+    def _on_tts_backend_toggled(self, button: Gtk.CheckButton, backend_id: str):
+        if not button.get_active():
+            return
+        current_backend = str(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)).strip().lower()
+        current_voice = str(getattr(self, "_tts_voice_id", "")).strip()
+        voice_by_backend = getattr(self, "_tts_voice_by_backend", None)
+        if not isinstance(voice_by_backend, dict):
+            voice_by_backend = {}
+            self._tts_voice_by_backend = voice_by_backend
+        if current_backend:
+            voice_by_backend[current_backend] = current_voice or default_tts_voice_for_backend(
+                current_backend
+            )
+
+        self._tts_backend = backend_id
+        self._tts_voice_id = voice_by_backend.get(
+            backend_id, default_tts_voice_for_backend(backend_id)
+        )
+        self._sync_tts_voice_controls()
+
+    def _on_tts_voice_changed(self, entry: Gtk.Entry):
+        value = entry.get_text().strip()
+        backend_id = str(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)).strip().lower()
+        if not value:
+            value = default_tts_voice_for_backend(backend_id)
+        self._tts_voice_id = value
+        voice_by_backend = getattr(self, "_tts_voice_by_backend", None)
+        if isinstance(voice_by_backend, dict):
+            voice_by_backend[backend_id] = value
+
+    def _sync_tts_voice_controls(self):
+        entry = getattr(self, "_tts_voice_entry", None)
+        help_label = getattr(self, "_tts_voice_help", None)
+        if entry is None or help_label is None:
+            return
+
+        backend_id = str(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)).strip().lower()
+        voice_by_backend = getattr(self, "_tts_voice_by_backend", None)
+        if not isinstance(voice_by_backend, dict):
+            voice_by_backend = {}
+            self._tts_voice_by_backend = voice_by_backend
+
+        default_voice = default_tts_voice_for_backend(backend_id)
+        current_voice = str(voice_by_backend.get(backend_id, default_voice)).strip() or default_voice
+        self._tts_voice_id = current_voice
+        voice_by_backend[backend_id] = current_voice
+
+        if entry.get_text() != current_voice:
+            entry.set_text(current_voice)
+
+        if backend_id == "openai":
+            entry.set_placeholder_text("onyx")
+            help_label.set_text("Examples: onyx, nova, shimmer, alloy, sage")
+        else:
+            entry.set_placeholder_text(default_tts_voice_for_backend("elevenlabs"))
+            help_label.set_text(
+                "Paste an ElevenLabs voice ID here, or keep the default voice ID."
+            )
+
     def _sync_auto_add_keybind_state(self):
         if not hasattr(self, "_auto_add_keybind"):
             return
@@ -737,6 +860,10 @@ class WelcomeWizard(Gtk.Application):
         sherpa_enable_parakeet_streaming = bool(
             getattr(self, "_sherpa_enable_parakeet_streaming", False)
         )
+        tts_backend = str(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)).strip().lower()
+        tts_voice_id = str(
+            getattr(self, "_tts_voice_id", default_tts_voice_for_backend(tts_backend))
+        ).strip() or default_tts_voice_for_backend(tts_backend)
 
         write_kwargs: dict[str, object] = {
             "overwrite_existing": getattr(self, "_force_reconfigure", False),
@@ -746,6 +873,8 @@ class WelcomeWizard(Gtk.Application):
                 "_typing_final_injection_mode",
                 DEFAULT_FINAL_INJECTION_MODE,
             ),
+            "tts_backend": tts_backend,
+            "tts_default_voice_id": tts_voice_id,
         }
         if self._asr_backend == "sherpa":
             write_kwargs["sherpa_enable_parakeet_streaming"] = sherpa_enable_parakeet_streaming
@@ -935,6 +1064,14 @@ class WelcomeWizard(Gtk.Application):
                         "_typing_final_injection_mode",
                         DEFAULT_FINAL_INJECTION_MODE,
                     ),
+                    tts_backend=getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND),
+                    tts_default_voice_id=getattr(
+                        self,
+                        "_tts_voice_id",
+                        default_tts_voice_for_backend(
+                            getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)
+                        ),
+                    ),
                 )
             except Exception:  # noqa: BLE001
                 log.exception("Wizard fallback to Zipformer streaming profile failed")
@@ -966,10 +1103,16 @@ class WelcomeWizard(Gtk.Application):
 
         write_marker()
         log.info(
-            "Wizard setup ready: asr_backend=%s sherpa_model=%s sherpa_provider=%s keybind=%s final_injection=%s keybind_setup=%s model_setup=%s",
+            "Wizard setup ready: asr_backend=%s sherpa_model=%s sherpa_provider=%s tts_backend=%s tts_voice=%s keybind=%s final_injection=%s keybind_setup=%s model_setup=%s",
             self._asr_backend,
             sherpa_model_name,
             getattr(self, "_sherpa_provider", "cpu"),
+            getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND),
+            getattr(
+                self,
+                "_tts_voice_id",
+                default_tts_voice_for_backend(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)),
+            ),
             self._keybind,
             getattr(self, "_typing_final_injection_mode", DEFAULT_FINAL_INJECTION_MODE),
             keybind_status,
@@ -1078,6 +1221,14 @@ class WelcomeWizard(Gtk.Application):
                     self,
                     "_typing_final_injection_mode",
                     DEFAULT_FINAL_INJECTION_MODE,
+                ),
+                tts_backend=getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND),
+                tts_default_voice_id=getattr(
+                    self,
+                    "_tts_voice_id",
+                    default_tts_voice_for_backend(
+                        getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)
+                    ),
                 ),
             )
         )

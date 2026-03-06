@@ -14,7 +14,12 @@ import sys
 from pathlib import Path
 
 from .asr import get_backend_class
-from .config import CURRENT_CONFIG_VERSION, Config
+from .config import (
+    CURRENT_CONFIG_VERSION,
+    DEFAULT_ELEVENLABS_TTS_VOICE_ID,
+    DEFAULT_OPENAI_TTS_VOICE_ID,
+    Config,
+)
 from .config_io import load_raw, write_atomic
 from .config_migrations import migrate_to_latest
 
@@ -102,6 +107,55 @@ TTS_KEYBIND_PRESETS = [
     ),
 ]
 DEFAULT_TTS_KEYBIND_ID = "super_ctrl_s"
+DEFAULT_TTS_BACKEND = "elevenlabs"
+_OPENAI_TTS_VOICE_LABELS: dict[str, str] = {
+    "alloy": "Alloy",
+    "ash": "Ash",
+    "coral": "Coral",
+    "echo": "Echo",
+    "fable": "Fable",
+    "nova": "Nova",
+    "onyx": "Onyx",
+    "sage": "Sage",
+    "shimmer": "Shimmer",
+}
+TTS_BACKENDS = [
+    (
+        "elevenlabs",
+        "ElevenLabs",
+        "Cloud TTS with custom voice IDs. Keep the default voice or paste your own voice ID.",
+    ),
+    (
+        "openai",
+        "OpenAI",
+        "Cloud TTS with built-in voice names like onyx, nova, and shimmer.",
+    ),
+]
+
+
+def default_tts_voice_for_backend(backend: str) -> str:
+    backend_id = str(backend).strip().lower()
+    if backend_id == "openai":
+        return DEFAULT_OPENAI_TTS_VOICE_ID
+    return DEFAULT_ELEVENLABS_TTS_VOICE_ID
+
+
+def tts_backend_label(backend: str) -> str:
+    backend_id = str(backend).strip().lower()
+    return next((label for value, label, _desc in TTS_BACKENDS if value == backend_id), backend_id)
+
+
+def tts_voice_label(backend: str, voice_id: str) -> str:
+    backend_id = str(backend).strip().lower()
+    value = str(voice_id).strip()
+    if not value:
+        value = default_tts_voice_for_backend(backend_id)
+
+    if backend_id == "openai":
+        return _OPENAI_TTS_VOICE_LABELS.get(value.lower(), value)
+    if backend_id == "elevenlabs" and value == DEFAULT_ELEVENLABS_TTS_VOICE_ID:
+        return f"Default ({value})"
+    return value
 
 
 def format_hyprland_bind(hypr_key_spec: str, *, shuvoice_command: str = "shuvoice") -> str:
@@ -581,6 +635,8 @@ def write_config(
     sherpa_enable_parakeet_streaming: bool = False,
     sherpa_provider: str | None = None,
     typing_final_injection_mode: str = DEFAULT_FINAL_INJECTION_MODE,
+    tts_backend: str = DEFAULT_TTS_BACKEND,
+    tts_default_voice_id: str | None = None,
 ):
     """Write wizard selections to config.toml.
 
@@ -606,6 +662,9 @@ def write_config(
     so users can pick between clipboard paste and direct keystroke typing from
     the wizard UI.
 
+    TTS provider + default voice are persisted to ``[tts]`` so the wizard can
+    configure which backend handles ``tts_speak`` and which voice it should use.
+
     Writes use the config I/O durability path (atomic write + backup).
 
     Provider selection:
@@ -618,6 +677,16 @@ def write_config(
     if injection_mode not in _FINAL_INJECTION_MODE_SET:
         allowed = ", ".join(sorted(_FINAL_INJECTION_MODE_SET))
         raise ValueError(f"typing_final_injection_mode must be one of: {allowed}")
+
+    tts_backend_value = str(tts_backend).strip().lower()
+    if tts_backend_value not in {"elevenlabs", "openai", "local"}:
+        raise ValueError("tts_backend must be one of: elevenlabs, openai, local")
+
+    tts_voice_value = str(
+        tts_default_voice_id or default_tts_voice_for_backend(tts_backend_value)
+    ).strip()
+    if not tts_voice_value:
+        raise ValueError("tts_default_voice_id must not be empty")
 
     if asr_backend == "sherpa":
         explicit_provider = None
@@ -667,6 +736,11 @@ def write_config(
         typing_table = {}
         migrated["typing"] = typing_table
 
+    tts_table = migrated.get("tts")
+    if not isinstance(tts_table, dict):
+        tts_table = {}
+        migrated["tts"] = tts_table
+
     asr_table["asr_backend"] = asr_backend
     if provider_key:
         asr_table[provider_key] = provider
@@ -700,6 +774,9 @@ def write_config(
             asr_table["instant_mode"] = False
             typing_table["output_mode"] = "final_only"
 
+    tts_table["tts_backend"] = tts_backend_value
+    tts_table["tts_default_voice_id"] = tts_voice_value
+
     migrated["config_version"] = CURRENT_CONFIG_VERSION
 
     backup = write_atomic(config_file, migrated)
@@ -718,6 +795,8 @@ def format_summary(
     sherpa_enable_parakeet_streaming: bool = False,
     sherpa_provider: str | None = None,
     typing_final_injection_mode: str = DEFAULT_FINAL_INJECTION_MODE,
+    tts_backend: str = DEFAULT_TTS_BACKEND,
+    tts_default_voice_id: str | None = None,
 ) -> str:
     """Build a human-readable summary of wizard selections."""
     asr_name = next(
@@ -736,9 +815,16 @@ def format_summary(
         "direct": "Direct typing (keystroke simulation)",
     }.get(injection_mode, injection_mode or DEFAULT_FINAL_INJECTION_MODE)
 
+    tts_backend_value = str(tts_backend).strip().lower() or DEFAULT_TTS_BACKEND
+    tts_voice_value = str(
+        tts_default_voice_id or default_tts_voice_for_backend(tts_backend_value)
+    ).strip()
+
     lines = [
         f"ASR backend:      {asr_name}",
         f"Final injection:  {injection_label}",
+        f"TTS provider:     {tts_backend_label(tts_backend_value)}",
+        f"TTS voice:        {tts_voice_label(tts_backend_value, tts_voice_value)}",
         f"Push-to-talk:     {keybind_label}",
     ]
 

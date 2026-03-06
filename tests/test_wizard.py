@@ -83,6 +83,8 @@ def test_write_config_creates_toml_with_cuda(tmp_path):
         assert "sherpa_enable_parakeet_streaming = false" in content
         assert 'output_mode = "final_only"' in content
         assert f'typing_final_injection_mode = "{DEFAULT_FINAL_INJECTION_MODE}"' in content
+        assert 'tts_backend = "elevenlabs"' in content
+        assert 'tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"' in content
         assert "use_clipboard_for_final = true" in content
 
 
@@ -106,6 +108,8 @@ def test_write_config_creates_toml_without_cuda(tmp_path):
         assert "sherpa_enable_parakeet_streaming = false" in content
         assert 'output_mode = "final_only"' in content
         assert f'typing_final_injection_mode = "{DEFAULT_FINAL_INJECTION_MODE}"' in content
+        assert 'tts_backend = "elevenlabs"' in content
+        assert 'tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"' in content
         assert "use_clipboard_for_final = true" in content
 
 
@@ -218,6 +222,19 @@ def test_write_config_rejects_invalid_sherpa_provider(tmp_path):
             write_config("sherpa", sherpa_provider="rocm")
 
 
+def test_write_config_persists_tts_provider_and_voice(tmp_path):
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        write_config("nemo", tts_backend="openai", tts_default_voice_id="nova")
+
+    content = (tmp_path / "config.toml").read_text()
+    assert 'tts_backend = "openai"' in content
+    assert 'tts_default_voice_id = "nova"' in content
+
+
 def test_write_config_does_not_overwrite_existing(tmp_path):
     """write_config preserves an existing config.toml."""
     config_file = tmp_path / "config.toml"
@@ -294,6 +311,8 @@ def test_format_summary_contains_backend_and_keybind():
     result = format_summary("sherpa")
     assert "Sherpa-ONNX" in result
     assert "Final injection:  Auto (recommended)" in result
+    assert "TTS provider:     ElevenLabs" in result
+    assert "TTS voice:        Default (zNsotODqUhvbJ5wMG7Ei)" in result
     assert "Right Control" in result
     assert "hyprland.conf" in result
 
@@ -301,6 +320,12 @@ def test_format_summary_contains_backend_and_keybind():
 def test_format_summary_shows_selected_final_injection_mode():
     result = format_summary("nemo", typing_final_injection_mode="direct")
     assert "Final injection:  Direct typing (keystroke simulation)" in result
+
+
+def test_format_summary_shows_selected_tts_provider_and_voice():
+    result = format_summary("nemo", tts_backend="openai", tts_default_voice_id="nova")
+    assert "TTS provider:     OpenAI" in result
+    assert "TTS voice:        Nova" in result
 
 
 def test_format_summary_sherpa_default_model_shows_streaming_mode():

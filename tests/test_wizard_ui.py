@@ -69,6 +69,8 @@ def test_wizard_defaults_to_parakeet_instant_profile():
     assert wizard._sherpa_model_name == "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
     assert wizard._sherpa_enable_parakeet_streaming is False
     assert wizard._sherpa_provider == "cpu"
+    assert wizard._tts_backend == "elevenlabs"
+    assert wizard._tts_voice_id == "zNsotODqUhvbJ5wMG7Ei"
 
 
 def test_asr_page_omits_parakeet_streaming_override_option():
@@ -84,10 +86,34 @@ def test_asr_page_omits_parakeet_streaming_override_option():
     assert not hasattr(wizard, "_sherpa_parakeet_streaming_radio")
 
 
+def test_keybind_page_includes_tts_controls():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard()
+    wizard._build_keybind_page()
+
+    assert hasattr(wizard, "_tts_backend_radios")
+    assert "elevenlabs" in wizard._tts_backend_radios
+    assert "openai" in wizard._tts_backend_radios
+    assert hasattr(wizard, "_tts_voice_entry")
+    assert wizard._tts_voice_entry.get_text() == "zNsotODqUhvbJ5wMG7Ei"
+
+
 def test_model_status_text_maps_cancelled_state():
     from shuvoice.wizard import WelcomeWizard
 
     assert "cancelled" in WelcomeWizard._model_download_status_text("cancelled").lower()
+
+
+def test_tts_backend_toggle_updates_voice_entry():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard()
+    wizard._build_keybind_page()
+    wizard._tts_backend_radios["openai"].set_active(True)
+
+    assert wizard._tts_backend == "openai"
+    assert wizard._tts_voice_entry.get_text() == "onyx"
 
 
 def test_model_status_text_maps_incompatible_streaming_state():
@@ -138,6 +164,8 @@ def test_on_finish_writes_config_releases_window_and_quits():
         overwrite_existing=False,
         sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
         typing_final_injection_mode="auto",
+        tts_backend="elevenlabs",
+        tts_default_voice_id="zNsotODqUhvbJ5wMG7Ei",
     )
     maybe_download.assert_called_once_with(
         "moonshine",
@@ -160,6 +188,8 @@ def test_on_finish_passes_parakeet_streaming_profile_to_write_config():
     wizard._sherpa_enable_parakeet_streaming = True
     wizard._sherpa_provider = "cuda"
     wizard._keybind = "f9"
+    wizard._tts_backend = "openai"
+    wizard._tts_voice_id = "onyx"
     wizard.completed = False
     wizard._release_input_and_destroy_window = MagicMock()
     wizard.quit = MagicMock()
@@ -178,6 +208,8 @@ def test_on_finish_passes_parakeet_streaming_profile_to_write_config():
         sherpa_enable_parakeet_streaming=True,
         sherpa_provider="cuda",
         typing_final_injection_mode="auto",
+        tts_backend="openai",
+        tts_default_voice_id="onyx",
     )
 
 
@@ -253,6 +285,8 @@ def test_complete_finish_applies_zipformer_fallback_for_incompatible_parakeet_st
         sherpa_enable_parakeet_streaming=False,
         sherpa_provider="cuda",
         typing_final_injection_mode="auto",
+        tts_backend="elevenlabs",
+        tts_default_voice_id="zNsotODqUhvbJ5wMG7Ei",
     )
     write_marker.assert_called_once()
     assert wizard._sherpa_model_name == "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"

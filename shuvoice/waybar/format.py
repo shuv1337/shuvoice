@@ -6,7 +6,39 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ..config import Config
+from ..config import DEFAULT_ELEVENLABS_TTS_VOICE_ID, Config
+
+_OPENAI_VOICE_LABELS = {
+    "alloy": "Alloy",
+    "ash": "Ash",
+    "coral": "Coral",
+    "echo": "Echo",
+    "fable": "Fable",
+    "nova": "Nova",
+    "onyx": "Onyx",
+    "sage": "Sage",
+    "shimmer": "Shimmer",
+}
+
+
+def _tts_backend_label(backend: str) -> str:
+    return {
+        "elevenlabs": "ElevenLabs",
+        "openai": "OpenAI",
+        "local": "Local Piper",
+    }.get(str(backend).strip().lower(), str(backend).strip() or "unknown")
+
+
+def _tts_voice_label(backend: str, voice_id: str) -> str:
+    backend_id = str(backend).strip().lower()
+    voice = str(voice_id).strip()
+    if backend_id == "openai":
+        return _OPENAI_VOICE_LABELS.get(voice.lower(), voice or "default")
+    if backend_id == "elevenlabs" and voice == DEFAULT_ELEVENLABS_TTS_VOICE_ID:
+        return "Default"
+    if backend_id == "local" and not voice:
+        return "configured local default"
+    return voice or "default"
 
 
 def config_info_lines(config: Config) -> list[str]:
@@ -47,6 +79,11 @@ def config_info_lines(config: Config) -> list[str]:
     else:
         device = "unknown"
     lines.append(f"Device:   {device}")
+    if config.tts_enabled:
+        lines.append(f"TTS:      {_tts_backend_label(config.tts_backend)}")
+        lines.append(f"Voice:    {_tts_voice_label(config.tts_backend, config.tts_default_voice_id)}")
+    else:
+        lines.append("TTS:      Disabled")
 
     return lines
 
