@@ -27,7 +27,7 @@
 
 - **Push-to-talk dictation** — hold a key, speak, release. Text appears in your focused app.
 - **Pluggable ASR backends** — choose between NeMo (highest accuracy), Sherpa-ONNX (fast, CPU-friendly), or Moonshine (lightweight).
-- **Text-to-speech** — highlight text and hear it read aloud via ElevenLabs or local Piper.
+- **Text-to-speech** — highlight text and hear it read aloud via ElevenLabs, OpenAI, or local Piper.
 - **Native Wayland overlay** — GTK4 layer-shell overlay with blur, transparency, and live transcription feedback.
 - **Waybar integration** — tray-style status icon with tooltip, state colors, and click actions.
 - **Guided setup wizard** — interactive GTK wizard walks you through backend, keybind, and model selection.
@@ -140,6 +140,9 @@ uv sync --extra asr-moonshine
 ```bash
 # ElevenLabs TTS (cloud, high quality)
 uv sync --extra tts-elevenlabs
+
+# OpenAI TTS (cloud)
+uv sync --extra tts-openai
 
 # Local TTS (Piper, experimental)
 uv sync --extra tts-local
@@ -489,16 +492,24 @@ layerrule = ignorealpha 0.20, tts-overlay
 ```toml
 [tts]
 tts_enabled = true
-tts_backend = "elevenlabs"                      # elevenlabs | local
-tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"
-tts_model_id = "eleven_multilingual_v2"
+tts_backend = "elevenlabs"                      # elevenlabs | openai | local
+tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"   # ElevenLabs default
+# OpenAI defaults are auto-applied when tts_backend = "openai":
+# tts_default_voice_id = "onyx"
+# tts_model_id = "gpt-4o-mini-tts"
+# tts_api_key_env = "OPENAI_API_KEY"
+tts_model_id = "eleven_flash_v2_5"
 tts_api_key_env = "ELEVENLABS_API_KEY"          # env var name (not the key itself)
 ```
 
 Set your API key in `~/.config/shuvoice/local.dev`:
 
 ```bash
+# ElevenLabs
 ELEVENLABS_API_KEY=sk-your-key-here
+
+# OpenAI
+OPENAI_API_KEY=sk-your-key-here
 ```
 
 ### Example Configs
@@ -635,7 +646,7 @@ complete examples.
 | `Control socket not found` | Start ShuVoice first before sending control commands |
 | `espeak-ng not found` | `sudo pacman -S espeak-ng` (only needed for roundtrip test scripts) |
 | `tts_speak` says no selected text | Highlight text first; verify `wl-paste` works |
-| ElevenLabs 401 errors | Export API key in env var named by `tts_api_key_env`; run `shuvoice preflight` |
+| ElevenLabs/OpenAI 401 errors | Export the provider API key in the env var named by `tts_api_key_env`; run `shuvoice preflight` |
 | `Failed to build kaldialign` (Python 3.14) | Use `uv sync --extra asr-nemo --override packaging/constraints/py314-overrides.txt` |
 
 </details>

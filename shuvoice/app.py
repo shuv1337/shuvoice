@@ -56,6 +56,16 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+def _filter_tts_api_key_dependency_errors(errors: list[str]) -> list[str]:
+    filtered: list[str] = []
+    for error in errors:
+        lower = error.lower()
+        if "api key" in lower or "_api_key" in lower:
+            continue
+        filtered.append(error)
+    return filtered
+
+
 class ShuVoiceApp(Gtk.Application):
     """GTK4 application that orchestrates streaming speech-to-text."""
 
@@ -101,12 +111,8 @@ class ShuVoiceApp(Gtk.Application):
                 )
 
                 backend_errors = self.tts_backend.dependency_errors()
-                if config.tts_backend == "elevenlabs":
-                    backend_errors = [
-                        error
-                        for error in backend_errors
-                        if "API key" not in error and "ELEVENLABS_API_KEY" not in error
-                    ]
+                if self.tts_backend.capabilities.requires_api_key:
+                    backend_errors = _filter_tts_api_key_dependency_errors(backend_errors)
                 if backend_errors:
                     for error in backend_errors:
                         log.warning("TTS dependency warning: %s", error)

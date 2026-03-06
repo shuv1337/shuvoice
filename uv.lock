@@ -5221,7 +5221,7 @@ wheels = [
 
 [[package]]
 name = "shuvoice"
-version = "0.1.2"
+version = "0.1.3"
 source = { editable = "." }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -5278,7 +5278,7 @@ requires-dist = [
     { name = "torch", marker = "extra == 'asr-nemo'", specifier = ">=2.4" },
     { name = "useful-moonshine-onnx", marker = "extra == 'asr-moonshine'" },
 ]
-provides-extras = ["asr", "asr-nemo", "asr-sherpa", "asr-moonshine", "tts-elevenlabs", "tts-local", "dev"]
+provides-extras = ["asr", "asr-nemo", "asr-sherpa", "asr-moonshine", "tts-elevenlabs", "tts-openai", "tts-local", "dev"]
 
 [package.metadata.requires-dev]
 dev = [

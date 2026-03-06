@@ -51,7 +51,7 @@ def test_synthesize_stream_shapes_request(monkeypatch):
         backend.synthesize_stream(
             "Hello world",
             voice_id="zNsotODqUhvbJ5wMG7Ei",
-            model_id="eleven_multilingual_v2",
+            model_id="eleven_flash_v2_5",
         )
     )
 
@@ -63,7 +63,7 @@ def test_synthesize_stream_shapes_request(monkeypatch):
 
     payload = json.loads(seen["body"].decode("utf-8"))
     assert payload["text"] == "Hello world"
-    assert payload["model_id"] == "eleven_multilingual_v2"
+    assert payload["model_id"] == "eleven_flash_v2_5"
 
 
 def test_synthesize_stream_requires_env_var(monkeypatch):

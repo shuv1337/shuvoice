@@ -14,6 +14,16 @@ from ...config import Config
 from ...tts import get_tts_backend_class
 
 
+def _filter_tts_api_key_dependency_errors(errors: list[str]) -> list[str]:
+    filtered: list[str] = []
+    for error in errors:
+        lower = error.lower()
+        if "api key" in lower or "_api_key" in lower:
+            continue
+        filtered.append(error)
+    return filtered
+
+
 def run_preflight(config: Config) -> bool:
     """Check runtime prerequisites and print a human-readable report."""
     checks: list[tuple[str, bool, str]] = []
@@ -77,14 +87,16 @@ def run_preflight(config: Config) -> bool:
 
         import sounddevice as sd
 
-        # PCM output is currently 24k for ElevenLabs and local backend contract.
+        # PCM output is currently 24k for the supported raw-PCM TTS backends.
         sd.check_output_settings(device=config.tts_playback_device, samplerate=24000)
         return str(config.tts_playback_device)
 
     def check_tts_api_key() -> str:
         if not config.tts_enabled:
             return "disabled"
-        if config.tts_backend != "elevenlabs":
+
+        backend_cls = get_tts_backend_class(config.tts_backend)
+        if not backend_cls.capabilities.requires_api_key:
             return "not required"
 
         env_name = str(config.tts_api_key_env).strip()
@@ -93,7 +105,7 @@ def run_preflight(config: Config) -> bool:
             raise RuntimeError(f"Environment variable {env_name} is not set")
 
         # Guardrail: users occasionally paste keys into the config key-name field.
-        if env_name.startswith("sk_") or env_name.startswith("xi_"):
+        if env_name.startswith(("sk_", "sk-", "xi_")):
             raise RuntimeError(
                 "tts_api_key_env looks like a raw API key value, expected an environment variable name"
             )
@@ -105,11 +117,9 @@ def run_preflight(config: Config) -> bool:
             return "disabled"
         backend_cls = get_tts_backend_class(config.tts_backend)
         errors = backend_cls.dependency_errors()
-        if config.tts_backend == "elevenlabs":
+        if backend_cls.capabilities.requires_api_key:
             # API key presence is validated via check_tts_api_key using the configured env name.
-            errors = [
-                err for err in errors if "API key" not in err and "ELEVENLABS_API_KEY" not in err
-            ]
+            errors = _filter_tts_api_key_dependency_errors(errors)
         if errors:
             raise RuntimeError("; ".join(errors))
         return f"{config.tts_backend} deps OK"

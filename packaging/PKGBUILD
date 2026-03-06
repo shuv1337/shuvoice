@@ -1,7 +1,7 @@
 # Maintainer: Shuv <shuv@example.com>
 
 pkgname=shuvoice-git
-pkgver=0.1.2.r0
+pkgver=0.1.3.r0
 pkgrel=1
 pkgdesc="Streaming speech-to-text overlay for Hyprland/Wayland with pluggable ASR backends"
 arch=('x86_64')
@@ -49,7 +49,7 @@ sha256sums=('SKIP')
 
 pkgver() {
   cd "$srcdir/shuvoice"
-  printf "0.1.2.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+  printf "0.1.3.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {

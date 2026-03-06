@@ -118,6 +118,14 @@ def _xdg_data_home() -> Path:
     return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
 
 
+DEFAULT_ELEVENLABS_TTS_VOICE_ID = "zNsotODqUhvbJ5wMG7Ei"
+DEFAULT_ELEVENLABS_TTS_MODEL_ID = "eleven_flash_v2_5"
+DEFAULT_ELEVENLABS_TTS_API_KEY_ENV = "ELEVENLABS_API_KEY"
+DEFAULT_OPENAI_TTS_VOICE_ID = "onyx"
+DEFAULT_OPENAI_TTS_MODEL_ID = "gpt-4o-mini-tts"
+DEFAULT_OPENAI_TTS_API_KEY_ENV = "OPENAI_API_KEY"
+
+
 DEFAULT_TEXT_REPLACEMENTS: dict[str, str] = {
     # ShuVoice name variants (common ASR confusions)
     "shove voice": "ShuVoice",
@@ -227,10 +235,10 @@ class Config:
 
     # Text-to-speech
     tts_enabled: bool = True
-    tts_backend: str = "elevenlabs"  # elevenlabs | local
-    tts_default_voice_id: str = "zNsotODqUhvbJ5wMG7Ei"
-    tts_model_id: str = "eleven_multilingual_v2"
-    tts_api_key_env: str = "ELEVENLABS_API_KEY"
+    tts_backend: str = "elevenlabs"  # elevenlabs | openai | local
+    tts_default_voice_id: str = DEFAULT_ELEVENLABS_TTS_VOICE_ID
+    tts_model_id: str = DEFAULT_ELEVENLABS_TTS_MODEL_ID
+    tts_api_key_env: str = DEFAULT_ELEVENLABS_TTS_API_KEY_ENV
     tts_output_format: str = "pcm_24000"
     tts_max_chars: int = 5000
     tts_request_timeout_sec: float = 30.0
@@ -400,8 +408,16 @@ class Config:
             raise ValueError("tts_enabled must be true or false")
 
         self.tts_backend = str(self.tts_backend).strip().lower()
-        if self.tts_backend not in {"elevenlabs", "local"}:
-            raise ValueError("tts_backend must be one of: elevenlabs, local")
+        if self.tts_backend not in {"elevenlabs", "openai", "local"}:
+            raise ValueError("tts_backend must be one of: elevenlabs, openai, local")
+
+        if self.tts_backend == "openai":
+            if str(self.tts_default_voice_id).strip() == DEFAULT_ELEVENLABS_TTS_VOICE_ID:
+                self.tts_default_voice_id = DEFAULT_OPENAI_TTS_VOICE_ID
+            if str(self.tts_model_id).strip() == DEFAULT_ELEVENLABS_TTS_MODEL_ID:
+                self.tts_model_id = DEFAULT_OPENAI_TTS_MODEL_ID
+            if str(self.tts_api_key_env).strip() == DEFAULT_ELEVENLABS_TTS_API_KEY_ENV:
+                self.tts_api_key_env = DEFAULT_OPENAI_TTS_API_KEY_ENV
 
         self.tts_default_voice_id = str(self.tts_default_voice_id).strip()
         if not self.tts_default_voice_id:

@@ -55,7 +55,7 @@ class TTSPlayer:
 
     @staticmethod
     def _parse_sample_rate(output_format: str) -> int:
-        # ElevenLabs format style: "pcm_24000"
+        # Raw PCM format style: "pcm_24000"
         text = str(output_format).strip().lower()
         if text.startswith("pcm_"):
             maybe_rate = text.split("_", 1)[1]

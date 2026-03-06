@@ -21,6 +21,7 @@
   - [Moonshine](#moonshine-backend)
 - [TTS Backends](#tts-backends)
   - [ElevenLabs](#elevenlabs-backend)
+  - [OpenAI](#openai-backend)
   - [Local (Piper scaffold)](#local-piper-scaffold)
 - [Model Locations](#model-locations)
 - [Build Artifacts](#build-artifacts)
@@ -118,7 +119,7 @@ WantedBy=graphical-session.target
 **Automatic local env file**: `~/.config/shuvoice/local.dev`
 - Loaded automatically on `shuvoice` CLI startup.
 - Supports `KEY=value` and `export KEY=value` lines.
-- Intended for local API keys (for example `ELEVENLABS_API_KEY`).
+- Intended for local API keys (for example `ELEVENLABS_API_KEY` or `OPENAI_API_KEY`).
 - Existing process environment variables take precedence by default.
 
 Top-level schema marker: `config_version = 1` (legacy unversioned files are treated as v0 and auto-migrated).
@@ -430,7 +431,7 @@ uv sync --extra asr-moonshine
 tts_enabled = true
 tts_backend = "elevenlabs"
 tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"
-tts_model_id = "eleven_multilingual_v2"
+tts_model_id = "eleven_flash_v2_5"
 tts_api_key_env = "ELEVENLABS_API_KEY"
 tts_output_format = "pcm_24000"
 tts_max_chars = 5000
@@ -442,6 +443,38 @@ tts_request_timeout_sec = 30.0
 - API key value is **env-only** (named by `tts_api_key_env`), never stored in config.
 - `tts_speak` captures selected text using primary selection first, clipboard fallback second.
 - Overlay namespace: `tts-overlay` (interactive controls, keyboard mode on-demand).
+
+### OpenAI Backend
+
+**Status**: ✅ Production-ready (raw PCM path)  
+**Backend key**: `tts_backend = "openai"`  
+**Modules**: `shuvoice/tts_openai.py`, `shuvoice/tts_player.py`, `shuvoice/tts_overlay.py`
+
+#### Config
+
+```toml
+[tts]
+tts_enabled = true
+tts_backend = "openai"
+tts_default_voice_id = "onyx"
+tts_model_id = "gpt-4o-mini-tts"
+tts_api_key_env = "OPENAI_API_KEY"
+tts_output_format = "pcm_24000"
+tts_max_chars = 5000
+tts_request_timeout_sec = 30.0
+```
+
+#### Dependencies
+
+```bash
+uv sync --extra tts-openai
+```
+
+#### Notes
+
+- API key value is **env-only** (named by `tts_api_key_env`), never stored in config.
+- OpenAI defaults are auto-applied when `tts_backend = "openai"` and the stock ElevenLabs defaults are still present.
+- Current ShuVoice playback path expects raw PCM output, so use `tts_output_format = "pcm_24000"`.
 
 ### Local (Piper scaffold)
 
@@ -476,6 +509,7 @@ uv sync --extra tts-local
 | Sherpa | `sherpa_model_name` (default `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06`) | `~/.local/share/shuvoice/models/sherpa/<sherpa_model_name>/` or custom `sherpa_model_dir` |
 | Moonshine | `UsefulSensors/moonshine` | Hugging Face cache (`~/.cache/huggingface/...`) |
 | ElevenLabs TTS | `tts_default_voice_id` + `tts_model_id` | Remote API (`api.elevenlabs.io`); key in env (`tts_api_key_env`) |
+| OpenAI TTS | `tts_default_voice_id` + `tts_model_id` | Remote API (`api.openai.com/v1/audio/speech`); key in env (`tts_api_key_env`) |
 | Local TTS | `tts_local_model_path` / `tts_local_voice` | Local filesystem path (Piper `.onnx` model file(s)) |
 
 ---

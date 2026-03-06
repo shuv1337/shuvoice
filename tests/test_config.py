@@ -43,7 +43,7 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     assert cfg.tts_enabled is True
     assert cfg.tts_backend == "elevenlabs"
     assert cfg.tts_default_voice_id == "zNsotODqUhvbJ5wMG7Ei"
-    assert cfg.tts_model_id == "eleven_multilingual_v2"
+    assert cfg.tts_model_id == "eleven_flash_v2_5"
     assert cfg.tts_api_key_env == "ELEVENLABS_API_KEY"
     assert cfg.tts_output_format == "pcm_24000"
     assert cfg.tts_max_chars == 5000
@@ -282,6 +282,14 @@ def test_asr_backend_validation():
 def test_tts_backend_validation():
     with pytest.raises(ValueError, match="tts_backend"):
         Config(tts_backend="bad-backend")
+
+
+def test_openai_tts_backend_normalizes_backend_specific_defaults():
+    cfg = Config(tts_backend="openai")
+
+    assert cfg.tts_default_voice_id == "onyx"
+    assert cfg.tts_model_id == "gpt-4o-mini-tts"
+    assert cfg.tts_api_key_env == "OPENAI_API_KEY"
 
 
 def test_tts_validation():

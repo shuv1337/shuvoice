@@ -15,6 +15,12 @@ def _resolve_elevenlabs() -> type[TTSBackend]:
     return ElevenLabsTTSBackend
 
 
+def _resolve_openai() -> type[TTSBackend]:
+    from .tts_openai import OpenAITTSBackend
+
+    return OpenAITTSBackend
+
+
 def _resolve_local() -> type[TTSBackend]:
     from .tts_local import LocalTTSBackend
 
@@ -23,6 +29,7 @@ def _resolve_local() -> type[TTSBackend]:
 
 _TTS_BACKEND_REGISTRY: dict[str, BackendResolver] = {
     "elevenlabs": _resolve_elevenlabs,
+    "openai": _resolve_openai,
     "local": _resolve_local,
 }
 

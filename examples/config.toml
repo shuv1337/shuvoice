@@ -82,12 +82,17 @@ bottom_margin = 60
 [tts]
 # true | false
 # tts_enabled = true
-# elevenlabs | local
+# elevenlabs | openai | local
 # tts_backend = "elevenlabs"
 # ElevenLabs defaults
 # tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"
-# tts_model_id = "eleven_multilingual_v2"
+# tts_model_id = "eleven_flash_v2_5"
 # tts_api_key_env = "ELEVENLABS_API_KEY"
+# OpenAI defaults (auto-applied when tts_backend = "openai" and the ElevenLabs defaults are unchanged)
+# tts_default_voice_id = "onyx"
+# tts_model_id = "gpt-4o-mini-tts"
+# tts_api_key_env = "OPENAI_API_KEY"
+# Raw PCM playback format used by the current TTS backends
 # tts_output_format = "pcm_24000"
 # tts_max_chars = 5000
 # tts_request_timeout_sec = 30.0
