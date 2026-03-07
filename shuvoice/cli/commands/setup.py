@@ -13,6 +13,7 @@ from ...setup_helpers import (
     build_backend_setup_report,
     format_missing_dependency_report,
 )
+from ...sherpa_cuda import prepare_cuda_runtime
 from .preflight import run_preflight
 
 
@@ -50,14 +51,52 @@ def _detect_cuda_gpu() -> bool:
     return shutil.which("nvidia-smi") is not None
 
 
+def _detect_cuda_architectures() -> str:
+    try:
+        import torch  # noqa: PLC0415
+
+        if torch.cuda.is_available():
+            major, minor = torch.cuda.get_device_capability(0)
+            return f"{major}{minor}"
+    except Exception:  # noqa: BLE001
+        pass
+
+    return "89"
+
+
+def _sherpa_cuda_cmake_args() -> str:
+    arch = _detect_cuda_architectures()
+    return (
+        "-DSHERPA_ONNX_ENABLE_GPU=ON "
+        f"-DCMAKE_CUDA_ARCHITECTURES={arch} "
+        "-DCMAKE_C_FLAGS=-Wno-error=format-security "
+        "-DCMAKE_CXX_FLAGS=-Wno-error=format-security"
+    )
+
+
+def _sherpa_cuda_compat_packages() -> list[str]:
+    return [
+        "nvidia-cublas-cu12",
+        "nvidia-cuda-runtime-cu12",
+        "nvidia-cudnn-cu12",
+        "nvidia-cufft-cu12",
+        "nvidia-curand-cu12",
+    ]
+
+
 def _venv_install_commands(
     packages: list[str],
     *,
     upgrade: bool = False,
     no_binary: str | None = None,
-    env_var: str | None = None,
+    env_vars: dict[str, str] | None = None,
 ) -> list[list[str]]:
     commands: list[list[str]] = []
+
+    env_prefix = ["env"]
+    if env_vars:
+        for key, value in env_vars.items():
+            env_prefix.append(f"{key}={value}")
 
     if shutil.which("uv"):
         uv_cmd = ["uv", "pip", "install"]
@@ -66,8 +105,8 @@ def _venv_install_commands(
         if no_binary:
             uv_cmd.extend(["--no-binary", no_binary])
         uv_cmd.extend(packages)
-        if env_var:
-            commands.append(["env", env_var, *uv_cmd])
+        if env_vars:
+            commands.append([*env_prefix, *uv_cmd])
         else:
             commands.append(uv_cmd)
 
@@ -77,8 +116,8 @@ def _venv_install_commands(
     if no_binary:
         pip_cmd.extend(["--no-binary", no_binary])
     pip_cmd.extend(packages)
-    if env_var:
-        commands.append(["env", env_var, *pip_cmd])
+    if env_vars:
+        commands.append([*env_prefix, *pip_cmd])
     else:
         commands.append(pip_cmd)
 
@@ -120,7 +159,13 @@ def _auto_install_commands(backend: str, *, prefer_cuda: bool | None = None) -> 
                         ["sherpa-onnx"],
                         upgrade=True,
                         no_binary="sherpa-onnx",
-                        env_var="SHERPA_ONNX_CMAKE_ARGS=-DSHERPA_ONNX_ENABLE_GPU=ON",
+                        env_vars={"SHERPA_ONNX_CMAKE_ARGS": _sherpa_cuda_cmake_args()},
+                    )
+                )
+                commands.extend(
+                    _venv_install_commands(
+                        _sherpa_cuda_compat_packages(),
+                        upgrade=True,
                     )
                 )
             commands.extend(_venv_install_commands(["sherpa-onnx"], upgrade=True))
@@ -153,8 +198,16 @@ def _attempt_auto_install(backend: str, *, prefer_cuda: bool | None = None) -> b
 
         print(f"Attempting install: {' '.join(command)}")
         proc = subprocess.run(command, check=False)
-        if proc.returncode == 0:
-            return True
+        if proc.returncode != 0:
+            continue
+
+        if backend == "sherpa" and prefer_cuda:
+            repaired, detail = prepare_cuda_runtime()
+            print(f"Sherpa CUDA runtime repair: {detail}")
+            if not repaired:
+                continue
+
+        return True
 
     return False
 
@@ -197,6 +250,20 @@ def run_setup(
     cfg_for_checks = Config(**{name: getattr(config, name) for name in Config.config_field_names()})
 
     startup_warnings = backend_cls.startup_warnings(cfg_for_checks, apply_fixes=True)
+    if (
+        install_missing
+        and config.asr_backend == "sherpa"
+        and config.sherpa_provider == "cuda"
+        and startup_warnings
+    ):
+        print("\n[WARN] Sherpa CUDA runtime is not ready; attempting repair/install.")
+        if _attempt_auto_install(config.asr_backend, prefer_cuda=True):
+            backend_cls = get_backend_class(config.asr_backend)
+            cfg_for_checks = Config(
+                **{name: getattr(config, name) for name in Config.config_field_names()}
+            )
+            startup_warnings = backend_cls.startup_warnings(cfg_for_checks, apply_fixes=True)
+
     if startup_warnings:
         for warning in startup_warnings:
             print(f"[WARN] {warning}")

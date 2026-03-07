@@ -330,6 +330,10 @@ yay -S --needed python-sherpa-onnx-bin
   (`python-sherpa-onnx` source provider before `python-sherpa-onnx-bin`).
 - In venv workflows, prefers `uv pip install ...` and falls back to
   `python -m pip install ...`.
+- For Sherpa CUDA in a venv, setup now also installs the required CUDA compat
+  pip libs (`nvidia-*-cu12`), patches RUNPATH on the Sherpa runtime libs, and
+  links exact sonames into `site-packages/sherpa_onnx/lib/` so CUDA hosts with
+  newer system toolkits can still load the provider out of the box.
 
 #### Sherpa GPU (CUDA) support
 
@@ -341,12 +345,19 @@ Typical rebuild flow:
 ```bash
 cd $REPO_ROOT/build/sherpa-onnx
 git checkout v<VERSION>
-export SHERPA_ONNX_CMAKE_ARGS="-DSHERPA_ONNX_ENABLE_GPU=ON -DCMAKE_CUDA_ARCHITECTURES=89"
+export SHERPA_ONNX_CMAKE_ARGS="-DSHERPA_ONNX_ENABLE_GPU=ON -DCMAKE_CUDA_ARCHITECTURES=89 -DCMAKE_C_FLAGS=-Wno-error=format-security -DCMAKE_CXX_FLAGS=-Wno-error=format-security"
 $REPO_ROOT/.venv/bin/python setup.py bdist_wheel
 uv pip install dist/sherpa_onnx-*.whl --force-reinstall --no-deps
+uv pip install --upgrade nvidia-cublas-cu12 nvidia-cuda-runtime-cu12 nvidia-cudnn-cu12 nvidia-cufft-cu12 nvidia-curand-cu12
 
 SHERPA_LIB="$REPO_ROOT/.venv/lib/python3.12/site-packages/sherpa_onnx/lib"
-# Copy required CUDA compat libs into $SHERPA_LIB, then patch RUNPATH:
+# Link exact CUDA sonames from site-packages/nvidia into $SHERPA_LIB, then patch RUNPATH:
+ln -sfn ../../nvidia/cublas/lib/libcublasLt.so.12 "$SHERPA_LIB/libcublasLt.so.12"
+ln -sfn ../../nvidia/cublas/lib/libcublas.so.12 "$SHERPA_LIB/libcublas.so.12"
+ln -sfn ../../nvidia/cuda_runtime/lib/libcudart.so.12 "$SHERPA_LIB/libcudart.so.12"
+ln -sfn ../../nvidia/cufft/lib/libcufft.so.11 "$SHERPA_LIB/libcufft.so.11"
+ln -sfn ../../nvidia/curand/lib/libcurand.so.10 "$SHERPA_LIB/libcurand.so.10"
+ln -sfn ../../nvidia/cudnn/lib/libcudnn.so.9 "$SHERPA_LIB/libcudnn.so.9"
 patchelf --set-rpath '$ORIGIN' "$SHERPA_LIB/libonnxruntime_providers_cuda.so"
 patchelf --set-rpath '$ORIGIN' "$SHERPA_LIB/libonnxruntime_providers_shared.so"
 patchelf --set-rpath '$ORIGIN' "$SHERPA_LIB/libonnxruntime.so"

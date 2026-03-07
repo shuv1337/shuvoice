@@ -50,6 +50,53 @@ def test_run_setup_success_path_with_skips(monkeypatch):
     assert code == 0
 
 
+def test_run_setup_attempts_cuda_runtime_repair_when_requested(capsys, monkeypatch):
+    report = BackendSetupReport(
+        backend="sherpa",
+        missing_dependencies=(),
+        install_hints=(),
+        model_status="present (/tmp/model)",
+    )
+    monkeypatch.setattr(setup_cmd, "build_backend_setup_report", lambda _cfg: report)
+
+    class _DummySherpaBackend:
+        capabilities = SimpleNamespace(supports_model_download=True)
+        calls = 0
+
+        @classmethod
+        def startup_warnings(cls, cfg, *, apply_fixes: bool = False):
+            cls.calls += 1
+            if cls.calls == 1:
+                if apply_fixes and cfg.sherpa_provider == "cuda":
+                    cfg.sherpa_provider = "cpu"
+                return ["CUDA provider unavailable; falling back to CPU"]
+            return []
+
+        @staticmethod
+        def startup_errors(_cfg):
+            return []
+
+        @staticmethod
+        def _looks_like_parakeet_model(_cfg):
+            return False
+
+    calls: list[tuple[str, bool | None]] = []
+    monkeypatch.setattr(setup_cmd, "get_backend_class", lambda _name: _DummySherpaBackend)
+    monkeypatch.setattr(
+        setup_cmd,
+        "_attempt_auto_install",
+        lambda backend, *, prefer_cuda=None: calls.append((backend, prefer_cuda)) or True,
+    )
+
+    cfg = Config(asr_backend="sherpa", sherpa_provider="cuda")
+    code = setup_cmd.run_setup(cfg, install_missing=True, skip_model_download=True, skip_preflight=True)
+
+    assert code == 0
+    assert calls == [("sherpa", True)]
+    out = capsys.readouterr().out
+    assert "attempting repair/install" in out.lower()
+
+
 def test_run_setup_reports_sherpa_decode_mode_and_provider(capsys, monkeypatch):
     report = BackendSetupReport(
         backend="sherpa",

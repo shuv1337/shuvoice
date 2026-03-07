@@ -38,6 +38,23 @@ def test_auto_install_commands_prefers_cuda_capable_provider_when_gpu_detected(m
     assert commands[2][-1] == "python-sherpa-onnx-bin"
 
 
+def test_auto_install_commands_venv_cuda_includes_gpu_build_and_compat_packages(monkeypatch):
+    monkeypatch.setattr(setup_cmd, "_running_in_venv", lambda: True)
+    monkeypatch.setattr(setup_cmd, "_detect_cuda_gpu", lambda: True)
+    monkeypatch.setattr(setup_cmd, "_detect_cuda_architectures", lambda: "89")
+    monkeypatch.setattr(
+        setup_cmd.shutil,
+        "which",
+        lambda exe: "/usr/bin/uv" if exe == "uv" else None,
+    )
+
+    commands = setup_cmd._auto_install_commands("sherpa")
+
+    assert any("SHERPA_ONNX_CMAKE_ARGS=-DSHERPA_ONNX_ENABLE_GPU=ON" in part for cmd in commands for part in cmd)
+    assert any("nvidia-cublas-cu12" in cmd for cmd in commands)
+    assert any("nvidia-cudnn-cu12" in cmd for cmd in commands)
+
+
 def test_auto_install_commands_venv_prefers_uv_pip(monkeypatch):
     monkeypatch.setattr(setup_cmd, "_running_in_venv", lambda: True)
     monkeypatch.setattr(setup_cmd, "_detect_cuda_gpu", lambda: False)

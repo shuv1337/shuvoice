@@ -120,7 +120,7 @@ uv sync
 Pick **one** (or more) backend to install:
 
 ```bash
-# Sherpa-ONNX (fast, CPU-friendly — recommended starting point)
+# Sherpa-ONNX (fast, CPU-friendly by default; CUDA-capable runtime auto-repaired by setup/wizard)
 uv sync --extra asr-sherpa
 
 # NeMo (highest accuracy, requires NVIDIA GPU + CUDA)
@@ -207,6 +207,10 @@ shuvoice preflight
 This checks Python version, required modules, audio devices, ASR/TTS backend
 dependencies, required binaries (`wtype`, `wl-copy`, `wl-paste`), and GTK
 layer-shell availability.
+
+On CUDA hosts, `shuvoice setup --install-missing` now also attempts to build a
+gpu-enabled Sherpa runtime in the venv and wire the required CUDA compat libs
+when `sherpa_provider = "cuda"` is selected.
 
 ---
 

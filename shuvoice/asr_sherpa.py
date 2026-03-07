@@ -18,6 +18,7 @@ import numpy as np
 
 from .asr_base import ASRBackend, ASRCapabilities
 from .config import Config
+from .sherpa_cuda import cuda_provider_runtime_status, prepare_cuda_runtime, sherpa_lib_dir
 
 log = logging.getLogger(__name__)
 
@@ -155,24 +156,26 @@ class SherpaBackend(ASRBackend):
     @staticmethod
     def _cuda_provider_available() -> tuple[bool, str]:
         try:
-            import sherpa_onnx
+            import sherpa_onnx  # noqa: F401
         except Exception as exc:  # noqa: BLE001
             return False, f"failed to import sherpa_onnx ({exc})"
 
-        lib_dir = Path(sherpa_onnx.__file__).resolve().parent / "lib"
-        if not lib_dir.is_dir():
-            return False, f"runtime lib directory not found at {lib_dir}"
+        lib_dir = sherpa_lib_dir()
+        if lib_dir is None or not lib_dir.is_dir():
+            return False, "runtime lib directory not found for sherpa_onnx"
 
-        cuda_candidates = (
-            "libonnxruntime_providers_cuda.so*",
-            "onnxruntime_providers_cuda.dll",
-            "libonnxruntime_providers_cuda.dylib",
-        )
-        found = [path for pattern in cuda_candidates for path in lib_dir.glob(pattern)]
-        if found:
-            return True, f"found CUDA provider libraries under {lib_dir}"
+        status_ok, detail = cuda_provider_runtime_status(lib_dir)
+        if status_ok:
+            return True, detail
 
-        return False, f"missing CUDA provider library under {lib_dir}"
+        provider_lib = lib_dir / "libonnxruntime_providers_cuda.so"
+        if provider_lib.exists():
+            repaired, repair_detail = prepare_cuda_runtime(lib_dir)
+            if repaired:
+                return cuda_provider_runtime_status(lib_dir)
+            return False, repair_detail
+
+        return False, detail
 
     @classmethod
     def _model_archive_url(cls, model_name: str) -> str:

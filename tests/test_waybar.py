@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
-import json
-
 from shuvoice.config import Config
-from shuvoice.waybar import _action_menu, _perform_action, build_waybar_payload, config_info_lines, main
+from shuvoice.waybar import (
+    _action_menu,
+    _perform_action,
+    build_waybar_payload,
+    config_info_lines,
+    main,
+)
 
 
 def test_build_waybar_payload_recording_state():
