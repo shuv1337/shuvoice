@@ -13,6 +13,7 @@ import numpy as np
 import sounddevice as sd
 
 from .tts_base import TTSBackend
+from .tts_speed import normalize_tts_playback_speed
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ class TTSPlayer:
         *,
         output_device: str | int | None = None,
         output_format: str = "pcm_24000",
+        playback_speed: float = 1.0,
         on_state_change: Callable[[str, dict[str, Any]], None] | None = None,
     ):
         self._backend = backend
@@ -38,6 +40,7 @@ class TTSPlayer:
         self._lock = threading.RLock()
         self._state = "idle"
         self._generation = 0
+        self._playback_speed = normalize_tts_playback_speed(playback_speed)
 
         self._cancel_event = threading.Event()
         self._pause_event = threading.Event()
@@ -68,6 +71,17 @@ class TTSPlayer:
         with self._lock:
             return self._state
 
+    @property
+    def playback_speed(self) -> float:
+        with self._lock:
+            return self._playback_speed
+
+    def set_playback_speed(self, speed: float) -> float:
+        normalized = normalize_tts_playback_speed(speed)
+        with self._lock:
+            self._playback_speed = normalized
+        return normalized
+
     def is_active(self) -> bool:
         with self._lock:
             return self._state in self.ACTIVE_STATES
@@ -79,6 +93,7 @@ class TTSPlayer:
                 "voice_id": self._last_voice_id,
                 "model_id": self._last_model_id,
                 "text_len": len(self._last_text),
+                "playback_speed": self._playback_speed,
             }
 
     def _transition(self, state: str, **info: Any) -> None:
@@ -238,6 +253,24 @@ class TTSPlayer:
         samples = np.frombuffer(usable, dtype="<i2").reshape(-1, 1)
         return samples, next_carry
 
+    @staticmethod
+    def _adjust_samples_for_speed(samples: np.ndarray, speed: float) -> np.ndarray:
+        normalized = normalize_tts_playback_speed(speed)
+        if samples.size == 0 or abs(normalized - 1.0) < 1e-6:
+            return samples
+
+        mono = samples.reshape(-1)
+        source_len = mono.size
+        target_len = max(1, int(round(source_len / normalized)))
+        if target_len == source_len:
+            return samples
+
+        source_positions = np.arange(source_len, dtype=np.float32)
+        target_positions = np.linspace(0, source_len - 1, num=target_len, dtype=np.float32)
+        adjusted = np.interp(target_positions, source_positions, mono)
+        adjusted = np.clip(np.rint(adjusted), np.iinfo(np.int16).min, np.iinfo(np.int16).max)
+        return adjusted.astype(np.int16).reshape(-1, 1)
+
     def _write_samples_with_recovery(self, samples: np.ndarray) -> None:
         """Write PCM samples with a one-time stream recreation retry."""
         for attempt in (1, 2):
@@ -277,6 +310,10 @@ class TTSPlayer:
                     break
 
                 samples, carry = self._chunk_to_samples(item, carry)
+                if samples.size == 0:
+                    continue
+
+                samples = self._adjust_samples_for_speed(samples, self.playback_speed)
                 if samples.size == 0:
                     continue
 

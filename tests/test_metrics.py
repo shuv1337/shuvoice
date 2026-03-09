@@ -16,6 +16,7 @@ def test_metrics_collector_counts_and_timings():
     metrics.observe_tts_interrupt()
     metrics.observe_tts_pause()
     metrics.observe_tts_selection_failure()
+    metrics.observe_tts_speed_change()
     metrics.observe_tts_synth_failure()
     metrics.observe_tts_playback_completion()
     metrics.observe_tts_synth_latency(0.42)
@@ -34,6 +35,7 @@ def test_metrics_collector_counts_and_timings():
     assert snap["tts"]["interrupt_count"] == 1
     assert snap["tts"]["pause_count"] == 1
     assert snap["tts"]["selection_failures"] == 1
+    assert snap["tts"]["speed_change_count"] == 1
     assert snap["tts"]["synth_failures"] == 1
     assert snap["tts"]["playback_completions"] == 1
     assert snap["tts"]["synth_latency_sec"]["count"] == 1

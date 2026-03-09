@@ -85,6 +85,31 @@ def test_tts_player_basic_state_flow(monkeypatch):
     assert _FakeOutputStream.instances[0].writes
 
 
+def test_tts_player_applies_playback_speed_to_output(monkeypatch):
+    _FakeOutputStream.instances.clear()
+    monkeypatch.setattr("shuvoice.tts_player.sd.OutputStream", _FakeOutputStream)
+
+    backend = _Backend([b"\x00\x00" * 200])
+    player = TTSPlayer(backend, playback_speed=2.0)
+
+    player.speak("hello", "voice", "model")
+
+    assert _wait_until(lambda: player.state == "idle")
+    written = _FakeOutputStream.instances[0].writes[0]
+    assert written.shape == (100, 1)
+    assert player.status_payload()["playback_speed"] == 2.0
+
+
+def test_tts_player_set_playback_speed_clamps_value(monkeypatch):
+    _FakeOutputStream.instances.clear()
+    monkeypatch.setattr("shuvoice.tts_player.sd.OutputStream", _FakeOutputStream)
+
+    player = TTSPlayer(_Backend([b"\x00\x00" * 10]))
+
+    assert player.set_playback_speed(5.0) == 2.0
+    assert player.playback_speed == 2.0
+
+
 def test_tts_player_pause_resume(monkeypatch):
     _FakeOutputStream.instances.clear()
     monkeypatch.setattr("shuvoice.tts_player.sd.OutputStream", _FakeOutputStream)

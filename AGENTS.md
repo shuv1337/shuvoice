@@ -150,6 +150,8 @@ This applies backend-specific tuning at runtime:
 - Selection capture order: `wl-paste --primary --no-newline` first, then
   clipboard fallback (`wl-paste --no-newline`)
 - STT and TTS are mutually exclusive at runtime (starting one stops the other)
+- TTS overlay exposes runtime pause/resume, restart, stop, voice selection,
+  and playback speed controls (0.5×–2.0×)
 
 ### Audio gain tuning (app-side)
 
@@ -447,12 +449,14 @@ tts_api_key_env = "ELEVENLABS_API_KEY"
 tts_output_format = "pcm_24000"
 tts_max_chars = 5000
 tts_request_timeout_sec = 30.0
+tts_playback_speed = 1.0
 ```
 
 #### Notes
 
 - API key value is **env-only** (named by `tts_api_key_env`), never stored in config.
 - `tts_speak` captures selected text using primary selection first, clipboard fallback second.
+- `tts_playback_speed` controls the default runtime overlay playback speed (0.5×–2.0×).
 - Overlay namespace: `tts-overlay` (interactive controls, keyboard mode on-demand).
 
 ### OpenAI Backend
@@ -473,6 +477,7 @@ tts_api_key_env = "OPENAI_API_KEY"
 tts_output_format = "pcm_24000"
 tts_max_chars = 5000
 tts_request_timeout_sec = 30.0
+tts_playback_speed = 1.0
 ```
 
 #### Dependencies
@@ -498,6 +503,7 @@ uv sync --extra tts-openai
 ```toml
 [tts]
 tts_backend = "local"
+tts_playback_speed = 1.0
 tts_local_model_path = "/path/to/piper-model.onnx" # file or directory with .onnx voices
 tts_local_voice = "en_US-amy-medium"                # optional voice/model stem
 tts_local_device = 3                                 # optional output device hint

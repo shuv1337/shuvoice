@@ -96,6 +96,8 @@ bottom_margin = 60
 # tts_output_format = "pcm_24000"
 # tts_max_chars = 5000
 # tts_request_timeout_sec = 30.0
+# Default overlay playback speed (runtime overlay controls can adjust this between 0.5x and 2.0x)
+# tts_playback_speed = 1.0
 # Optional output device name/index for TTS playback
 # tts_playback_device = 3
 # tts_overlay_auto_hide_sec = 2.0

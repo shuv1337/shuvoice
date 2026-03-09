@@ -16,6 +16,7 @@ def test_waybar_format_config_info_lines():
     assert any("Moonshine" in line for line in lines)
     assert any("TTS:" in line and "ElevenLabs" in line for line in lines)
     assert any("Voice:" in line for line in lines)
+    assert "Speed:    1.0×" in lines
 
 
 def test_waybar_format_instant_profile_line():

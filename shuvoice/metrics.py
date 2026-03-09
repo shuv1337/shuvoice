@@ -87,6 +87,9 @@ class MetricsCollector:
     def observe_tts_selection_failure(self) -> None:
         self.increment("tts_selection_failures")
 
+    def observe_tts_speed_change(self) -> None:
+        self.increment("tts_speed_change_count")
+
     def observe_tts_synth_latency(self, seconds: float) -> None:
         self.observe_timing("tts_synth_latency_sec", seconds)
 
@@ -117,6 +120,7 @@ class MetricsCollector:
                 "playback_completions": counters.get("tts_playback_completions", 0),
                 "pause_count": counters.get("tts_pause_count", 0),
                 "selection_failures": counters.get("tts_selection_failures", 0),
+                "speed_change_count": counters.get("tts_speed_change_count", 0),
                 "synth_latency_sec": timing_summary.get(
                     "tts_synth_latency_sec",
                     {"count": 0, "avg": 0.0, "max": 0.0},

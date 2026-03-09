@@ -48,6 +48,7 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     assert cfg.tts_output_format == "pcm_24000"
     assert cfg.tts_max_chars == 5000
     assert cfg.tts_request_timeout_sec == 30.0
+    assert cfg.tts_playback_speed == 1.0
     assert cfg.tts_playback_device is None
     assert cfg.tts_overlay_auto_hide_sec == 2.0
 
@@ -104,6 +105,7 @@ tts_api_key_env = "TEST_TTS_KEY"
 tts_output_format = "pcm_24000"
 tts_max_chars = 1234
 tts_request_timeout_sec = 12.5
+tts_playback_speed = 1.3
 tts_playback_device = "2"
 tts_overlay_auto_hide_sec = 3.5
 tts_local_model_path = "/tmp/piper-models"
@@ -173,6 +175,7 @@ foo = "bar"
     assert cfg.tts_output_format == "pcm_24000"
     assert cfg.tts_max_chars == 1234
     assert cfg.tts_request_timeout_sec == 12.5
+    assert cfg.tts_playback_speed == 1.3
     assert cfg.tts_playback_device == 2
     assert cfg.tts_overlay_auto_hide_sec == 3.5
     assert cfg.tts_local_model_path == "/tmp/piper-models"
@@ -304,6 +307,9 @@ def test_tts_validation():
 
     with pytest.raises(ValueError, match="tts_request_timeout_sec"):
         Config(tts_request_timeout_sec=0)
+
+    with pytest.raises(ValueError, match="tts_playback_speed"):
+        Config(tts_playback_speed=0.25)
 
     with pytest.raises(ValueError, match="tts_overlay_auto_hide_sec"):
         Config(tts_overlay_auto_hide_sec=-0.1)
@@ -615,6 +621,7 @@ def test_to_nested_dict_includes_sherpa_decode_mode():
         sherpa_decode_mode="offline_instant",
         sherpa_enable_parakeet_streaming=True,
         tts_backend="local",
+        tts_playback_speed=1.4,
         tts_local_model_path="/tmp/models",
     )
 
@@ -622,4 +629,5 @@ def test_to_nested_dict_includes_sherpa_decode_mode():
     assert data["asr"]["sherpa_decode_mode"] == "offline_instant"
     assert data["asr"]["sherpa_enable_parakeet_streaming"] is True
     assert data["tts"]["tts_backend"] == "local"
+    assert data["tts"]["tts_playback_speed"] == 1.4
     assert data["tts"]["tts_local_model_path"] == "/tmp/models"

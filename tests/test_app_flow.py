@@ -577,6 +577,26 @@ def test_tts_speak_selection_stops_recording_and_starts_player(monkeypatch):
     app.metrics.observe_tts_interrupt.assert_not_called()
 
 
+def test_tts_set_playback_speed_updates_player_overlay_and_metrics():
+    app = SimpleNamespace(
+        _tts_playback_speed=1.0,
+        tts_player=SimpleNamespace(
+            set_playback_speed=Mock(return_value=1.4),
+            is_active=lambda: False,
+        ),
+        tts_overlay=SimpleNamespace(set_speed=Mock()),
+        metrics=SimpleNamespace(observe_tts_speed_change=Mock()),
+    )
+
+    result = ShuVoiceApp._tts_set_playback_speed(app, 1.4)
+
+    assert result == 1.4
+    assert app._tts_playback_speed == 1.4
+    app.tts_player.set_playback_speed.assert_called_once_with(1.4)
+    app.tts_overlay.set_speed.assert_called_once_with(1.4)
+    app.metrics.observe_tts_speed_change.assert_called_once()
+
+
 def test_handle_tts_command_returns_disabled_error_when_config_disabled():
     app = SimpleNamespace(config=SimpleNamespace(tts_enabled=False))
 

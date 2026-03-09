@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from .tts_speed import TTS_PLAYBACK_SPEED_DEFAULT, validate_tts_playback_speed
+
 log = logging.getLogger(__name__)
 
 CURRENT_CONFIG_VERSION = 1
@@ -77,6 +79,7 @@ CONFIG_SECTION_FIELDS: dict[str, tuple[str, ...]] = {
         "tts_output_format",
         "tts_max_chars",
         "tts_request_timeout_sec",
+        "tts_playback_speed",
         "tts_playback_device",
         "tts_overlay_auto_hide_sec",
         "tts_local_model_path",
@@ -242,6 +245,7 @@ class Config:
     tts_output_format: str = "pcm_24000"
     tts_max_chars: int = 5000
     tts_request_timeout_sec: float = 30.0
+    tts_playback_speed: float = TTS_PLAYBACK_SPEED_DEFAULT
     tts_playback_device: str | int | None = None
     tts_overlay_auto_hide_sec: float = 2.0
     tts_local_model_path: str | None = None
@@ -442,6 +446,8 @@ class Config:
         if float(self.tts_request_timeout_sec) <= 0:
             raise ValueError("tts_request_timeout_sec must be > 0")
         self.tts_request_timeout_sec = float(self.tts_request_timeout_sec)
+
+        self.tts_playback_speed = validate_tts_playback_speed(self.tts_playback_speed)
 
         if float(self.tts_overlay_auto_hide_sec) < 0:
             raise ValueError("tts_overlay_auto_hide_sec must be >= 0")

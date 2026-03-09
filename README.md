@@ -304,6 +304,7 @@ ShuVoice reads the selected text aloud using your configured TTS backend.
 - Uses primary selection first, then clipboard fallback
 - STT and TTS are mutually exclusive (starting one stops the other)
 - Re-triggering while speaking interrupts and starts fresh
+- The TTS overlay includes pause/resume, restart, stop, voice selection, and speed controls
 
 ### Control Commands
 
@@ -505,6 +506,7 @@ tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"   # ElevenLabs default
 # tts_api_key_env = "OPENAI_API_KEY"
 tts_model_id = "eleven_flash_v2_5"
 tts_api_key_env = "ELEVENLABS_API_KEY"          # env var name (not the key itself)
+tts_playback_speed = 1.0                         # default overlay playback speed (0.5x to 2.0x)
 ```
 
 Set your API key in `~/.config/shuvoice/local.dev`:
@@ -541,7 +543,7 @@ Pre-built config files for common setups:
 
 ShuVoice ships a Waybar helper (`shuvoice-waybar`) for a tray-style status icon.
 When running on Hyprland, the tooltip also shows the configured TTS provider /
-voice plus the detected push-to-talk and TTS keybinds.
+voice, playback speed, plus the detected push-to-talk and TTS keybinds.
 
 Add to your Waybar config:
 

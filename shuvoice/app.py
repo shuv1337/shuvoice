@@ -46,6 +46,7 @@ from .selection import SelectionError, capture_selection
 from .transcript import prefer_transcript
 from .tts import create_tts_backend
 from .tts_player import TTSPlayer
+from .tts_speed import normalize_tts_playback_speed
 from .typer import StreamingTyper
 from .utterance_state import _UtteranceState
 
@@ -98,6 +99,7 @@ class ShuVoiceApp(Gtk.Application):
         self.tts_player: TTSPlayer | None = None
         self.tts_overlay: TTSOverlay | None = None
         self._tts_voice_id = str(config.tts_default_voice_id).strip()
+        self._tts_playback_speed = normalize_tts_playback_speed(config.tts_playback_speed)
         self._tts_last_preview_text = ""
 
         if config.tts_enabled:
@@ -107,6 +109,7 @@ class ShuVoiceApp(Gtk.Application):
                     self.tts_backend,
                     output_device=config.tts_playback_device,
                     output_format=config.tts_output_format,
+                    playback_speed=self._tts_playback_speed,
                     on_state_change=self._on_tts_player_state_change,
                 )
 
@@ -310,6 +313,8 @@ class ShuVoiceApp(Gtk.Application):
                 on_restart=self._tts_restart,
                 on_stop=self._tts_stop,
                 on_voice_selected=self._tts_select_voice,
+                on_speed_changed=self._tts_set_playback_speed,
+                initial_speed=self._tts_playback_speed,
             )
             threading.Thread(target=self._load_tts_voices, name="tts-voices", daemon=True).start()
 
@@ -504,6 +509,32 @@ class ShuVoiceApp(Gtk.Application):
         self._tts_voice_id = selected
         log.info("TTS voice updated: voice_id=%s", selected)
 
+    def _tts_set_playback_speed(self, speed: float) -> float:
+        normalized = normalize_tts_playback_speed(speed)
+        previous = getattr(self, "_tts_playback_speed", normalized)
+        self._tts_playback_speed = normalized
+
+        tts_player = getattr(self, "tts_player", None)
+        if tts_player is not None:
+            normalized = tts_player.set_playback_speed(normalized)
+            self._tts_playback_speed = normalized
+
+        tts_overlay = getattr(self, "tts_overlay", None)
+        if tts_overlay is not None:
+            tts_overlay.set_speed(normalized)
+
+        if abs(normalized - previous) >= 1e-6:
+            metrics = getattr(self, "metrics", None)
+            if metrics is not None:
+                metrics.observe_tts_speed_change()
+            log.info(
+                "TTS playback speed updated: speed=%sx active=%s",
+                normalized,
+                bool(tts_player is not None and tts_player.is_active()),
+            )
+
+        return normalized
+
     def _wait_for_stt_processing_clear(self, timeout_sec: float = 5.0) -> bool:
         if not self._processing.is_set():
             return True
@@ -541,9 +572,10 @@ class ShuVoiceApp(Gtk.Application):
         self._tts_last_preview_text = text
 
         log.info(
-            "TTS speak: backend=%s voice=%s text_len=%d",
+            "TTS speak: backend=%s voice=%s speed=%sx text_len=%d",
             self.config.tts_backend,
             self._tts_voice_id,
+            getattr(self, "_tts_playback_speed", 1.0),
             text_len,
         )
 

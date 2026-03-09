@@ -21,12 +21,19 @@ from .tts_overlay_state import (
     summarize_preview,
     status_label_for_state,
 )
+from .tts_speed import (
+    TTS_PLAYBACK_SPEED_MAX,
+    TTS_PLAYBACK_SPEED_MIN,
+    format_tts_playback_speed,
+    normalize_tts_playback_speed,
+    step_tts_playback_speed,
+)
 
 log = logging.getLogger(__name__)
 
 
 class TTSOverlay:
-    """Interactive TTS overlay with transport controls and voice selection."""
+    """Interactive TTS overlay with transport, voice, and speed controls."""
 
     def __init__(
         self,
@@ -38,6 +45,8 @@ class TTSOverlay:
         on_restart: Callable[[], None] | None = None,
         on_stop: Callable[[], None] | None = None,
         on_voice_selected: Callable[[str], None] | None = None,
+        on_speed_changed: Callable[[float], None] | None = None,
+        initial_speed: float | None = None,
     ):
         self._config = config
         self._on_pause = on_pause
@@ -45,6 +54,7 @@ class TTSOverlay:
         self._on_restart = on_restart
         self._on_stop = on_stop
         self._on_voice_selected = on_voice_selected
+        self._on_speed_changed = on_speed_changed
 
         self._window = Gtk.Window(application=app)
         self._visible = False
@@ -54,18 +64,24 @@ class TTSOverlay:
 
         self._voices: list[VoiceInfo] = []
         self._voice_selected_id = str(config.tts_default_voice_id)
+        default_speed = initial_speed if initial_speed is not None else config.tts_playback_speed
+        self._playback_speed = normalize_tts_playback_speed(default_speed)
 
         self._status_label: Gtk.Label | None = None
         self._preview_label: Gtk.Label | None = None
         self._pause_btn: Gtk.Button | None = None
         self._restart_btn: Gtk.Button | None = None
         self._stop_btn: Gtk.Button | None = None
+        self._slower_btn: Gtk.Button | None = None
+        self._speed_label: Gtk.Label | None = None
+        self._faster_btn: Gtk.Button | None = None
         self._voice_store: Gtk.StringList | None = None
         self._voice_dropdown: Gtk.DropDown | None = None
 
         self._setup_layer_shell()
         self._setup_css()
         self._setup_widgets()
+        self._render()
         self._window.present()
         self._window.set_visible(False)
 
@@ -130,26 +146,56 @@ class TTSOverlay:
         self._preview_label = preview_label
         root.append(preview_label)
 
-        controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        controls.set_spacing(8)
+        transport_controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        transport_controls.set_spacing(8)
 
         pause_btn = Gtk.Button(label="⏸ Pause")
         pause_btn.add_css_class("tts-control-btn")
         pause_btn.connect("clicked", self._on_pause_clicked)
         self._pause_btn = pause_btn
-        controls.append(pause_btn)
+        transport_controls.append(pause_btn)
 
         restart_btn = Gtk.Button(label="⟲ Restart")
         restart_btn.add_css_class("tts-control-btn")
         restart_btn.connect("clicked", self._on_restart_clicked)
         self._restart_btn = restart_btn
-        controls.append(restart_btn)
+        transport_controls.append(restart_btn)
 
         stop_btn = Gtk.Button(label="■ Stop")
         stop_btn.add_css_class("tts-control-btn")
         stop_btn.connect("clicked", self._on_stop_clicked)
         self._stop_btn = stop_btn
-        controls.append(stop_btn)
+        transport_controls.append(stop_btn)
+
+        root.append(transport_controls)
+
+        settings_controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        settings_controls.set_spacing(8)
+
+        speed_controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        speed_controls.set_spacing(6)
+
+        slower_btn = Gtk.Button(label="−")
+        slower_btn.add_css_class("tts-control-btn")
+        slower_btn.set_tooltip_text("Slow down TTS playback")
+        slower_btn.connect("clicked", self._on_slower_clicked)
+        self._slower_btn = slower_btn
+        speed_controls.append(slower_btn)
+
+        speed_label = Gtk.Label(label="")
+        speed_label.add_css_class("tts-preview-label")
+        speed_label.set_valign(Gtk.Align.CENTER)
+        self._speed_label = speed_label
+        speed_controls.append(speed_label)
+
+        faster_btn = Gtk.Button(label="+")
+        faster_btn.add_css_class("tts-control-btn")
+        faster_btn.set_tooltip_text("Speed up TTS playback")
+        faster_btn.connect("clicked", self._on_faster_clicked)
+        self._faster_btn = faster_btn
+        speed_controls.append(faster_btn)
+
+        settings_controls.append(speed_controls)
 
         voice_store = Gtk.StringList.new(["Default"])
         voice_dropdown = Gtk.DropDown.new(voice_store, None)
@@ -157,9 +203,9 @@ class TTSOverlay:
         voice_dropdown.set_hexpand(True)
         self._voice_store = voice_store
         self._voice_dropdown = voice_dropdown
-        controls.append(voice_dropdown)
+        settings_controls.append(voice_dropdown)
 
-        root.append(controls)
+        root.append(settings_controls)
         self._window.set_child(root)
 
     def _clear_auto_hide_timer(self) -> None:
@@ -196,6 +242,15 @@ class TTSOverlay:
                 "▶ Resume" if self._state == TTS_OVERLAY_PAUSED else "⏸ Pause"
             )
 
+        if self._speed_label is not None:
+            self._speed_label.set_text(f"Speed {format_tts_playback_speed(self._playback_speed)}")
+
+        if self._slower_btn is not None:
+            self._slower_btn.set_sensitive(self._playback_speed > TTS_PLAYBACK_SPEED_MIN)
+
+        if self._faster_btn is not None:
+            self._faster_btn.set_sensitive(self._playback_speed < TTS_PLAYBACK_SPEED_MAX)
+
     def _on_pause_clicked(self, _button: Gtk.Button) -> None:
         if self._state == TTS_OVERLAY_PAUSED:
             if self._on_resume is not None:
@@ -212,6 +267,23 @@ class TTSOverlay:
         if self._on_stop is not None:
             self._on_stop()
         self.hide()
+
+    def _on_slower_clicked(self, _button: Gtk.Button) -> None:
+        self._apply_speed(step_tts_playback_speed(self._playback_speed, -1), emit=True)
+
+    def _on_faster_clicked(self, _button: Gtk.Button) -> None:
+        self._apply_speed(step_tts_playback_speed(self._playback_speed, 1), emit=True)
+
+    def _apply_speed(self, speed: float, *, emit: bool = False) -> None:
+        normalized = normalize_tts_playback_speed(speed)
+        if abs(normalized - self._playback_speed) < 1e-6:
+            return
+
+        self._playback_speed = normalized
+        self._render()
+
+        if emit and self._on_speed_changed is not None:
+            self._on_speed_changed(normalized)
 
     def _on_voice_changed(self, dropdown: Gtk.DropDown, _param_spec) -> None:
         idx = int(dropdown.get_selected())
@@ -235,6 +307,9 @@ class TTSOverlay:
         self, state: str, *, preview_text: str = "", error_message: str | None = None
     ) -> None:
         GLib.idle_add(self._do_set_state, state, preview_text, error_message)
+
+    def set_speed(self, speed: float) -> None:
+        GLib.idle_add(self._do_set_speed, speed)
 
     def set_voices(self, voices: list[VoiceInfo], selected_voice_id: str | None = None) -> None:
         GLib.idle_add(self._do_set_voices, list(voices), selected_voice_id)
@@ -274,6 +349,10 @@ class TTSOverlay:
             self._schedule_auto_hide()
         else:
             self._do_show()
+        return GLib.SOURCE_REMOVE
+
+    def _do_set_speed(self, speed: float):
+        self._apply_speed(speed, emit=False)
         return GLib.SOURCE_REMOVE
 
     def _do_set_voices(self, voices: list[VoiceInfo], selected_voice_id: str | None):
