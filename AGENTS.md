@@ -151,7 +151,9 @@ This applies backend-specific tuning at runtime:
   clipboard fallback (`wl-paste --no-newline`)
 - STT and TTS are mutually exclusive at runtime (starting one stops the other)
 - TTS overlay exposes runtime pause/resume, restart, stop, voice selection,
-  and playback speed controls (0.5×–2.0×)
+  and provider-backed speed controls (0.5×–2.0×)
+- Changing speed while speaking restarts the current utterance from the beginning
+  at the new synthesis speed
 
 ### Audio gain tuning (app-side)
 
@@ -456,7 +458,8 @@ tts_playback_speed = 1.0
 
 - API key value is **env-only** (named by `tts_api_key_env`), never stored in config.
 - `tts_speak` captures selected text using primary selection first, clipboard fallback second.
-- `tts_playback_speed` controls the default runtime overlay playback speed (0.5×–2.0×).
+- `tts_playback_speed` controls the default synthesis speed (0.5×–2.0×).
+- Runtime speed changes restart the current utterance from the beginning.
 - Overlay namespace: `tts-overlay` (interactive controls, keyboard mode on-demand).
 
 ### OpenAI Backend
@@ -491,6 +494,7 @@ uv sync --extra tts-openai
 - API key value is **env-only** (named by `tts_api_key_env`), never stored in config.
 - OpenAI defaults are auto-applied when `tts_backend = "openai"` and the stock ElevenLabs defaults are still present.
 - Current ShuVoice playback path expects raw PCM output, so use `tts_output_format = "pcm_24000"`.
+- OpenAI speed uses the provider-native `speed` request field (no player-side PCM resampling).
 
 ### Local (Piper scaffold)
 
@@ -504,6 +508,7 @@ uv sync --extra tts-openai
 [tts]
 tts_backend = "local"
 tts_playback_speed = 1.0
+# Faster ShuVoice speeds map to lower Piper --length-scale values.
 tts_local_model_path = "/path/to/piper-model.onnx" # file or directory with .onnx voices
 tts_local_voice = "en_US-amy-medium"                # optional voice/model stem
 tts_local_device = 3                                 # optional output device hint

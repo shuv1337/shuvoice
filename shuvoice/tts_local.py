@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import logging
+import math
 import shutil
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
-from .tts_base import TTSBackend, TTSCapabilities, VoiceInfo
+from .tts_base import (
+    TTSBackend,
+    TTSCapabilities,
+    TTSSpeedApplyError,
+    TTSSynthesisRequest,
+    VoiceInfo,
+)
+from .tts_speed import TTS_PLAYBACK_SPEED_MAX, TTS_PLAYBACK_SPEED_MIN
 
 log = logging.getLogger(__name__)
 
@@ -21,10 +29,17 @@ class LocalTTSBackend(TTSBackend):
     ``tts_backend = "local"``.
     """
 
+    # Verified from the current Piper CLI (`piper --help` / `src/piper/__main__.py`)
+    # in OHF-Voice/piper1-gpl: synthesis-time duration control is exposed as
+    # `--length-scale`. Lower values speak faster; higher values speak slower.
+    # ShuVoice therefore maps `speed` inversely as `length_scale = 1.0 / speed`.
     capabilities = TTSCapabilities(
         supports_streaming=True,
         supports_voice_list=True,
         requires_api_key=False,
+        supports_speed_control=True,
+        speed_min=TTS_PLAYBACK_SPEED_MIN,
+        speed_max=TTS_PLAYBACK_SPEED_MAX,
     )
 
     def __init__(self, config):
@@ -100,10 +115,19 @@ class LocalTTSBackend(TTSBackend):
             raise RuntimeError(f"No .onnx model files found under local TTS path: {path}")
         return first
 
-    def synthesize_stream(self, text: str, voice_id: str, model_id: str) -> Iterator[bytes]:
-        del model_id  # Reserved for future local model families.
+    @staticmethod
+    def _length_scale_for_speed(speed: float) -> float:
+        speed_value = float(speed)
+        if not math.isfinite(speed_value) or speed_value <= 0:
+            raise TTSSpeedApplyError("Local Piper speed must be a positive finite number")
 
-        text_value = str(text).strip()
+        # Piper length-scale is inverse duration control:
+        #   faster ShuVoice speed  -> smaller length_scale
+        #   slower ShuVoice speed  -> larger length_scale
+        return round(1.0 / speed_value, 4)
+
+    def synthesize_stream(self, request: TTSSynthesisRequest) -> Iterator[bytes]:
+        text_value = str(request.text).strip()
         if not text_value:
             raise ValueError("TTS text must not be empty")
         if len(text_value) > int(self.config.tts_max_chars):
@@ -111,11 +135,27 @@ class LocalTTSBackend(TTSBackend):
                 f"Selected text is too long ({len(text_value)} chars, max {self.config.tts_max_chars})"
             )
 
-        model_file = self._resolve_model_file(voice_id)
+        model_file = self._resolve_model_file(request.voice_id)
+        length_scale = self._length_scale_for_speed(request.playback_speed)
 
-        command = ["piper", "--model", str(model_file), "--output_raw"]
+        command = [
+            "piper",
+            "--model",
+            str(model_file),
+            "--output_raw",
+            "--length-scale",
+            f"{length_scale:.4f}",
+        ]
         if self.config.tts_local_device is not None:
             log.debug("Local TTS device hint configured: %s", self.config.tts_local_device)
+
+        log.info(
+            "Local Piper TTS request: voice=%s speed=%sx length_scale=%s model=%s",
+            request.voice_id or self.config.tts_local_voice or model_file.stem,
+            round(float(request.playback_speed), 2),
+            f"{length_scale:.4f}",
+            model_file.name,
+        )
 
         timeout = max(1.0, float(self.config.tts_request_timeout_sec) * 4.0)
 

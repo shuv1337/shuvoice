@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import math
 import os
 import threading
 import time
@@ -11,16 +13,32 @@ import urllib.parse
 import urllib.request
 from collections.abc import Iterator
 
-from .tts_base import TTSBackend, TTSCapabilities, VoiceInfo
+from .tts_base import (
+    TTSBackend,
+    TTSCapabilities,
+    TTSSpeedApplyError,
+    TTSSynthesisRequest,
+    VoiceInfo,
+)
+from .tts_speed import TTS_PLAYBACK_SPEED_MAX, TTS_PLAYBACK_SPEED_MIN
+
+log = logging.getLogger(__name__)
 
 
 class ElevenLabsTTSBackend(TTSBackend):
     """Streaming ElevenLabs backend using stdlib urllib."""
 
+    # Verified from the current ElevenLabs streaming docs: the request body accepts
+    # `voice_settings.speed` per request on the streaming endpoint. The docs do not
+    # currently publish a stricter numeric range than "< 1.0 slower, > 1.0 faster",
+    # so ShuVoice keeps its shared 0.5–2.0 UI range and passes it through directly.
     capabilities = TTSCapabilities(
         supports_streaming=True,
         supports_voice_list=True,
         requires_api_key=True,
+        supports_speed_control=True,
+        speed_min=TTS_PLAYBACK_SPEED_MIN,
+        speed_max=TTS_PLAYBACK_SPEED_MAX,
     )
 
     _API_BASE = "https://api.elevenlabs.io/v1"
@@ -58,8 +76,34 @@ class ElevenLabsTTSBackend(TTSBackend):
             return f"ElevenLabs server error ({exc.code})"
         return f"ElevenLabs request failed ({exc.code})"
 
-    def synthesize_stream(self, text: str, voice_id: str, model_id: str) -> Iterator[bytes]:
-        text_value = str(text).strip()
+    @staticmethod
+    def _native_speed_for_request(request: TTSSynthesisRequest) -> float:
+        speed = float(request.playback_speed)
+        if not math.isfinite(speed) or speed <= 0:
+            raise TTSSpeedApplyError("ElevenLabs speed must be a positive finite number")
+        return round(speed, 2)
+
+    def _stream_request_payload(self, request: TTSSynthesisRequest, *, model: str) -> bytes:
+        native_speed = self._native_speed_for_request(request)
+        log.info(
+            "ElevenLabs TTS request: voice=%s model=%s speed=%sx native_speed=%sx",
+            request.voice_id,
+            model,
+            round(float(request.playback_speed), 2),
+            native_speed,
+        )
+        return json.dumps(
+            {
+                "text": str(request.text).strip(),
+                "model_id": model,
+                "voice_settings": {
+                    "speed": native_speed,
+                },
+            }
+        ).encode("utf-8")
+
+    def synthesize_stream(self, request: TTSSynthesisRequest) -> Iterator[bytes]:
+        text_value = str(request.text).strip()
         if not text_value:
             raise ValueError("TTS text must not be empty")
         if len(text_value) > int(self.config.tts_max_chars):
@@ -67,18 +111,25 @@ class ElevenLabsTTSBackend(TTSBackend):
                 f"Selected text is too long ({len(text_value)} chars, max {self.config.tts_max_chars})"
             )
 
-        voice = str(voice_id or self.config.tts_default_voice_id).strip()
-        model = str(model_id or self.config.tts_model_id).strip()
+        voice = str(request.voice_id or self.config.tts_default_voice_id).strip()
+        model = str(request.model_id or self.config.tts_model_id).strip()
         api_key = self._api_key()
 
         encoded_voice = urllib.parse.quote(voice, safe="")
         query = urllib.parse.urlencode({"output_format": self.config.tts_output_format})
         url = f"{self._API_BASE}/text-to-speech/{encoded_voice}/stream?{query}"
 
-        payload = json.dumps({"text": text_value, "model_id": model}).encode("utf-8")
-        request = urllib.request.Request(
+        http_request = urllib.request.Request(
             url=url,
-            data=payload,
+            data=self._stream_request_payload(
+                TTSSynthesisRequest(
+                    text=text_value,
+                    voice_id=voice,
+                    model_id=model,
+                    playback_speed=request.playback_speed,
+                ),
+                model=model,
+            ),
             headers={
                 "Content-Type": "application/json",
                 "Accept": "application/octet-stream",
@@ -90,7 +141,7 @@ class ElevenLabsTTSBackend(TTSBackend):
         timeout = float(self.config.tts_request_timeout_sec)
 
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with urllib.request.urlopen(http_request, timeout=timeout) as response:
                 while True:
                     chunk = response.read(4096)
                     if not chunk:

@@ -18,6 +18,8 @@ def metrics_to_human(metrics: dict[str, Any]) -> str:
     utt_avg = timings.get("utterance_duration_sec", {}).get("avg", 0.0)
     tts_speak = tts.get("speak_count", counters.get("tts_speak_count", 0))
     tts_done = tts.get("playback_completions", counters.get("tts_playback_completions", 0))
+    tts_speed_changes = tts.get("speed_change_count", counters.get("tts_speed_change_count", 0))
+    tts_speed_restarts = tts.get("speed_restart_count", counters.get("tts_speed_restart_count", 0))
     return (
         f"chunks={counters.get('chunks_processed', 0)} "
         f"starts={counters.get('recording_start_count', 0)} "
@@ -26,6 +28,8 @@ def metrics_to_human(metrics: dict[str, Any]) -> str:
         f"commits={counters.get('final_commits', 0)} "
         f"tts_speaks={tts_speak} "
         f"tts_done={tts_done} "
+        f"tts_speed_changes={tts_speed_changes} "
+        f"tts_speed_restarts={tts_speed_restarts} "
         f"queue_avg={queue_depth:.2f} "
         f"utterance_avg_sec={utt_avg:.2f}"
     )

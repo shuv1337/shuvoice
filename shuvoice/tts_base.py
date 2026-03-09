@@ -6,6 +6,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterator
 
+from .tts_speed import TTS_PLAYBACK_SPEED_MAX, TTS_PLAYBACK_SPEED_MIN
+
 if TYPE_CHECKING:
     from .config import Config
 
@@ -18,10 +20,45 @@ class VoiceInfo:
 
 
 @dataclass(frozen=True)
+class TTSSynthesisRequest:
+    """Immutable per-utterance synthesis request.
+
+    Speed is captured here so the backend receives the exact speed chosen when
+    the utterance started. Playback must not rewrite PCM timing after synthesis.
+    """
+
+    text: str
+    voice_id: str
+    model_id: str
+    playback_speed: float
+
+
+@dataclass(frozen=True)
 class TTSCapabilities:
     supports_streaming: bool = True
     supports_voice_list: bool = True
     requires_api_key: bool = False
+    supports_speed_control: bool = False
+    speed_min: float | None = None
+    speed_max: float | None = None
+
+    def speed_bounds(self) -> tuple[float, float] | None:
+        if not self.supports_speed_control:
+            return None
+
+        minimum = (
+            TTS_PLAYBACK_SPEED_MIN if self.speed_min is None else max(TTS_PLAYBACK_SPEED_MIN, self.speed_min)
+        )
+        maximum = (
+            TTS_PLAYBACK_SPEED_MAX if self.speed_max is None else min(TTS_PLAYBACK_SPEED_MAX, self.speed_max)
+        )
+        if minimum > maximum:
+            minimum, maximum = maximum, minimum
+        return (round(minimum, 2), round(maximum, 2))
+
+
+class TTSSpeedApplyError(RuntimeError):
+    """Raised when a backend cannot apply a requested synthesis speed."""
 
 
 class TTSBackend(ABC):
@@ -33,7 +70,7 @@ class TTSBackend(ABC):
         self.config = config
 
     @abstractmethod
-    def synthesize_stream(self, text: str, voice_id: str, model_id: str) -> Iterator[bytes]:
+    def synthesize_stream(self, request: TTSSynthesisRequest) -> Iterator[bytes]:
         """Yield PCM audio chunks as they become available."""
 
     @abstractmethod

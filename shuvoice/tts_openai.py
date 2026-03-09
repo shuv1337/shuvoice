@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import json
+import logging
+import math
 import os
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
 
-from .tts_base import TTSBackend, TTSCapabilities, VoiceInfo
+from .tts_base import (
+    TTSBackend,
+    TTSCapabilities,
+    TTSSpeedApplyError,
+    TTSSynthesisRequest,
+    VoiceInfo,
+)
+from .tts_speed import TTS_PLAYBACK_SPEED_MAX, TTS_PLAYBACK_SPEED_MIN
+
+log = logging.getLogger(__name__)
 
 _OPENAI_VOICES: tuple[VoiceInfo, ...] = (
     VoiceInfo(id="alloy", name="Alloy", description="Balanced neutral voice"),
@@ -26,10 +37,17 @@ _OPENAI_VOICES: tuple[VoiceInfo, ...] = (
 class OpenAITTSBackend(TTSBackend):
     """OpenAI text-to-speech backend using stdlib urllib."""
 
+    # Verified from the generated openai-python client / OpenAPI types:
+    # `speed` is a native request field with a documented provider range of
+    # 0.25–4.0. ShuVoice intentionally keeps a narrower shared 0.5–2.0 UI range,
+    # so current requests pass through directly without extra mapping.
     capabilities = TTSCapabilities(
         supports_streaming=True,
         supports_voice_list=True,
         requires_api_key=True,
+        supports_speed_control=True,
+        speed_min=TTS_PLAYBACK_SPEED_MIN,
+        speed_max=TTS_PLAYBACK_SPEED_MAX,
     )
 
     _API_BASE = "https://api.openai.com/v1"
@@ -37,6 +55,8 @@ class OpenAITTSBackend(TTSBackend):
         "pcm": "pcm",
         "pcm_24000": "pcm",
     }
+    _PROVIDER_SPEED_MIN = 0.25
+    _PROVIDER_SPEED_MAX = 4.0
 
     @staticmethod
     def dependency_errors() -> list[str]:
@@ -74,8 +94,23 @@ class OpenAITTSBackend(TTSBackend):
             return f"OpenAI server error ({exc.code})"
         return f"OpenAI request failed ({exc.code})"
 
-    def synthesize_stream(self, text: str, voice_id: str, model_id: str) -> Iterator[bytes]:
-        text_value = str(text).strip()
+    def _native_speed_for_request(self, request: TTSSynthesisRequest) -> float:
+        speed = float(request.playback_speed)
+        if not math.isfinite(speed) or speed <= 0:
+            raise TTSSpeedApplyError("OpenAI speed must be a positive finite number")
+
+        native_speed = min(self._PROVIDER_SPEED_MAX, max(self._PROVIDER_SPEED_MIN, speed))
+        native_speed = round(native_speed, 2)
+        if abs(native_speed - speed) >= 1e-6:
+            log.info(
+                "OpenAI TTS speed clamped: requested=%sx native=%sx",
+                round(speed, 2),
+                native_speed,
+            )
+        return native_speed
+
+    def synthesize_stream(self, request: TTSSynthesisRequest) -> Iterator[bytes]:
+        text_value = str(request.text).strip()
         if not text_value:
             raise ValueError("TTS text must not be empty")
         if len(text_value) > int(self.config.tts_max_chars):
@@ -83,10 +118,19 @@ class OpenAITTSBackend(TTSBackend):
                 f"Selected text is too long ({len(text_value)} chars, max {self.config.tts_max_chars})"
             )
 
-        voice = str(voice_id or self.config.tts_default_voice_id).strip()
-        model = str(model_id or self.config.tts_model_id).strip()
+        voice = str(request.voice_id or self.config.tts_default_voice_id).strip()
+        model = str(request.model_id or self.config.tts_model_id).strip()
         api_key = self._api_key()
         response_format = self._response_format()
+        native_speed = self._native_speed_for_request(request)
+
+        log.info(
+            "OpenAI TTS request: voice=%s model=%s speed=%sx native_speed=%sx",
+            voice,
+            model,
+            round(float(request.playback_speed), 2),
+            native_speed,
+        )
 
         payload = json.dumps(
             {
@@ -94,9 +138,10 @@ class OpenAITTSBackend(TTSBackend):
                 "voice": voice,
                 "input": text_value,
                 "response_format": response_format,
+                "speed": native_speed,
             }
         ).encode("utf-8")
-        request = urllib.request.Request(
+        http_request = urllib.request.Request(
             url=f"{self._API_BASE}/audio/speech",
             data=payload,
             headers={
@@ -110,7 +155,7 @@ class OpenAITTSBackend(TTSBackend):
         timeout = float(self.config.tts_request_timeout_sec)
 
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with urllib.request.urlopen(http_request, timeout=timeout) as response:
                 while True:
                     chunk = response.read(4096)
                     if not chunk:

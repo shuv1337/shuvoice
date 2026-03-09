@@ -13,7 +13,7 @@ gi.require_version("Gtk4LayerShell", "1.0")
 from gi.repository import Gdk, GLib, Gtk
 from gi.repository import Gtk4LayerShell as LayerShell
 
-from .tts_base import VoiceInfo
+from .tts_base import TTSCapabilities, VoiceInfo
 from .tts_overlay_state import (
     TTS_OVERLAY_ERROR,
     TTS_OVERLAY_IDLE,
@@ -31,6 +31,8 @@ from .tts_speed import (
 
 log = logging.getLogger(__name__)
 
+_SPEED_UNSUPPORTED_TOOLTIP = "This TTS backend does not support provider-native speed control."
+
 
 class TTSOverlay:
     """Interactive TTS overlay with transport, voice, and speed controls."""
@@ -47,6 +49,7 @@ class TTSOverlay:
         on_voice_selected: Callable[[str], None] | None = None,
         on_speed_changed: Callable[[float], None] | None = None,
         initial_speed: float | None = None,
+        speed_capabilities: TTSCapabilities | None = None,
     ):
         self._config = config
         self._on_pause = on_pause
@@ -55,6 +58,12 @@ class TTSOverlay:
         self._on_stop = on_stop
         self._on_voice_selected = on_voice_selected
         self._on_speed_changed = on_speed_changed
+
+        capabilities = speed_capabilities or TTSCapabilities()
+        bounds = capabilities.speed_bounds()
+        self._speed_supported = capabilities.supports_speed_control
+        self._speed_min = bounds[0] if bounds is not None else TTS_PLAYBACK_SPEED_MIN
+        self._speed_max = bounds[1] if bounds is not None else TTS_PLAYBACK_SPEED_MAX
 
         self._window = Gtk.Window(application=app)
         self._visible = False
@@ -65,7 +74,7 @@ class TTSOverlay:
         self._voices: list[VoiceInfo] = []
         self._voice_selected_id = str(config.tts_default_voice_id)
         default_speed = initial_speed if initial_speed is not None else config.tts_playback_speed
-        self._playback_speed = normalize_tts_playback_speed(default_speed)
+        self._playback_speed = self._clamp_speed(default_speed)
 
         self._status_label: Gtk.Label | None = None
         self._preview_label: Gtk.Label | None = None
@@ -177,7 +186,6 @@ class TTSOverlay:
 
         slower_btn = Gtk.Button(label="−")
         slower_btn.add_css_class("tts-control-btn")
-        slower_btn.set_tooltip_text("Slow down TTS playback")
         slower_btn.connect("clicked", self._on_slower_clicked)
         self._slower_btn = slower_btn
         speed_controls.append(slower_btn)
@@ -190,7 +198,6 @@ class TTSOverlay:
 
         faster_btn = Gtk.Button(label="+")
         faster_btn.add_css_class("tts-control-btn")
-        faster_btn.set_tooltip_text("Speed up TTS playback")
         faster_btn.connect("clicked", self._on_faster_clicked)
         self._faster_btn = faster_btn
         speed_controls.append(faster_btn)
@@ -222,6 +229,30 @@ class TTSOverlay:
             return
         self._auto_hide_source_id = GLib.timeout_add(delay_ms, self._do_hide)
 
+    def _clamp_speed(self, speed: float) -> float:
+        normalized = normalize_tts_playback_speed(speed)
+        return round(min(self._speed_max, max(self._speed_min, normalized)), 2)
+
+    def _set_speed_tooltips(self) -> None:
+        if self._slower_btn is None or self._faster_btn is None or self._speed_label is None:
+            return
+
+        if not self._speed_supported:
+            self._slower_btn.set_tooltip_text(_SPEED_UNSUPPORTED_TOOLTIP)
+            self._faster_btn.set_tooltip_text(_SPEED_UNSUPPORTED_TOOLTIP)
+            self._speed_label.set_tooltip_text(_SPEED_UNSUPPORTED_TOOLTIP)
+            return
+
+        self._slower_btn.set_tooltip_text(
+            "Restart current speech slower using provider-native synthesis"
+        )
+        self._faster_btn.set_tooltip_text(
+            "Restart current speech faster using provider-native synthesis"
+        )
+        self._speed_label.set_tooltip_text(
+            "Speed changes apply on the next utterance, or restart the current one from the beginning"
+        )
+
     def _render(self) -> None:
         if self._status_label is not None:
             error_message = None
@@ -243,13 +274,22 @@ class TTSOverlay:
             )
 
         if self._speed_label is not None:
-            self._speed_label.set_text(f"Speed {format_tts_playback_speed(self._playback_speed)}")
+            if self._speed_supported:
+                self._speed_label.set_text(f"Speed {format_tts_playback_speed(self._playback_speed)}")
+            else:
+                self._speed_label.set_text("Speed unavailable")
 
         if self._slower_btn is not None:
-            self._slower_btn.set_sensitive(self._playback_speed > TTS_PLAYBACK_SPEED_MIN)
+            self._slower_btn.set_sensitive(
+                self._speed_supported and self._playback_speed > self._speed_min
+            )
 
         if self._faster_btn is not None:
-            self._faster_btn.set_sensitive(self._playback_speed < TTS_PLAYBACK_SPEED_MAX)
+            self._faster_btn.set_sensitive(
+                self._speed_supported and self._playback_speed < self._speed_max
+            )
+
+        self._set_speed_tooltips()
 
     def _on_pause_clicked(self, _button: Gtk.Button) -> None:
         if self._state == TTS_OVERLAY_PAUSED:
@@ -275,7 +315,11 @@ class TTSOverlay:
         self._apply_speed(step_tts_playback_speed(self._playback_speed, 1), emit=True)
 
     def _apply_speed(self, speed: float, *, emit: bool = False) -> None:
-        normalized = normalize_tts_playback_speed(speed)
+        if not self._speed_supported:
+            self._render()
+            return
+
+        normalized = self._clamp_speed(speed)
         if abs(normalized - self._playback_speed) < 1e-6:
             return
 

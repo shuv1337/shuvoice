@@ -90,6 +90,15 @@ class MetricsCollector:
     def observe_tts_speed_change(self) -> None:
         self.increment("tts_speed_change_count")
 
+    def observe_tts_speed_restart(self) -> None:
+        self.increment("tts_speed_restart_count")
+
+    def observe_tts_speed_unsupported(self) -> None:
+        self.increment("tts_speed_unsupported_count")
+
+    def observe_tts_speed_apply_failure(self) -> None:
+        self.increment("tts_speed_apply_failure_count")
+
     def observe_tts_synth_latency(self, seconds: float) -> None:
         self.observe_timing("tts_synth_latency_sec", seconds)
 
@@ -121,6 +130,9 @@ class MetricsCollector:
                 "pause_count": counters.get("tts_pause_count", 0),
                 "selection_failures": counters.get("tts_selection_failures", 0),
                 "speed_change_count": counters.get("tts_speed_change_count", 0),
+                "speed_restart_count": counters.get("tts_speed_restart_count", 0),
+                "speed_unsupported_count": counters.get("tts_speed_unsupported_count", 0),
+                "speed_apply_failure_count": counters.get("tts_speed_apply_failure_count", 0),
                 "synth_latency_sec": timing_summary.get(
                     "tts_synth_latency_sec",
                     {"count": 0, "avg": 0.0, "max": 0.0},
@@ -147,6 +159,8 @@ class MetricsCollector:
             f"commits={counters.get('final_commits', 0)} "
             f"tts_speaks={counters.get('tts_speak_count', 0)} "
             f"tts_done={counters.get('tts_playback_completions', 0)} "
+            f"tts_speed_changes={counters.get('tts_speed_change_count', 0)} "
+            f"tts_speed_restarts={counters.get('tts_speed_restart_count', 0)} "
             f"queue_max={counters.get('queue_depth_max', 0)} "
             f"utt_avg={timings.get('utterance_duration_sec', {}).get('avg', 0.0):.2f}s"
         )

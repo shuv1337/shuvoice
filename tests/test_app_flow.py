@@ -7,6 +7,7 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
+from shuvoice.tts_base import TTSCapabilities
 from shuvoice.utterance_state import _UtteranceState
 
 pytest.importorskip("gi")
@@ -580,12 +581,25 @@ def test_tts_speak_selection_stops_recording_and_starts_player(monkeypatch):
 def test_tts_set_playback_speed_updates_player_overlay_and_metrics():
     app = SimpleNamespace(
         _tts_playback_speed=1.0,
+        config=SimpleNamespace(tts_backend="openai"),
+        _tts_last_preview_text="preview",
+        tts_backend=SimpleNamespace(
+            capabilities=TTSCapabilities(supports_speed_control=True, speed_min=0.5, speed_max=2.0)
+        ),
         tts_player=SimpleNamespace(
             set_playback_speed=Mock(return_value=1.4),
             is_active=lambda: False,
+            restart=Mock(return_value=False),
         ),
-        tts_overlay=SimpleNamespace(set_speed=Mock()),
-        metrics=SimpleNamespace(observe_tts_speed_change=Mock()),
+        tts_overlay=SimpleNamespace(set_speed=Mock(), set_state=Mock()),
+        metrics=SimpleNamespace(
+            observe_tts_speed_change=Mock(),
+            observe_tts_speed_restart=Mock(),
+            observe_tts_speed_unsupported=Mock(),
+        ),
+        _tts_speed_capabilities=lambda: TTSCapabilities(
+            supports_speed_control=True, speed_min=0.5, speed_max=2.0
+        ),
     )
 
     result = ShuVoiceApp._tts_set_playback_speed(app, 1.4)
@@ -595,6 +609,68 @@ def test_tts_set_playback_speed_updates_player_overlay_and_metrics():
     app.tts_player.set_playback_speed.assert_called_once_with(1.4)
     app.tts_overlay.set_speed.assert_called_once_with(1.4)
     app.metrics.observe_tts_speed_change.assert_called_once()
+    app.metrics.observe_tts_speed_restart.assert_not_called()
+    app.metrics.observe_tts_speed_unsupported.assert_not_called()
+
+
+def test_tts_set_playback_speed_restarts_active_utterance():
+    app = SimpleNamespace(
+        _tts_playback_speed=1.0,
+        config=SimpleNamespace(tts_backend="openai"),
+        _tts_last_preview_text="preview",
+        tts_backend=SimpleNamespace(
+            capabilities=TTSCapabilities(supports_speed_control=True, speed_min=0.5, speed_max=2.0)
+        ),
+        tts_player=SimpleNamespace(
+            set_playback_speed=Mock(return_value=1.3),
+            is_active=lambda: True,
+            restart=Mock(return_value=True),
+        ),
+        tts_overlay=SimpleNamespace(set_speed=Mock(), set_state=Mock()),
+        metrics=SimpleNamespace(
+            observe_tts_speed_change=Mock(),
+            observe_tts_speed_restart=Mock(),
+            observe_tts_speed_unsupported=Mock(),
+        ),
+        _tts_speed_capabilities=lambda: TTSCapabilities(
+            supports_speed_control=True, speed_min=0.5, speed_max=2.0
+        ),
+    )
+
+    result = ShuVoiceApp._tts_set_playback_speed(app, 1.3)
+
+    assert result == 1.3
+    app.tts_player.restart.assert_called_once_with()
+    app.tts_overlay.set_state.assert_called_once_with("synthesizing", preview_text="preview")
+    app.metrics.observe_tts_speed_restart.assert_called_once()
+
+
+def test_tts_set_playback_speed_ignores_unsupported_backend():
+    app = SimpleNamespace(
+        _tts_playback_speed=1.0,
+        config=SimpleNamespace(tts_backend="mock"),
+        tts_backend=SimpleNamespace(capabilities=TTSCapabilities(supports_speed_control=False)),
+        tts_player=SimpleNamespace(
+            set_playback_speed=Mock(return_value=1.4),
+            is_active=lambda: False,
+            restart=Mock(return_value=False),
+        ),
+        tts_overlay=SimpleNamespace(set_speed=Mock()),
+        metrics=SimpleNamespace(
+            observe_tts_speed_change=Mock(),
+            observe_tts_speed_restart=Mock(),
+            observe_tts_speed_unsupported=Mock(),
+        ),
+        _tts_speed_capabilities=lambda: TTSCapabilities(supports_speed_control=False),
+    )
+
+    result = ShuVoiceApp._tts_set_playback_speed(app, 1.4)
+
+    assert result == 1.0
+    app.tts_player.set_playback_speed.assert_not_called()
+    app.metrics.observe_tts_speed_change.assert_not_called()
+    app.metrics.observe_tts_speed_restart.assert_not_called()
+    app.metrics.observe_tts_speed_unsupported.assert_called_once()
 
 
 def test_handle_tts_command_returns_disabled_error_when_config_disabled():

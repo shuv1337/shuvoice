@@ -7,6 +7,7 @@ import urllib.error
 import pytest
 
 from shuvoice.config import Config
+from shuvoice.tts_base import TTSSynthesisRequest
 from shuvoice.tts_elevenlabs import ElevenLabsTTSBackend
 
 
@@ -49,9 +50,12 @@ def test_synthesize_stream_shapes_request(monkeypatch):
 
     chunks = list(
         backend.synthesize_stream(
-            "Hello world",
-            voice_id="zNsotODqUhvbJ5wMG7Ei",
-            model_id="eleven_flash_v2_5",
+            TTSSynthesisRequest(
+                text="Hello world",
+                voice_id="zNsotODqUhvbJ5wMG7Ei",
+                model_id="eleven_flash_v2_5",
+                playback_speed=1.4,
+            )
         )
     )
 
@@ -64,6 +68,7 @@ def test_synthesize_stream_shapes_request(monkeypatch):
     payload = json.loads(seen["body"].decode("utf-8"))
     assert payload["text"] == "Hello world"
     assert payload["model_id"] == "eleven_flash_v2_5"
+    assert payload["voice_settings"]["speed"] == 1.4
 
 
 def test_synthesize_stream_requires_env_var(monkeypatch):
@@ -73,7 +78,16 @@ def test_synthesize_stream_requires_env_var(monkeypatch):
     monkeypatch.delenv("MY_CUSTOM_KEY", raising=False)
 
     with pytest.raises(RuntimeError, match="MY_CUSTOM_KEY"):
-        list(backend.synthesize_stream("hello", voice_id="v", model_id="m"))
+        list(
+            backend.synthesize_stream(
+                TTSSynthesisRequest(
+                    text="hello",
+                    voice_id="v",
+                    model_id="m",
+                    playback_speed=1.0,
+                )
+            )
+        )
 
 
 def test_synthesize_stream_http_error_classification(monkeypatch):
@@ -93,7 +107,16 @@ def test_synthesize_stream_http_error_classification(monkeypatch):
     monkeypatch.setattr("shuvoice.tts_elevenlabs.urllib.request.urlopen", fake_urlopen)
 
     with pytest.raises(RuntimeError, match="rate limit"):
-        list(backend.synthesize_stream("hello", voice_id="v", model_id="m"))
+        list(
+            backend.synthesize_stream(
+                TTSSynthesisRequest(
+                    text="hello",
+                    voice_id="v",
+                    model_id="m",
+                    playback_speed=1.0,
+                )
+            )
+        )
 
 
 def test_list_voices_parses_payload_and_caches(monkeypatch):

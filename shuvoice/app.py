@@ -45,6 +45,7 @@ from .runtime import (
 from .selection import SelectionError, capture_selection
 from .transcript import prefer_transcript
 from .tts import create_tts_backend
+from .tts_base import TTSCapabilities
 from .tts_player import TTSPlayer
 from .tts_speed import normalize_tts_playback_speed
 from .typer import StreamingTyper
@@ -315,6 +316,7 @@ class ShuVoiceApp(Gtk.Application):
                 on_voice_selected=self._tts_select_voice,
                 on_speed_changed=self._tts_set_playback_speed,
                 initial_speed=self._tts_playback_speed,
+                speed_capabilities=self._tts_speed_capabilities(),
             )
             threading.Thread(target=self._load_tts_voices, name="tts-voices", daemon=True).start()
 
@@ -509,30 +511,65 @@ class ShuVoiceApp(Gtk.Application):
         self._tts_voice_id = selected
         log.info("TTS voice updated: voice_id=%s", selected)
 
+    def _tts_speed_capabilities(self) -> TTSCapabilities:
+        backend = getattr(self, "tts_backend", None)
+        capabilities = getattr(backend, "capabilities", None)
+        if isinstance(capabilities, TTSCapabilities):
+            return capabilities
+        return TTSCapabilities()
+
+    def _tts_speed_supported(self) -> bool:
+        return self._tts_speed_capabilities().supports_speed_control
+
     def _tts_set_playback_speed(self, speed: float) -> float:
         normalized = normalize_tts_playback_speed(speed)
         previous = getattr(self, "_tts_playback_speed", normalized)
-        self._tts_playback_speed = normalized
+        capabilities = self._tts_speed_capabilities()
+        bounds = capabilities.speed_bounds()
+        if bounds is not None:
+            normalized = min(bounds[1], max(bounds[0], normalized))
 
         tts_player = getattr(self, "tts_player", None)
+        tts_overlay = getattr(self, "tts_overlay", None)
+        metrics = getattr(self, "metrics", None)
+
+        if not capabilities.supports_speed_control:
+            if metrics is not None:
+                metrics.observe_tts_speed_unsupported()
+            if tts_overlay is not None:
+                tts_overlay.set_speed(previous)
+            log.info("TTS speed change ignored: backend=%s does not support native speed control", self.config.tts_backend)
+            return previous
+
+        self._tts_playback_speed = normalized
         if tts_player is not None:
             normalized = tts_player.set_playback_speed(normalized)
             self._tts_playback_speed = normalized
 
-        tts_overlay = getattr(self, "tts_overlay", None)
         if tts_overlay is not None:
             tts_overlay.set_speed(normalized)
 
-        if abs(normalized - previous) >= 1e-6:
-            metrics = getattr(self, "metrics", None)
-            if metrics is not None:
-                metrics.observe_tts_speed_change()
-            log.info(
-                "TTS playback speed updated: speed=%sx active=%s",
-                normalized,
-                bool(tts_player is not None and tts_player.is_active()),
-            )
+        if abs(normalized - previous) < 1e-6:
+            return normalized
 
+        if metrics is not None:
+            metrics.observe_tts_speed_change()
+
+        active = bool(tts_player is not None and tts_player.is_active())
+        restarted = False
+        if active and tts_player is not None:
+            restarted = bool(tts_player.restart())
+            if restarted and metrics is not None:
+                metrics.observe_tts_speed_restart()
+            if restarted and tts_overlay is not None:
+                tts_overlay.set_state("synthesizing", preview_text=self._tts_last_preview_text)
+
+        log.info(
+            "TTS synthesis speed updated: speed=%sx active=%s restarted=%s",
+            normalized,
+            active,
+            restarted,
+        )
         return normalized
 
     def _wait_for_stt_processing_clear(self, timeout_sec: float = 5.0) -> bool:
@@ -622,8 +659,15 @@ class ShuVoiceApp(Gtk.Application):
                 self.metrics.observe_tts_playback_completion()
         elif state == "error":
             self.metrics.observe_tts_synth_failure()
+            if info.get("speed_apply_failure"):
+                self.metrics.observe_tts_speed_apply_failure()
             error_class = str(info.get("error_class") or "unknown")
-            log.warning("TTS synth failed: error_class=%s", error_class)
+            log.warning(
+                "TTS synth failed: error_class=%s speed_apply_failure=%s request_speed=%s",
+                error_class,
+                bool(info.get("speed_apply_failure")),
+                info.get("request_playback_speed"),
+            )
 
         GLib.idle_add(self._apply_tts_overlay_state, state, dict(info))
 

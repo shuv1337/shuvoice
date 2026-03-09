@@ -245,7 +245,7 @@ class Config:
     tts_output_format: str = "pcm_24000"
     tts_max_chars: int = 5000
     tts_request_timeout_sec: float = 30.0
-    tts_playback_speed: float = TTS_PLAYBACK_SPEED_DEFAULT
+    tts_playback_speed: float = TTS_PLAYBACK_SPEED_DEFAULT  # default synthesis speed
     tts_playback_device: str | int | None = None
     tts_overlay_auto_hide_sec: float = 2.0
     tts_local_model_path: str | None = None

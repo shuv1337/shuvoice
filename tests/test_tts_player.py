@@ -4,6 +4,7 @@ import time
 
 import numpy as np
 
+from shuvoice.tts_base import TTSSynthesisRequest
 from shuvoice.tts_player import TTSPlayer
 
 
@@ -44,10 +45,10 @@ class _Backend:
         self._chunks = chunks
         self._delay_sec = delay_sec
         self._fail = fail
-        self.calls: list[tuple[str, str, str]] = []
+        self.calls: list[TTSSynthesisRequest] = []
 
-    def synthesize_stream(self, text: str, voice_id: str, model_id: str):
-        self.calls.append((text, voice_id, model_id))
+    def synthesize_stream(self, request: TTSSynthesisRequest):
+        self.calls.append(request)
         if self._fail:
             raise RuntimeError("boom")
         for chunk in self._chunks:
@@ -85,7 +86,7 @@ def test_tts_player_basic_state_flow(monkeypatch):
     assert _FakeOutputStream.instances[0].writes
 
 
-def test_tts_player_applies_playback_speed_to_output(monkeypatch):
+def test_tts_player_writes_backend_pcm_without_resampling(monkeypatch):
     _FakeOutputStream.instances.clear()
     monkeypatch.setattr("shuvoice.tts_player.sd.OutputStream", _FakeOutputStream)
 
@@ -96,8 +97,54 @@ def test_tts_player_applies_playback_speed_to_output(monkeypatch):
 
     assert _wait_until(lambda: player.state == "idle")
     written = _FakeOutputStream.instances[0].writes[0]
-    assert written.shape == (100, 1)
-    assert player.status_payload()["playback_speed"] == 2.0
+    assert written.shape == (200, 1)
+
+    status = player.status_payload()
+    assert status["playback_speed"] == 2.0
+    assert status["selected_playback_speed"] == 2.0
+    assert status["active_request_speed"] is None
+
+
+def test_tts_player_snapshots_selected_speed_into_request(monkeypatch):
+    _FakeOutputStream.instances.clear()
+    monkeypatch.setattr("shuvoice.tts_player.sd.OutputStream", _FakeOutputStream)
+
+    backend = _Backend([b"\x00\x00" * 10] * 6, delay_sec=0.02)
+    player = TTSPlayer(backend)
+
+    player.set_playback_speed(1.3)
+    player.speak("hello", "voice", "model")
+
+    assert _wait_until(lambda: player.state in {"synthesizing", "playing"})
+    status = player.status_payload()
+    assert status["playback_speed"] == 1.3
+    assert status["active_request_speed"] == 1.3
+
+    player.set_playback_speed(1.8)
+    assert player.status_payload()["playback_speed"] == 1.8
+    assert player.status_payload()["active_request_speed"] == 1.3
+
+    assert _wait_until(lambda: player.state == "idle")
+    assert backend.calls[0].playback_speed == 1.3
+
+
+def test_tts_player_restart_uses_latest_selected_speed(monkeypatch):
+    _FakeOutputStream.instances.clear()
+    monkeypatch.setattr("shuvoice.tts_player.sd.OutputStream", _FakeOutputStream)
+
+    backend = _Backend([b"\x00\x00" * 120])
+    player = TTSPlayer(backend)
+
+    assert player.restart() is False
+
+    player.set_playback_speed(1.1)
+    player.speak("hello", "voice", "model")
+    assert _wait_until(lambda: player.state == "idle")
+
+    player.set_playback_speed(1.6)
+    assert player.restart() is True
+    assert _wait_until(lambda: player.state == "idle")
+    assert [call.playback_speed for call in backend.calls] == [1.1, 1.6]
 
 
 def test_tts_player_set_playback_speed_clamps_value(monkeypatch):
@@ -169,7 +216,7 @@ def test_tts_player_interrupt_semantics(monkeypatch):
     assert interrupted is True
 
     assert _wait_until(lambda: player.state == "idle")
-    assert backend.calls[-1][0] == "second"
+    assert backend.calls[-1].text == "second"
 
 
 def test_tts_player_stop_from_active_state(monkeypatch):
@@ -198,20 +245,3 @@ def test_tts_player_error_transition(monkeypatch):
     assert _wait_until(lambda: player.state == "error")
     assert player.stop() is True
     assert player.state == "idle"
-
-
-def test_tts_player_restart_uses_last_text(monkeypatch):
-    _FakeOutputStream.instances.clear()
-    monkeypatch.setattr("shuvoice.tts_player.sd.OutputStream", _FakeOutputStream)
-
-    backend = _Backend([b"\x00\x00" * 120])
-    player = TTSPlayer(backend)
-
-    assert player.restart() is False
-
-    player.speak("hello", "voice", "model")
-    assert _wait_until(lambda: player.state == "idle")
-
-    assert player.restart() is True
-    assert _wait_until(lambda: player.state == "idle")
-    assert [call[0] for call in backend.calls] == ["hello", "hello"]

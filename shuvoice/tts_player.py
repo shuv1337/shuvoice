@@ -12,14 +12,19 @@ from typing import Any
 import numpy as np
 import sounddevice as sd
 
-from .tts_base import TTSBackend
+from .tts_base import TTSBackend, TTSSpeedApplyError, TTSSynthesisRequest
 from .tts_speed import normalize_tts_playback_speed
 
 log = logging.getLogger(__name__)
 
 
 class TTSPlayer:
-    """Thread-safe TTS synthesis + playback coordinator."""
+    """Thread-safe TTS synthesis + playback coordinator.
+
+    The player is intentionally transport-only: it snapshots the selected speed
+    into a synthesis request and plays backend PCM exactly as produced. Speed
+    changes must be applied provider-side or not at all.
+    """
 
     ACTIVE_STATES = {"synthesizing", "playing", "paused"}
 
@@ -50,9 +55,8 @@ class TTSPlayer:
         self._play_thread: threading.Thread | None = None
         self._stream: sd.OutputStream | None = None
 
-        self._last_text = ""
-        self._last_voice_id = ""
-        self._last_model_id = ""
+        self._last_request: TTSSynthesisRequest | None = None
+        self._active_request: TTSSynthesisRequest | None = None
         self._synth_started_at: float | None = None
         self._play_started_at: float | None = None
 
@@ -88,12 +92,18 @@ class TTSPlayer:
 
     def status_payload(self) -> dict[str, Any]:
         with self._lock:
+            last_request = self._last_request
+            active_request = self._active_request
             return {
                 "state": self._state,
-                "voice_id": self._last_voice_id,
-                "model_id": self._last_model_id,
-                "text_len": len(self._last_text),
+                "voice_id": last_request.voice_id if last_request else "",
+                "model_id": last_request.model_id if last_request else "",
+                "text_len": len(last_request.text) if last_request else 0,
                 "playback_speed": self._playback_speed,
+                "selected_playback_speed": self._playback_speed,
+                "active_request_speed": (
+                    active_request.playback_speed if active_request is not None else None
+                ),
             }
 
     def _transition(self, state: str, **info: Any) -> None:
@@ -121,6 +131,11 @@ class TTSPlayer:
         with self._lock:
             return generation == self._generation
 
+    def _clear_active_request(self, generation: int) -> None:
+        with self._lock:
+            if generation == self._generation:
+                self._active_request = None
+
     def speak(self, text: str, voice_id: str, model_id: str) -> bool:
         """Start speaking text. Returns True when an active session was interrupted."""
         text_value = str(text).strip()
@@ -132,12 +147,18 @@ class TTSPlayer:
             interrupted = self.stop()
 
         with self._lock:
+            request = TTSSynthesisRequest(
+                text=text_value,
+                voice_id=str(voice_id).strip(),
+                model_id=str(model_id).strip(),
+                playback_speed=self._playback_speed,
+            )
+
             self._generation += 1
             generation = self._generation
 
-            self._last_text = text_value
-            self._last_voice_id = str(voice_id).strip()
-            self._last_model_id = str(model_id).strip()
+            self._last_request = request
+            self._active_request = request
 
             self._cancel_event = threading.Event()
             self._pause_event = threading.Event()
@@ -147,29 +168,34 @@ class TTSPlayer:
 
             self._synth_thread = threading.Thread(
                 target=self._run_synthesis,
-                args=(generation, text_value, self._last_voice_id, self._last_model_id),
+                args=(generation, request),
                 name="tts-synth",
                 daemon=True,
             )
             self._play_thread = threading.Thread(
                 target=self._run_playback,
-                args=(generation,),
+                args=(generation, request),
                 name="tts-playback",
                 daemon=True,
             )
 
-        self._transition("synthesizing")
+        self._transition(
+            "synthesizing",
+            request_playback_speed=request.playback_speed,
+            voice_id=request.voice_id,
+            model_id=request.model_id,
+        )
 
         self._synth_thread.start()
         self._play_thread.start()
 
         return interrupted
 
-    def _run_synthesis(self, generation: int, text: str, voice_id: str, model_id: str) -> None:
+    def _run_synthesis(self, generation: int, request: TTSSynthesisRequest) -> None:
         first_chunk = True
 
         try:
-            for chunk in self._backend.synthesize_stream(text, voice_id, model_id):
+            for chunk in self._backend.synthesize_stream(request):
                 if not self._is_generation_current(generation) or self._cancel_event.is_set():
                     break
                 if not chunk:
@@ -181,7 +207,11 @@ class TTSPlayer:
                     latency = 0.0
                     if synth_started_at is not None:
                         latency = max(0.0, time.monotonic() - synth_started_at)
-                    self._transition("playing", synth_latency_sec=latency)
+                    self._transition(
+                        "playing",
+                        synth_latency_sec=latency,
+                        request_playback_speed=request.playback_speed,
+                    )
 
                 while not self._cancel_event.is_set():
                     try:
@@ -193,10 +223,13 @@ class TTSPlayer:
             if self._cancel_event.is_set() or not self._is_generation_current(generation):
                 pass
             else:
+                self._clear_active_request(generation)
                 self._transition(
                     "error",
                     error_class=type(exc).__name__,
                     message=str(exc),
+                    request_playback_speed=request.playback_speed,
+                    speed_apply_failure=isinstance(exc, TTSSpeedApplyError),
                 )
         finally:
             while self._is_generation_current(generation):
@@ -253,24 +286,6 @@ class TTSPlayer:
         samples = np.frombuffer(usable, dtype="<i2").reshape(-1, 1)
         return samples, next_carry
 
-    @staticmethod
-    def _adjust_samples_for_speed(samples: np.ndarray, speed: float) -> np.ndarray:
-        normalized = normalize_tts_playback_speed(speed)
-        if samples.size == 0 or abs(normalized - 1.0) < 1e-6:
-            return samples
-
-        mono = samples.reshape(-1)
-        source_len = mono.size
-        target_len = max(1, int(round(source_len / normalized)))
-        if target_len == source_len:
-            return samples
-
-        source_positions = np.arange(source_len, dtype=np.float32)
-        target_positions = np.linspace(0, source_len - 1, num=target_len, dtype=np.float32)
-        adjusted = np.interp(target_positions, source_positions, mono)
-        adjusted = np.clip(np.rint(adjusted), np.iinfo(np.int16).min, np.iinfo(np.int16).max)
-        return adjusted.astype(np.int16).reshape(-1, 1)
-
     def _write_samples_with_recovery(self, samples: np.ndarray) -> None:
         """Write PCM samples with a one-time stream recreation retry."""
         for attempt in (1, 2):
@@ -285,7 +300,7 @@ class TTSPlayer:
                 self._close_stream()
                 time.sleep(0.03)
 
-    def _run_playback(self, generation: int) -> None:
+    def _run_playback(self, generation: int, request: TTSSynthesisRequest) -> None:
         carry = b""
 
         try:
@@ -313,10 +328,6 @@ class TTSPlayer:
                 if samples.size == 0:
                     continue
 
-                samples = self._adjust_samples_for_speed(samples, self.playback_speed)
-                if samples.size == 0:
-                    continue
-
                 if self._play_started_at is None:
                     self._play_started_at = time.monotonic()
                 self._write_samples_with_recovery(samples)
@@ -329,11 +340,23 @@ class TTSPlayer:
             duration = 0.0
             if self._play_started_at is not None:
                 duration = max(0.0, time.monotonic() - self._play_started_at)
-            self._transition("idle", playback_duration_sec=duration)
+            self._clear_active_request(generation)
+            self._transition(
+                "idle",
+                playback_duration_sec=duration,
+                request_playback_speed=request.playback_speed,
+            )
         except Exception as exc:  # noqa: BLE001
             if self._cancel_event.is_set() or not self._is_generation_current(generation):
                 return
-            self._transition("error", error_class=type(exc).__name__, message=str(exc))
+            self._clear_active_request(generation)
+            self._transition(
+                "error",
+                error_class=type(exc).__name__,
+                message=str(exc),
+                request_playback_speed=request.playback_speed,
+                speed_apply_failure=False,
+            )
         finally:
             self._close_stream()
 
@@ -362,14 +385,12 @@ class TTSPlayer:
 
     def restart(self) -> bool:
         with self._lock:
-            text = self._last_text
-            voice_id = self._last_voice_id
-            model_id = self._last_model_id
+            last_request = self._last_request
 
-        if not text:
+        if last_request is None or not last_request.text:
             return False
 
-        self.speak(text, voice_id, model_id)
+        self.speak(last_request.text, last_request.voice_id, last_request.model_id)
         return True
 
     def stop(self) -> bool:
@@ -379,6 +400,7 @@ class TTSPlayer:
                 return False
             self._cancel_event.set()
             self._pause_event.clear()
+            self._active_request = None
             synth_thread = self._synth_thread
             play_thread = self._play_thread
 

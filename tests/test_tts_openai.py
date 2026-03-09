@@ -7,6 +7,7 @@ import urllib.error
 import pytest
 
 from shuvoice.config import Config
+from shuvoice.tts_base import TTSSynthesisRequest
 from shuvoice.tts_openai import OpenAITTSBackend
 
 
@@ -47,7 +48,16 @@ def test_synthesize_stream_shapes_request(monkeypatch):
 
     monkeypatch.setattr("shuvoice.tts_openai.urllib.request.urlopen", fake_urlopen)
 
-    chunks = list(backend.synthesize_stream("Hello world", voice_id="onyx", model_id="gpt-4o-mini-tts"))
+    chunks = list(
+        backend.synthesize_stream(
+            TTSSynthesisRequest(
+                text="Hello world",
+                voice_id="onyx",
+                model_id="gpt-4o-mini-tts",
+                playback_speed=1.3,
+            )
+        )
+    )
 
     assert chunks == [b"aa", b"bb"]
     assert str(seen["url"]).endswith("/audio/speech")
@@ -61,6 +71,36 @@ def test_synthesize_stream_shapes_request(monkeypatch):
     assert payload["voice"] == "onyx"
     assert payload["model"] == "gpt-4o-mini-tts"
     assert payload["response_format"] == "pcm"
+    assert payload["speed"] == 1.3
+
+
+def test_synthesize_stream_clamps_provider_native_speed(monkeypatch):
+    cfg = Config(tts_backend="openai")
+    backend = OpenAITTSBackend(cfg)
+
+    monkeypatch.setenv("OPENAI_API_KEY", "secret")
+
+    seen: dict[str, object] = {}
+
+    def fake_urlopen(request, timeout=0):
+        seen["body"] = request.data
+        return _ChunkResponse([b""])
+
+    monkeypatch.setattr("shuvoice.tts_openai.urllib.request.urlopen", fake_urlopen)
+
+    list(
+        backend.synthesize_stream(
+            TTSSynthesisRequest(
+                text="Hello world",
+                voice_id="onyx",
+                model_id="gpt-4o-mini-tts",
+                playback_speed=9.0,
+            )
+        )
+    )
+
+    payload = json.loads(seen["body"].decode("utf-8"))
+    assert payload["speed"] == 4.0
 
 
 def test_synthesize_stream_requires_env_var(monkeypatch):
@@ -70,7 +110,16 @@ def test_synthesize_stream_requires_env_var(monkeypatch):
     monkeypatch.delenv("MY_CUSTOM_KEY", raising=False)
 
     with pytest.raises(RuntimeError, match="MY_CUSTOM_KEY"):
-        list(backend.synthesize_stream("hello", voice_id="alloy", model_id="gpt-4o-mini-tts"))
+        list(
+            backend.synthesize_stream(
+                TTSSynthesisRequest(
+                    text="hello",
+                    voice_id="alloy",
+                    model_id="gpt-4o-mini-tts",
+                    playback_speed=1.0,
+                )
+            )
+        )
 
 
 def test_synthesize_stream_http_error_classification(monkeypatch):
@@ -90,7 +139,16 @@ def test_synthesize_stream_http_error_classification(monkeypatch):
     monkeypatch.setattr("shuvoice.tts_openai.urllib.request.urlopen", fake_urlopen)
 
     with pytest.raises(RuntimeError, match="rate limit"):
-        list(backend.synthesize_stream("hello", voice_id="alloy", model_id="gpt-4o-mini-tts"))
+        list(
+            backend.synthesize_stream(
+                TTSSynthesisRequest(
+                    text="hello",
+                    voice_id="alloy",
+                    model_id="gpt-4o-mini-tts",
+                    playback_speed=1.0,
+                )
+            )
+        )
 
 
 def test_list_voices_returns_known_openai_voices():
@@ -119,4 +177,13 @@ def test_openai_backend_rejects_non_pcm_output_format(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "secret")
 
     with pytest.raises(ValueError, match="raw PCM output"):
-        list(backend.synthesize_stream("hello", voice_id="alloy", model_id="gpt-4o-mini-tts"))
+        list(
+            backend.synthesize_stream(
+                TTSSynthesisRequest(
+                    text="hello",
+                    voice_id="alloy",
+                    model_id="gpt-4o-mini-tts",
+                    playback_speed=1.0,
+                )
+            )
+        )
