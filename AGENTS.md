@@ -523,7 +523,7 @@ If no sidecar is present, ShuVoice falls back to `22050 Hz` for compatibility.
 
 ```bash
 uv sync --extra tts-local
-# requires `piper` binary in PATH
+# requires `piper` or `piper-tts` binary in PATH (Arch AUR: piper-tts)
 ```
 
 ---
