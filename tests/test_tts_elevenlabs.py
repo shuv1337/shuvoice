@@ -30,6 +30,13 @@ class _ChunkResponse:
         return value
 
 
+def test_sample_rate_hz_uses_pcm_output_format():
+    cfg = Config(tts_enabled=True, tts_output_format="pcm_24000")
+    backend = ElevenLabsTTSBackend(cfg)
+
+    assert backend.sample_rate_hz() == 24000
+
+
 def test_synthesize_stream_shapes_request(monkeypatch):
     cfg = Config(tts_enabled=True)
     backend = ElevenLabsTTSBackend(cfg)

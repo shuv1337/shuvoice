@@ -40,6 +40,13 @@ def test_waybar_format_shows_openai_tts_voice_name():
     assert "Voice:    Onyx" in lines
 
 
+def test_waybar_format_shows_local_auto_voice_label():
+    cfg = Config(tts_backend="local")
+    lines = config_info_lines(cfg)
+    assert "TTS:      Local Piper" in lines
+    assert "Voice:    Auto" in lines
+
+
 def test_waybar_format_shows_tts_disabled_state():
     cfg = Config(tts_enabled=False)
     lines = config_info_lines(cfg)

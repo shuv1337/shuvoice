@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import DEFAULT_ELEVENLABS_TTS_VOICE_ID, Config
+from ..tts_base import DEFAULT_LOCAL_TTS_VOICE_ID
 from ..tts_speed import format_tts_playback_speed
 
 _OPENAI_VOICE_LABELS = {
@@ -37,8 +38,8 @@ def _tts_voice_label(backend: str, voice_id: str) -> str:
         return _OPENAI_VOICE_LABELS.get(voice.lower(), voice or "default")
     if backend_id == "elevenlabs" and voice == DEFAULT_ELEVENLABS_TTS_VOICE_ID:
         return "Default"
-    if backend_id == "local" and not voice:
-        return "configured local default"
+    if backend_id == "local" and (not voice or voice.lower() == DEFAULT_LOCAL_TTS_VOICE_ID):
+        return "Auto"
     return voice or "default"
 
 

@@ -293,6 +293,10 @@ def finish_setup(
     sherpa_enable_parakeet_streaming: bool = False,
     sherpa_provider: str | None = None,
     typing_final_injection_mode: str = "auto",
+    tts_backend: str = "elevenlabs",
+    tts_default_voice_id: str | None = None,
+    tts_local_model_path: str | None = None,
+    tts_local_voice: str | None = None,
     auto_download_model: bool = True,
 ) -> tuple[str, str, str, str]:
     """Persist wizard selections and optionally configure keybind/model download."""
@@ -303,6 +307,10 @@ def finish_setup(
         sherpa_enable_parakeet_streaming=sherpa_enable_parakeet_streaming,
         sherpa_provider=sherpa_provider,
         typing_final_injection_mode=typing_final_injection_mode,
+        tts_backend=tts_backend,
+        tts_default_voice_id=tts_default_voice_id,
+        tts_local_model_path=tts_local_model_path,
+        tts_local_voice=tts_local_voice,
     )
 
     keybind_status = "not_attempted"
@@ -327,6 +335,10 @@ def finish_setup(
             sherpa_enable_parakeet_streaming=False,
             sherpa_provider=sherpa_provider,
             typing_final_injection_mode=typing_final_injection_mode,
+            tts_backend=tts_backend,
+            tts_default_voice_id=tts_default_voice_id,
+            tts_local_model_path=tts_local_model_path,
+            tts_local_voice=tts_local_voice,
         )
         model_message = (
             f"{model_message} Applied fallback profile: Streaming (Zipformer default model)."

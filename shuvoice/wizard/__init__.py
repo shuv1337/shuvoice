@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from pathlib import Path
 
 import gi
 
@@ -80,7 +81,9 @@ class WelcomeWizard(Gtk.Application):
         self._tts_voice_by_backend = {
             "elevenlabs": default_tts_voice_for_backend("elevenlabs"),
             "openai": default_tts_voice_for_backend("openai"),
+            "local": default_tts_voice_for_backend("local"),
         }
+        self._tts_local_model_path = ""
         self._tts_voice_id = self._tts_voice_by_backend[self._tts_backend]
         self._keybind = DEFAULT_KEYBIND_ID
         self._finish_in_progress = False
@@ -451,7 +454,8 @@ class WelcomeWizard(Gtk.Application):
         tts_help = Gtk.Label(
             label=(
                 "Choose which backend handles the TTS keybind and set the default voice.\n"
-                "For ElevenLabs, paste a voice ID. For OpenAI, use built-in names like onyx or nova."
+                "For ElevenLabs, paste a voice ID. For OpenAI, use built-in names like onyx or nova.\n"
+                "For Local Piper, point ShuVoice at a .onnx model file or a directory of .onnx voices."
             )
         )
         tts_help.add_css_class("wizard-desc")
@@ -484,6 +488,18 @@ class WelcomeWizard(Gtk.Application):
             page.append(backend_desc_label)
             self._set_accessible_description(backend_radio, backend_desc)
 
+        self._tts_local_model_path_entry = Gtk.Entry()
+        self._tts_local_model_path_entry.add_css_class("wizard-entry")
+        self._tts_local_model_path_entry.set_halign(Gtk.Align.FILL)
+        self._tts_local_model_path_entry.set_hexpand(True)
+        self._tts_local_model_path_entry.connect("changed", self._on_tts_local_model_path_changed)
+        page.append(self._tts_local_model_path_entry)
+
+        self._tts_local_model_path_help = Gtk.Label(label="")
+        self._tts_local_model_path_help.add_css_class("wizard-radio-desc")
+        self._tts_local_model_path_help.set_halign(Gtk.Align.START)
+        page.append(self._tts_local_model_path_help)
+
         self._tts_voice_entry = Gtk.Entry()
         self._tts_voice_entry.add_css_class("wizard-entry")
         self._tts_voice_entry.set_halign(Gtk.Align.FILL)
@@ -495,6 +511,13 @@ class WelcomeWizard(Gtk.Application):
         self._tts_voice_help.add_css_class("wizard-radio-desc")
         self._tts_voice_help.set_halign(Gtk.Align.START)
         page.append(self._tts_voice_help)
+
+        self._tts_config_error_label = Gtk.Label(label="")
+        self._tts_config_error_label.add_css_class("wizard-radio-desc")
+        self._tts_config_error_label.set_halign(Gtk.Align.START)
+        self._tts_config_error_label.set_visible(False)
+        page.append(self._tts_config_error_label)
+
         self._sync_tts_voice_controls()
 
         nav = self._make_nav_row(
@@ -722,7 +745,12 @@ class WelcomeWizard(Gtk.Application):
         self._tts_voice_id = voice_by_backend.get(
             backend_id, default_tts_voice_for_backend(backend_id)
         )
+        self._set_tts_config_error(None)
         self._sync_tts_voice_controls()
+
+    def _on_tts_local_model_path_changed(self, entry: Gtk.Entry):
+        self._tts_local_model_path = entry.get_text().strip()
+        self._set_tts_config_error(None)
 
     def _on_tts_voice_changed(self, entry: Gtk.Entry):
         value = entry.get_text().strip()
@@ -733,11 +761,83 @@ class WelcomeWizard(Gtk.Application):
         voice_by_backend = getattr(self, "_tts_voice_by_backend", None)
         if isinstance(voice_by_backend, dict):
             voice_by_backend[backend_id] = value
+        self._set_tts_config_error(None)
+
+    def _set_tts_config_error(self, message: str | None) -> None:
+        label = getattr(self, "_tts_config_error_label", None)
+        if label is None:
+            return
+        label.set_text(message or "")
+        label.set_visible(bool(message))
+
+    def _local_tts_resolved_voice(self) -> str:
+        requested = str(getattr(self, "_tts_voice_id", "")).strip().lower()
+        path_text = str(getattr(self, "_tts_local_model_path", "")).strip()
+        if not path_text:
+            return default_tts_voice_for_backend("local")
+
+        path = Path(path_text).expanduser()
+        if path.is_file():
+            return path.stem
+
+        if requested and requested != default_tts_voice_for_backend("local"):
+            return str(getattr(self, "_tts_voice_id", "")).strip()
+
+        first = next(iter(sorted(path.glob("*.onnx"))), None) if path.is_dir() else None
+        if first is not None:
+            return first.stem
+        return default_tts_voice_for_backend("local")
+
+    def _validate_tts_selection_for_finish(self) -> bool:
+        self._set_tts_config_error(None)
+        backend_id = str(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)).strip().lower()
+        if backend_id != "local":
+            return True
+
+        path_text = str(getattr(self, "_tts_local_model_path", "")).strip()
+        if not path_text:
+            self._set_tts_config_error(
+                "Local Piper requires a .onnx model path or a directory of .onnx voices."
+            )
+            return False
+
+        path = Path(path_text).expanduser()
+        if not path.exists():
+            self._set_tts_config_error(f"Local Piper path does not exist: {path}")
+            return False
+
+        if path.is_file():
+            if path.suffix.lower() != ".onnx":
+                self._set_tts_config_error(f"Local Piper model path must end in .onnx: {path}")
+                return False
+            return True
+
+        if not path.is_dir():
+            self._set_tts_config_error(f"Local Piper path must be a file or directory: {path}")
+            return False
+
+        model_files = sorted(path.glob("*.onnx"))
+        if not model_files:
+            self._set_tts_config_error(f"No .onnx model files found under: {path}")
+            return False
+
+        requested_voice = str(getattr(self, "_tts_voice_id", "")).strip()
+        if requested_voice and requested_voice.lower() != default_tts_voice_for_backend("local"):
+            requested_file = path / f"{requested_voice}.onnx"
+            if not requested_file.is_file():
+                self._set_tts_config_error(
+                    f"Local Piper voice '{requested_voice}' was not found in: {path}"
+                )
+                return False
+
+        return True
 
     def _sync_tts_voice_controls(self):
         entry = getattr(self, "_tts_voice_entry", None)
         help_label = getattr(self, "_tts_voice_help", None)
-        if entry is None or help_label is None:
+        path_entry = getattr(self, "_tts_local_model_path_entry", None)
+        path_help = getattr(self, "_tts_local_model_path_help", None)
+        if entry is None or help_label is None or path_entry is None or path_help is None:
             return
 
         backend_id = str(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)).strip().lower()
@@ -751,8 +851,26 @@ class WelcomeWizard(Gtk.Application):
         self._tts_voice_id = current_voice
         voice_by_backend[backend_id] = current_voice
 
-        if entry.get_text() != current_voice:
-            entry.set_text(current_voice)
+        display_voice = "" if backend_id == "local" and current_voice == default_voice else current_voice
+        if entry.get_text() != display_voice:
+            entry.set_text(display_voice)
+
+        is_local = backend_id == "local"
+        path_entry.set_visible(is_local)
+        path_help.set_visible(is_local)
+        if is_local:
+            current_path = str(getattr(self, "_tts_local_model_path", "")).strip()
+            if path_entry.get_text() != current_path:
+                path_entry.set_text(current_path)
+            path_entry.set_placeholder_text("/path/to/piper-model.onnx")
+            path_help.set_text(
+                "Point to a Piper .onnx model file or a directory containing .onnx voices."
+            )
+            entry.set_placeholder_text("Optional voice/model stem, e.g. en_US-amy-medium")
+            help_label.set_text(
+                "Leave the voice blank to use the first discovered .onnx model automatically."
+            )
+            return
 
         if backend_id == "openai":
             entry.set_placeholder_text("onyx")
@@ -861,9 +979,18 @@ class WelcomeWizard(Gtk.Application):
             getattr(self, "_sherpa_enable_parakeet_streaming", False)
         )
         tts_backend = str(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)).strip().lower()
+        if not self._validate_tts_selection_for_finish():
+            self._finish_in_progress = False
+            return
+
         tts_voice_id = str(
             getattr(self, "_tts_voice_id", default_tts_voice_for_backend(tts_backend))
         ).strip() or default_tts_voice_for_backend(tts_backend)
+        tts_local_model_path = str(getattr(self, "_tts_local_model_path", "")).strip() or None
+        tts_local_voice = None
+        if tts_backend == "local":
+            tts_voice_id = self._local_tts_resolved_voice()
+            tts_local_voice = tts_voice_id
 
         write_kwargs: dict[str, object] = {
             "overwrite_existing": getattr(self, "_force_reconfigure", False),
@@ -875,6 +1002,8 @@ class WelcomeWizard(Gtk.Application):
             ),
             "tts_backend": tts_backend,
             "tts_default_voice_id": tts_voice_id,
+            "tts_local_model_path": tts_local_model_path,
+            "tts_local_voice": tts_local_voice,
         }
         if self._asr_backend == "sherpa":
             write_kwargs["sherpa_enable_parakeet_streaming"] = sherpa_enable_parakeet_streaming
@@ -1053,6 +1182,17 @@ class WelcomeWizard(Gtk.Application):
     ):
         if model_status == "incompatible_streaming" and self._asr_backend == "sherpa":
             try:
+                resolved_tts_backend = getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)
+                resolved_tts_voice = getattr(
+                    self,
+                    "_tts_voice_id",
+                    default_tts_voice_for_backend(resolved_tts_backend),
+                )
+                resolved_local_voice = None
+                if str(resolved_tts_backend).strip().lower() == "local":
+                    resolved_tts_voice = self._local_tts_resolved_voice()
+                    resolved_local_voice = resolved_tts_voice
+
                 write_config(
                     "sherpa",
                     overwrite_existing=True,
@@ -1064,14 +1204,10 @@ class WelcomeWizard(Gtk.Application):
                         "_typing_final_injection_mode",
                         DEFAULT_FINAL_INJECTION_MODE,
                     ),
-                    tts_backend=getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND),
-                    tts_default_voice_id=getattr(
-                        self,
-                        "_tts_voice_id",
-                        default_tts_voice_for_backend(
-                            getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)
-                        ),
-                    ),
+                    tts_backend=resolved_tts_backend,
+                    tts_default_voice_id=resolved_tts_voice,
+                    tts_local_model_path=getattr(self, "_tts_local_model_path", None),
+                    tts_local_voice=resolved_local_voice,
                 )
             except Exception:  # noqa: BLE001
                 log.exception("Wizard fallback to Zipformer streaming profile failed")
@@ -1102,17 +1238,22 @@ class WelcomeWizard(Gtk.Application):
             self._apply_download_progress(1.0, "Model setup finished")
 
         write_marker()
+        resolved_tts_backend = getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)
+        resolved_tts_voice = getattr(
+            self,
+            "_tts_voice_id",
+            default_tts_voice_for_backend(resolved_tts_backend),
+        )
+        if str(resolved_tts_backend).strip().lower() == "local":
+            resolved_tts_voice = self._local_tts_resolved_voice()
+
         log.info(
             "Wizard setup ready: asr_backend=%s sherpa_model=%s sherpa_provider=%s tts_backend=%s tts_voice=%s keybind=%s final_injection=%s keybind_setup=%s model_setup=%s",
             self._asr_backend,
             sherpa_model_name,
             getattr(self, "_sherpa_provider", "cpu"),
-            getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND),
-            getattr(
-                self,
-                "_tts_voice_id",
-                default_tts_voice_for_backend(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)),
-            ),
+            resolved_tts_backend,
+            resolved_tts_voice,
             self._keybind,
             getattr(self, "_typing_final_injection_mode", DEFAULT_FINAL_INJECTION_MODE),
             keybind_status,
@@ -1207,6 +1348,15 @@ class WelcomeWizard(Gtk.Application):
         """Refresh the summary label text based on current selections."""
         if not hasattr(self, "_summary_label") or self._summary_label is None:
             return
+        tts_backend = getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)
+        tts_voice_id = getattr(
+            self,
+            "_tts_voice_id",
+            default_tts_voice_for_backend(tts_backend),
+        )
+        if str(tts_backend).strip().lower() == "local":
+            tts_voice_id = self._local_tts_resolved_voice()
+
         self._summary_label.set_text(
             summary_text(
                 self._asr_backend,
@@ -1222,14 +1372,9 @@ class WelcomeWizard(Gtk.Application):
                     "_typing_final_injection_mode",
                     DEFAULT_FINAL_INJECTION_MODE,
                 ),
-                tts_backend=getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND),
-                tts_default_voice_id=getattr(
-                    self,
-                    "_tts_voice_id",
-                    default_tts_voice_for_backend(
-                        getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)
-                    ),
-                ),
+                tts_backend=tts_backend,
+                tts_default_voice_id=tts_voice_id,
+                tts_local_model_path=getattr(self, "_tts_local_model_path", ""),
             )
         )
 
@@ -1276,6 +1421,8 @@ class WelcomeWizard(Gtk.Application):
 
             def _go_next(_btn, page=next_page):
                 if page == "done":
+                    if not self._validate_tts_selection_for_finish():
+                        return
                     self._update_summary()
                     self._set_launch_button_visible(False)
                     self._set_cancel_download_visible(False)

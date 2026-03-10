@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from .tts_base import DEFAULT_LOCAL_TTS_MODEL_ID, DEFAULT_LOCAL_TTS_VOICE_ID
 from .tts_speed import TTS_PLAYBACK_SPEED_DEFAULT, validate_tts_playback_speed
 
 log = logging.getLogger(__name__)
@@ -415,6 +416,14 @@ class Config:
         if self.tts_backend not in {"elevenlabs", "openai", "local"}:
             raise ValueError("tts_backend must be one of: elevenlabs, openai, local")
 
+        if self.tts_local_model_path is not None:
+            local_model_path = str(self.tts_local_model_path).strip()
+            self.tts_local_model_path = local_model_path or None
+
+        if self.tts_local_voice is not None:
+            local_voice = str(self.tts_local_voice).strip()
+            self.tts_local_voice = local_voice or None
+
         if self.tts_backend == "openai":
             if str(self.tts_default_voice_id).strip() == DEFAULT_ELEVENLABS_TTS_VOICE_ID:
                 self.tts_default_voice_id = DEFAULT_OPENAI_TTS_VOICE_ID
@@ -422,6 +431,22 @@ class Config:
                 self.tts_model_id = DEFAULT_OPENAI_TTS_MODEL_ID
             if str(self.tts_api_key_env).strip() == DEFAULT_ELEVENLABS_TTS_API_KEY_ENV:
                 self.tts_api_key_env = DEFAULT_OPENAI_TTS_API_KEY_ENV
+        elif self.tts_backend == "local":
+            current_voice_id = str(self.tts_default_voice_id).strip()
+            if current_voice_id in {
+                "",
+                DEFAULT_ELEVENLABS_TTS_VOICE_ID,
+                DEFAULT_OPENAI_TTS_VOICE_ID,
+            }:
+                self.tts_default_voice_id = self.tts_local_voice or DEFAULT_LOCAL_TTS_VOICE_ID
+
+            current_model_id = str(self.tts_model_id).strip()
+            if current_model_id in {
+                "",
+                DEFAULT_ELEVENLABS_TTS_MODEL_ID,
+                DEFAULT_OPENAI_TTS_MODEL_ID,
+            }:
+                self.tts_model_id = DEFAULT_LOCAL_TTS_MODEL_ID
 
         self.tts_default_voice_id = str(self.tts_default_voice_id).strip()
         if not self.tts_default_voice_id:

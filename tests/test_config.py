@@ -295,6 +295,19 @@ def test_openai_tts_backend_normalizes_backend_specific_defaults():
     assert cfg.tts_api_key_env == "OPENAI_API_KEY"
 
 
+def test_local_tts_backend_normalizes_defaults_for_manual_config():
+    cfg = Config(tts_backend="local")
+
+    assert cfg.tts_default_voice_id == "default"
+    assert cfg.tts_model_id == "piper"
+
+
+def test_local_tts_backend_prefers_explicit_local_voice():
+    cfg = Config(tts_backend="local", tts_local_voice="amy")
+
+    assert cfg.tts_default_voice_id == "amy"
+
+
 def test_tts_validation():
     with pytest.raises(ValueError, match="tts_enabled"):
         Config(tts_enabled="yes")

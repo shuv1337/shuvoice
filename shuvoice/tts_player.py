@@ -33,13 +33,16 @@ class TTSPlayer:
         backend: TTSBackend,
         *,
         output_device: str | int | None = None,
+        sample_rate: int | None = None,
         output_format: str = "pcm_24000",
         playback_speed: float = 1.0,
         on_state_change: Callable[[str, dict[str, Any]], None] | None = None,
     ):
         self._backend = backend
         self._output_device = output_device
-        self._sample_rate = self._parse_sample_rate(output_format)
+        self._sample_rate = int(sample_rate) if sample_rate is not None else int(
+            getattr(backend, "sample_rate_hz", lambda: self._parse_sample_rate(output_format))()
+        )
         self._on_state_change = on_state_change
 
         self._lock = threading.RLock()

@@ -109,6 +109,7 @@ class ShuVoiceApp(Gtk.Application):
                 self.tts_player = TTSPlayer(
                     self.tts_backend,
                     output_device=config.tts_playback_device,
+                    sample_rate=self.tts_backend.sample_rate_hz(),
                     output_format=config.tts_output_format,
                     playback_speed=self._tts_playback_speed,
                     on_state_change=self._on_tts_player_state_change,

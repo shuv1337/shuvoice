@@ -171,7 +171,7 @@ The wizard will:
 1. **Select your ASR backend** — Sherpa-ONNX, NeMo, or Moonshine
 2. **Choose a Sherpa profile** (if applicable) — Streaming (Zipformer) or Instant (Parakeet)
 3. **Pick your push-to-talk key** — Right Ctrl, Insert, F9, Super+V, or custom
-4. **Choose your TTS provider + default voice** — ElevenLabs or OpenAI
+4. **Choose your TTS provider + default voice** — ElevenLabs, OpenAI, or Local Piper
 5. **Download model files** — with progress indicator and cancel support
 6. **Auto-configure Hyprland keybinds** — adds `bind`/`bindr` lines if the key isn't already used
 
@@ -505,6 +505,11 @@ tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"   # ElevenLabs default
 # tts_default_voice_id = "onyx"
 # tts_model_id = "gpt-4o-mini-tts"
 # tts_api_key_env = "OPENAI_API_KEY"
+# Local Piper defaults are auto-applied when tts_backend = "local":
+# tts_default_voice_id = "default"              # use first discovered local .onnx model
+# tts_model_id = "piper"
+# tts_local_model_path = "/path/to/piper-models"
+# tts_local_voice = "en_US-amy-medium"          # optional explicit model stem
 tts_model_id = "eleven_flash_v2_5"
 tts_api_key_env = "ELEVENLABS_API_KEY"          # env var name (not the key itself)
 tts_playback_speed = 1.0                         # default synthesis speed (0.5x to 2.0x)
@@ -519,6 +524,11 @@ ELEVENLABS_API_KEY=sk-your-key-here
 # OpenAI
 OPENAI_API_KEY=sk-your-key-here
 ```
+
+For Local Piper, set `tts_local_model_path` to a `.onnx` file or a directory of `.onnx` voices.
+If you point at a directory and leave `tts_local_voice` unset, ShuVoice uses the first discovered
+model automatically. Piper sidecar files (`.onnx.json`) are also used to detect the correct
+playback sample rate.
 
 ### Example Configs
 

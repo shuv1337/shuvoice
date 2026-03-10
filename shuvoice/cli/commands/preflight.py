@@ -27,6 +27,7 @@ def _filter_tts_api_key_dependency_errors(errors: list[str]) -> list[str]:
 def run_preflight(config: Config) -> bool:
     """Check runtime prerequisites and print a human-readable report."""
     checks: list[tuple[str, bool, str]] = []
+    tts_backend_instance = None
 
     def add_check(name: str, fn: Callable[[], str]) -> None:
         try:
@@ -34,6 +35,13 @@ def run_preflight(config: Config) -> bool:
             checks.append((name, True, detail))
         except Exception as exc:  # noqa: BLE001
             checks.append((name, False, str(exc)))
+
+    def get_tts_backend_instance():
+        nonlocal tts_backend_instance
+        if tts_backend_instance is None:
+            backend_cls = get_tts_backend_class(config.tts_backend)
+            tts_backend_instance = backend_cls(config)
+        return tts_backend_instance
 
     def check_python() -> str:
         major, minor = sys.version_info[:2]
@@ -87,9 +95,10 @@ def run_preflight(config: Config) -> bool:
 
         import sounddevice as sd
 
-        # PCM output is currently 24k for the supported raw-PCM TTS backends.
-        sd.check_output_settings(device=config.tts_playback_device, samplerate=24000)
-        return str(config.tts_playback_device)
+        backend = get_tts_backend_instance()
+        sample_rate = int(backend.sample_rate_hz())
+        sd.check_output_settings(device=config.tts_playback_device, samplerate=sample_rate)
+        return f"{config.tts_playback_device} @ {sample_rate}Hz"
 
     def check_tts_api_key() -> str:
         if not config.tts_enabled:
@@ -122,7 +131,14 @@ def run_preflight(config: Config) -> bool:
             errors = _filter_tts_api_key_dependency_errors(errors)
         if errors:
             raise RuntimeError("; ".join(errors))
-        return f"{config.tts_backend} deps OK"
+
+        backend = get_tts_backend_instance()
+        detail = f"{config.tts_backend} deps OK"
+        if config.tts_backend == "local":
+            detail += (
+                f" ({len(backend.list_voices())} voices, sample_rate={int(backend.sample_rate_hz())}Hz)"
+            )
+        return detail
 
     def check_asr_stack() -> str:
         backend_cls = get_backend_class(config.asr_backend)
@@ -179,9 +195,9 @@ def run_preflight(config: Config) -> bool:
     add_check("Import sounddevice", check_import("sounddevice"))
     add_check("Import gi", check_import("gi"))
     add_check("Audio input device", check_audio_device)
-    add_check("Audio output device (TTS)", check_tts_output_device)
     add_check("ASR dependencies", check_asr_stack)
     add_check("TTS dependencies", check_tts_backend_stack)
+    add_check("Audio output device (TTS)", check_tts_output_device)
     add_check("TTS API key", check_tts_api_key)
     add_check("wtype binary", check_binary("wtype"))
     add_check("wl-copy binary", check_binary("wl-copy"))

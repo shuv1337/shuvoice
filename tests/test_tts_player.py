@@ -11,7 +11,8 @@ from shuvoice.tts_player import TTSPlayer
 class _FakeOutputStream:
     instances: list["_FakeOutputStream"] = []
 
-    def __init__(self, **_kwargs):
+    def __init__(self, **kwargs):
+        self.kwargs = dict(kwargs)
         self.active = False
         self.writes: list[np.ndarray] = []
         self.stopped = 0
@@ -41,11 +42,22 @@ class _FakeOutputStream:
 
 
 class _Backend:
-    def __init__(self, chunks: list[bytes], *, delay_sec: float = 0.0, fail: bool = False):
+    def __init__(
+        self,
+        chunks: list[bytes],
+        *,
+        delay_sec: float = 0.0,
+        fail: bool = False,
+        sample_rate: int = 24000,
+    ):
         self._chunks = chunks
         self._delay_sec = delay_sec
         self._fail = fail
+        self._sample_rate = sample_rate
         self.calls: list[TTSSynthesisRequest] = []
+
+    def sample_rate_hz(self) -> int:
+        return self._sample_rate
 
     def synthesize_stream(self, request: TTSSynthesisRequest):
         self.calls.append(request)
@@ -84,6 +96,19 @@ def test_tts_player_basic_state_flow(monkeypatch):
     assert events[-1] == "idle"
     assert _FakeOutputStream.instances
     assert _FakeOutputStream.instances[0].writes
+
+
+def test_tts_player_uses_backend_sample_rate(monkeypatch):
+    _FakeOutputStream.instances.clear()
+    monkeypatch.setattr("shuvoice.tts_player.sd.OutputStream", _FakeOutputStream)
+
+    backend = _Backend([b"\x00\x00" * 20], sample_rate=22050)
+    player = TTSPlayer(backend)
+
+    player.speak("hello", "voice", "model")
+
+    assert _wait_until(lambda: player.state == "idle")
+    assert _FakeOutputStream.instances[0].kwargs["samplerate"] == 22050
 
 
 def test_tts_player_writes_backend_pcm_without_resampling(monkeypatch):

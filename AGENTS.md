@@ -22,7 +22,7 @@
 - [TTS Backends](#tts-backends)
   - [ElevenLabs](#elevenlabs-backend)
   - [OpenAI](#openai-backend)
-  - [Local (Piper scaffold)](#local-piper-scaffold)
+  - [Local (Piper)](#local-piper)
 - [Model Locations](#model-locations)
 - [Build Artifacts](#build-artifacts)
 - [System Prerequisites](#system-prerequisites)
@@ -496,9 +496,9 @@ uv sync --extra tts-openai
 - Current ShuVoice playback path expects raw PCM output, so use `tts_output_format = "pcm_24000"`.
 - OpenAI speed uses the provider-native `speed` request field (no player-side PCM resampling).
 
-### Local (Piper scaffold)
+### Local (Piper)
 
-**Status**: ⚠️ Scaffold / experimental  
+**Status**: ⚠️ Experimental  
 **Backend key**: `tts_backend = "local"`  
 **Module**: `shuvoice/tts_local.py`
 
@@ -507,12 +507,17 @@ uv sync --extra tts-openai
 ```toml
 [tts]
 tts_backend = "local"
+tts_default_voice_id = "default"                    # first discovered local .onnx model
+# If you set tts_local_voice, Config normalizes tts_default_voice_id to that value.
 tts_playback_speed = 1.0
 # Faster ShuVoice speeds map to lower Piper --length-scale values.
 tts_local_model_path = "/path/to/piper-model.onnx" # file or directory with .onnx voices
-tts_local_voice = "en_US-amy-medium"                # optional voice/model stem
+tts_local_voice = "en_US-amy-medium"                # optional explicit voice/model stem
 tts_local_device = 3                                 # optional output device hint
 ```
+
+Piper `.onnx.json` sidecar files are used to detect the correct playback sample rate.
+If no sidecar is present, ShuVoice falls back to `22050 Hz` for compatibility.
 
 #### Dependencies
 

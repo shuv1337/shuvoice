@@ -86,6 +86,36 @@ def test_local_backend_length_scale_mapping_is_inverse():
     assert LocalTTSBackend._length_scale_for_speed(0.5) == 2.0
 
 
+def test_local_backend_sample_rate_uses_sidecar_metadata(tmp_path: Path):
+    model_file = tmp_path / "amy.onnx"
+    model_file.write_bytes(b"model")
+    (tmp_path / "amy.onnx.json").write_text('{"audio": {"sample_rate": 24000}}')
+
+    cfg = Config(tts_backend="local", tts_local_model_path=str(model_file))
+    backend = LocalTTSBackend(cfg)
+
+    assert backend.sample_rate_hz() == 24000
+
+
+def test_local_backend_default_voice_resolves_first_model_in_directory(tmp_path: Path):
+    (tmp_path / "alpha.onnx").write_bytes(b"model")
+    (tmp_path / "beta.onnx").write_bytes(b"model")
+    (tmp_path / "alpha.onnx.json").write_text('{"audio": {"sample_rate": 22050}}')
+
+    cfg = Config(tts_backend="local", tts_local_model_path=str(tmp_path))
+    backend = LocalTTSBackend(cfg)
+
+    assert backend.sample_rate_hz() == 22050
+    assert backend.list_voices()[0].id == "alpha"
+
+
+def test_local_backend_requires_model_path():
+    cfg = Config(tts_backend="local")
+
+    with pytest.raises(RuntimeError, match="tts_local_model_path"):
+        LocalTTSBackend(cfg)
+
+
 def test_local_backend_reports_stderr_failures(monkeypatch, tmp_path: Path):
     model_file = tmp_path / "amy.onnx"
     model_file.write_bytes(b"model")

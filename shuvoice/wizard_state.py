@@ -22,6 +22,7 @@ from .config import (
 )
 from .config_io import load_raw, write_atomic
 from .config_migrations import migrate_to_latest
+from .tts_base import DEFAULT_LOCAL_TTS_VOICE_ID
 
 log = logging.getLogger(__name__)
 
@@ -130,6 +131,11 @@ TTS_BACKENDS = [
         "OpenAI",
         "Cloud TTS with built-in voice names like onyx, nova, and shimmer.",
     ),
+    (
+        "local",
+        "Local Piper",
+        "Use a local Piper .onnx model file or a directory of Piper voices already on disk.",
+    ),
 ]
 
 
@@ -137,6 +143,8 @@ def default_tts_voice_for_backend(backend: str) -> str:
     backend_id = str(backend).strip().lower()
     if backend_id == "openai":
         return DEFAULT_OPENAI_TTS_VOICE_ID
+    if backend_id == "local":
+        return DEFAULT_LOCAL_TTS_VOICE_ID
     return DEFAULT_ELEVENLABS_TTS_VOICE_ID
 
 
@@ -155,6 +163,8 @@ def tts_voice_label(backend: str, voice_id: str) -> str:
         return _OPENAI_TTS_VOICE_LABELS.get(value.lower(), value)
     if backend_id == "elevenlabs" and value == DEFAULT_ELEVENLABS_TTS_VOICE_ID:
         return f"Default ({value})"
+    if backend_id == "local" and value.lower() == DEFAULT_LOCAL_TTS_VOICE_ID:
+        return "Auto (first discovered model)"
     return value
 
 
@@ -637,6 +647,8 @@ def write_config(
     typing_final_injection_mode: str = DEFAULT_FINAL_INJECTION_MODE,
     tts_backend: str = DEFAULT_TTS_BACKEND,
     tts_default_voice_id: str | None = None,
+    tts_local_model_path: str | None = None,
+    tts_local_voice: str | None = None,
 ):
     """Write wizard selections to config.toml.
 
@@ -664,6 +676,8 @@ def write_config(
 
     TTS provider + default voice are persisted to ``[tts]`` so the wizard can
     configure which backend handles ``tts_speak`` and which voice it should use.
+    For the local Piper backend, wizard can also persist ``tts_local_model_path``
+    and an optional ``tts_local_voice`` / resolved default model stem.
 
     Writes use the config I/O durability path (atomic write + backup).
 
@@ -687,6 +701,9 @@ def write_config(
     ).strip()
     if not tts_voice_value:
         raise ValueError("tts_default_voice_id must not be empty")
+
+    local_model_path_value = str(tts_local_model_path or "").strip() or None
+    local_voice_value = str(tts_local_voice or "").strip() or None
 
     if asr_backend == "sherpa":
         explicit_provider = None
@@ -776,6 +793,19 @@ def write_config(
 
     tts_table["tts_backend"] = tts_backend_value
     tts_table["tts_default_voice_id"] = tts_voice_value
+    if tts_backend_value == "local":
+        if local_model_path_value is not None:
+            tts_table["tts_local_model_path"] = local_model_path_value
+        else:
+            tts_table.pop("tts_local_model_path", None)
+
+        if local_voice_value is not None:
+            tts_table["tts_local_voice"] = local_voice_value
+        else:
+            tts_table.pop("tts_local_voice", None)
+    else:
+        tts_table.pop("tts_local_model_path", None)
+        tts_table.pop("tts_local_voice", None)
 
     migrated["config_version"] = CURRENT_CONFIG_VERSION
 
@@ -797,6 +827,7 @@ def format_summary(
     typing_final_injection_mode: str = DEFAULT_FINAL_INJECTION_MODE,
     tts_backend: str = DEFAULT_TTS_BACKEND,
     tts_default_voice_id: str | None = None,
+    tts_local_model_path: str | None = None,
 ) -> str:
     """Build a human-readable summary of wizard selections."""
     asr_name = next(
@@ -827,6 +858,10 @@ def format_summary(
         f"TTS voice:        {tts_voice_label(tts_backend_value, tts_voice_value)}",
         f"Push-to-talk:     {keybind_label}",
     ]
+
+    if tts_backend_value == "local":
+        local_model_path_value = str(tts_local_model_path or "").strip()
+        lines.insert(4, f"TTS model path:   {local_model_path_value or 'Not configured'}")
 
     if asr_backend == "sherpa":
         chosen_model = (sherpa_model_name or DEFAULT_SHERPA_MODEL_NAME).strip()

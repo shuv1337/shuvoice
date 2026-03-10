@@ -95,6 +95,8 @@ def test_keybind_page_includes_tts_controls():
     assert hasattr(wizard, "_tts_backend_radios")
     assert "elevenlabs" in wizard._tts_backend_radios
     assert "openai" in wizard._tts_backend_radios
+    assert "local" in wizard._tts_backend_radios
+    assert hasattr(wizard, "_tts_local_model_path_entry")
     assert hasattr(wizard, "_tts_voice_entry")
     assert wizard._tts_voice_entry.get_text() == "zNsotODqUhvbJ5wMG7Ei"
 
@@ -114,6 +116,18 @@ def test_tts_backend_toggle_updates_voice_entry():
 
     assert wizard._tts_backend == "openai"
     assert wizard._tts_voice_entry.get_text() == "onyx"
+
+
+def test_tts_backend_toggle_shows_local_path_controls():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard()
+    wizard._build_keybind_page()
+    wizard._tts_backend_radios["local"].set_active(True)
+
+    assert wizard._tts_backend == "local"
+    assert wizard._tts_local_model_path_entry.get_visible() is True
+    assert wizard._tts_voice_entry.get_text() == ""
 
 
 def test_model_status_text_maps_incompatible_streaming_state():
@@ -166,6 +180,8 @@ def test_on_finish_writes_config_releases_window_and_quits():
         typing_final_injection_mode="auto",
         tts_backend="elevenlabs",
         tts_default_voice_id="zNsotODqUhvbJ5wMG7Ei",
+        tts_local_model_path=None,
+        tts_local_voice=None,
     )
     maybe_download.assert_called_once_with(
         "moonshine",
@@ -210,6 +226,42 @@ def test_on_finish_passes_parakeet_streaming_profile_to_write_config():
         typing_final_injection_mode="auto",
         tts_backend="openai",
         tts_default_voice_id="onyx",
+        tts_local_model_path=None,
+        tts_local_voice=None,
+    )
+
+
+def test_on_finish_passes_local_tts_settings_to_write_config():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard.__new__(WelcomeWizard)
+    wizard._asr_backend = "moonshine"
+    wizard._keybind = "f9"
+    wizard._tts_backend = "local"
+    wizard._tts_voice_id = "default"
+    wizard._tts_local_model_path = "/tmp/piper-models"
+    wizard.completed = False
+    wizard._release_input_and_destroy_window = MagicMock()
+    wizard.quit = MagicMock()
+
+    with (
+        patch.object(WelcomeWizard, "_validate_tts_selection_for_finish", return_value=True),
+        patch.object(WelcomeWizard, "_local_tts_resolved_voice", return_value="amy"),
+        patch("shuvoice.wizard.write_config") as write_config,
+        patch("shuvoice.wizard.maybe_download_model", return_value=("skipped", "noop")),
+        patch("shuvoice.wizard.write_marker"),
+    ):
+        WelcomeWizard._on_finish(wizard, None)
+
+    write_config.assert_called_once_with(
+        "moonshine",
+        overwrite_existing=False,
+        sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
+        typing_final_injection_mode="auto",
+        tts_backend="local",
+        tts_default_voice_id="amy",
+        tts_local_model_path="/tmp/piper-models",
+        tts_local_voice="amy",
     )
 
 
@@ -287,6 +339,8 @@ def test_complete_finish_applies_zipformer_fallback_for_incompatible_parakeet_st
         typing_final_injection_mode="auto",
         tts_backend="elevenlabs",
         tts_default_voice_id="zNsotODqUhvbJ5wMG7Ei",
+        tts_local_model_path=None,
+        tts_local_voice=None,
     )
     write_marker.assert_called_once()
     assert wizard._sherpa_model_name == "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"

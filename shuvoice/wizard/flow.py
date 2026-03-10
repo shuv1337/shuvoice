@@ -16,6 +16,7 @@ def summary_text(
     typing_final_injection_mode: str = "auto",
     tts_backend: str = "elevenlabs",
     tts_default_voice_id: str | None = None,
+    tts_local_model_path: str | None = None,
 ) -> str:
     return format_summary(
         asr_backend,
@@ -27,4 +28,5 @@ def summary_text(
         typing_final_injection_mode=typing_final_injection_mode,
         tts_backend=tts_backend,
         tts_default_voice_id=tts_default_voice_id,
+        tts_local_model_path=tts_local_model_path,
     )

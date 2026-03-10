@@ -235,6 +235,27 @@ def test_write_config_persists_tts_provider_and_voice(tmp_path):
     assert 'tts_default_voice_id = "nova"' in content
 
 
+def test_write_config_persists_local_tts_settings(tmp_path):
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        write_config(
+            "nemo",
+            tts_backend="local",
+            tts_default_voice_id="amy",
+            tts_local_model_path="/models/piper",
+            tts_local_voice="amy",
+        )
+
+    content = (tmp_path / "config.toml").read_text()
+    assert 'tts_backend = "local"' in content
+    assert 'tts_default_voice_id = "amy"' in content
+    assert 'tts_local_model_path = "/models/piper"' in content
+    assert 'tts_local_voice = "amy"' in content
+
+
 def test_write_config_does_not_overwrite_existing(tmp_path):
     """write_config preserves an existing config.toml."""
     config_file = tmp_path / "config.toml"
@@ -326,6 +347,18 @@ def test_format_summary_shows_selected_tts_provider_and_voice():
     result = format_summary("nemo", tts_backend="openai", tts_default_voice_id="nova")
     assert "TTS provider:     OpenAI" in result
     assert "TTS voice:        Nova" in result
+
+
+def test_format_summary_shows_local_tts_path_and_voice():
+    result = format_summary(
+        "nemo",
+        tts_backend="local",
+        tts_default_voice_id="amy",
+        tts_local_model_path="/models/piper",
+    )
+    assert "TTS provider:     Local Piper" in result
+    assert "TTS model path:   /models/piper" in result
+    assert "TTS voice:        amy" in result
 
 
 def test_format_summary_sherpa_default_model_shows_streaming_mode():

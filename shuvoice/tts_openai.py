@@ -74,6 +74,14 @@ class OpenAITTSBackend(TTSBackend):
             raise RuntimeError(f"Missing OpenAI API key environment variable: {env_name}")
         return key
 
+    def sample_rate_hz(self) -> int:
+        output_format = str(self.config.tts_output_format).strip().lower()
+        if output_format.startswith("pcm_"):
+            maybe_rate = output_format.split("_", 1)[1]
+            if maybe_rate.isdigit() and int(maybe_rate) > 0:
+                return int(maybe_rate)
+        return 24000
+
     def _response_format(self) -> str:
         output_format = str(self.config.tts_output_format).strip().lower()
         response_format = self._OUTPUT_FORMAT_ALIASES.get(output_format)

@@ -12,6 +12,11 @@ if TYPE_CHECKING:
     from .config import Config
 
 
+DEFAULT_LOCAL_TTS_VOICE_ID = "default"
+DEFAULT_LOCAL_TTS_MODEL_ID = "piper"
+LOCAL_TTS_AUTO_VOICE_IDS = frozenset({"default", "auto"})
+
+
 @dataclass(frozen=True)
 class VoiceInfo:
     id: str
@@ -47,10 +52,14 @@ class TTSCapabilities:
             return None
 
         minimum = (
-            TTS_PLAYBACK_SPEED_MIN if self.speed_min is None else max(TTS_PLAYBACK_SPEED_MIN, self.speed_min)
+            TTS_PLAYBACK_SPEED_MIN
+            if self.speed_min is None
+            else max(TTS_PLAYBACK_SPEED_MIN, self.speed_min)
         )
         maximum = (
-            TTS_PLAYBACK_SPEED_MAX if self.speed_max is None else min(TTS_PLAYBACK_SPEED_MAX, self.speed_max)
+            TTS_PLAYBACK_SPEED_MAX
+            if self.speed_max is None
+            else min(TTS_PLAYBACK_SPEED_MAX, self.speed_max)
         )
         if minimum > maximum:
             minimum, maximum = maximum, minimum
@@ -68,6 +77,10 @@ class TTSBackend(ABC):
 
     def __init__(self, config: Config):
         self.config = config
+
+    @abstractmethod
+    def sample_rate_hz(self) -> int:
+        """Return the PCM sample rate emitted by :meth:`synthesize_stream`."""
 
     @abstractmethod
     def synthesize_stream(self, request: TTSSynthesisRequest) -> Iterator[bytes]:

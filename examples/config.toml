@@ -102,7 +102,10 @@ bottom_margin = 60
 # Optional output device name/index for TTS playback
 # tts_playback_device = 3
 # tts_overlay_auto_hide_sec = 2.0
-# Local backend scaffold (tts_backend = "local")
+# Local Piper backend (tts_backend = "local")
+# Default local voice auto-resolves to the first discovered .onnx model unless you set one explicitly.
+# tts_default_voice_id = "default"
+# tts_model_id = "piper"
 # tts_local_model_path = "/path/to/piper-model.onnx"
 # tts_local_voice = "en_US-amy-medium"
 # tts_local_device = 3
