@@ -25,6 +25,19 @@ log = logging.getLogger(__name__)
 
 _DEFAULT_PIPER_SAMPLE_RATE_HZ = 22050
 
+# Piper binary names in order of preference.
+# The AUR `piper-tts` package installs as `piper-tts`; upstream installs as
+# `piper`.  We accept whichever is available.
+_PIPER_BINARY_NAMES = ("piper", "piper-tts")
+
+
+def _find_piper_binary() -> str | None:
+    """Return the first available Piper binary name, or ``None``."""
+    for name in _PIPER_BINARY_NAMES:
+        if shutil.which(name) is not None:
+            return name
+    return None
+
 
 class LocalTTSBackend(TTSBackend):
     """Local TTS backend using the Piper CLI."""
@@ -44,6 +57,12 @@ class LocalTTSBackend(TTSBackend):
 
     def __init__(self, config):
         super().__init__(config)
+        self._piper_binary = _find_piper_binary()
+        if self._piper_binary is None:
+            raise RuntimeError(
+                "Missing piper binary for local TTS backend. "
+                "Install Piper (piper or piper-tts) and set [tts].tts_local_model_path."
+            )
         self._model_path = self._validate_model_path(config.tts_local_model_path)
         self._voice_cache = self._discover_voices()
         if not self._voice_cache:
@@ -54,10 +73,10 @@ class LocalTTSBackend(TTSBackend):
     @staticmethod
     def dependency_errors() -> list[str]:
         errors: list[str] = []
-        if shutil.which("piper") is None:
+        if _find_piper_binary() is None:
             errors.append(
                 "Missing piper binary for local TTS backend. "
-                "Install Piper and set [tts].tts_local_model_path."
+                "Install Piper (piper or piper-tts) and set [tts].tts_local_model_path."
             )
         return errors
 
@@ -203,7 +222,7 @@ class LocalTTSBackend(TTSBackend):
         length_scale = self._length_scale_for_speed(request.playback_speed)
 
         command = [
-            "piper",
+            self._piper_binary,
             "--model",
             str(model_file),
             "--output_raw",
@@ -252,13 +271,17 @@ class LocalTTSBackend(TTSBackend):
                     break
                 yield chunk
 
-            _stdout, stderr = proc.communicate(timeout=timeout)
+            # stdin is already closed; use wait() + stderr.read() instead of
+            # communicate() which would try to flush the closed stdin handle.
+            proc.stdout.close()
+            stderr_bytes = proc.stderr.read() if proc.stderr else b""
+            proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             proc.kill()
             raise RuntimeError("Local TTS synthesis timed out") from exc
 
         if proc.returncode not in (0, None):
-            stderr_text = stderr.decode("utf-8", errors="replace").strip()
+            stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
             if stderr_text:
                 raise RuntimeError(f"Local TTS synthesis failed: {stderr_text}")
             raise RuntimeError(f"Local TTS synthesis failed with exit code {proc.returncode}")

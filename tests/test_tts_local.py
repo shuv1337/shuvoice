@@ -19,10 +19,14 @@ class _FakePopen:
         self._returncode = returncode
         self.returncode = returncode
         self._stderr = stderr
+        self.stderr = io.BytesIO(stderr)
         self.killed = False
 
     def communicate(self, timeout=None):
         return (b"", self._stderr)
+
+    def wait(self, timeout=None):
+        return self._returncode
 
     def kill(self):
         self.killed = True
@@ -32,6 +36,9 @@ class _ChunkReader:
     def __init__(self, chunks: list[bytes]):
         self._chunks = list(chunks)
         self._index = 0
+
+    def close(self):
+        pass
 
     def read(self, _size: int = -1) -> bytes:
         if self._index >= len(self._chunks):
@@ -70,8 +77,8 @@ def test_local_backend_shapes_piper_command_with_length_scale(monkeypatch, tmp_p
     )
 
     assert chunks == [b"aa", b"bb"]
-    assert seen["command"] == [
-        "piper",
+    assert seen["command"][0] in ("piper", "piper-tts")
+    assert seen["command"][1:] == [
         "--model",
         str(model_file),
         "--output_raw",
@@ -150,10 +157,10 @@ def test_local_backend_timeout_kills_process(monkeypatch, tmp_path: Path):
 
     proc = _FakePopen(["piper"])
 
-    def fake_communicate(timeout=None):
+    def fake_wait(timeout=None):
         raise subprocess.TimeoutExpired(cmd=proc.command, timeout=timeout or 0)
 
-    proc.communicate = fake_communicate
+    proc.wait = fake_wait
 
     def fake_popen(command, stdin=None, stdout=None, stderr=None):
         proc.command = list(command)
