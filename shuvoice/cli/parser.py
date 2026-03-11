@@ -247,6 +247,27 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip final preflight checks",
     )
+    setup_parser.add_argument(
+        "--tts-local-voice",
+        default=None,
+        help=(
+            "Curated Local Piper voice to download when tts_backend=local "
+            "(for example: en_US-amy-medium)"
+        ),
+    )
+    setup_parser.add_argument(
+        "--tts-local-model-dir",
+        default=None,
+        help=(
+            "Directory to store managed Local Piper voices when tts_backend=local "
+            "(default: ~/.local/share/shuvoice/models/piper)"
+        ),
+    )
+    setup_parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Disable interactive prompts and use recommended defaults where possible",
+    )
 
     subparsers.add_parser("wizard", help="Launch the setup wizard")
 

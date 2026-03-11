@@ -86,11 +86,21 @@ def test_cli_main_dispatches_setup(monkeypatch):
     called: dict[str, bool] = {}
 
     def fake_setup(
-        _cfg: Config, *, install_missing: bool, skip_model_download: bool, skip_preflight: bool
+        _cfg: Config,
+        *,
+        install_missing: bool,
+        skip_model_download: bool,
+        skip_preflight: bool,
+        tts_local_voice: str | None,
+        tts_local_model_dir: str | None,
+        non_interactive: bool,
     ) -> int:
         called["install_missing"] = install_missing
         called["skip_model_download"] = skip_model_download
         called["skip_preflight"] = skip_preflight
+        called["tts_local_voice"] = tts_local_voice
+        called["tts_local_model_dir"] = tts_local_model_dir
+        called["non_interactive"] = non_interactive
         return 0
 
     monkeypatch.setattr("shuvoice.cli.run_setup", fake_setup)
@@ -100,6 +110,9 @@ def test_cli_main_dispatches_setup(monkeypatch):
         "install_missing": False,
         "skip_model_download": True,
         "skip_preflight": False,
+        "tts_local_voice": None,
+        "tts_local_model_dir": None,
+        "non_interactive": False,
     }
 
 

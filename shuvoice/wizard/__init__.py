@@ -25,6 +25,7 @@ gi.require_version("Gtk4LayerShell", "1.0")
 from gi.repository import GLib, Gtk
 from gi.repository import Gtk4LayerShell as LayerShell
 
+from ..piper_setup import curated_piper_voices, managed_piper_model_dir, recommended_piper_voice
 from ..wizard_state import (
     ASR_BACKENDS,
     KEYBIND_PRESETS,
@@ -37,7 +38,7 @@ from ..wizard_state import (
     TTS_BACKENDS,
     default_tts_voice_for_backend,
 )
-from .actions import maybe_download_model, needs_wizard, write_config, write_marker
+from .actions import maybe_download_model, maybe_setup_local_tts, needs_wizard, write_config, write_marker
 from .flow import summary_text
 from .hyprland import (
     KeybindSetupStatus,
@@ -51,6 +52,17 @@ log = logging.getLogger(__name__)
 
 # Wizard UX default: stable Parakeet instant profile.
 DEFAULT_WIZARD_SHERPA_MODEL_NAME = PARAKEET_TDT_V3_INT8_MODEL_NAME
+
+
+def _display_managed_piper_model_path() -> str:
+    path = managed_piper_model_dir().expanduser().resolve()
+    home = Path.home().resolve()
+    try:
+        relative = path.relative_to(home)
+    except ValueError:
+        return str(path)
+    return f"~/{relative.as_posix()}"
+
 
 # Re-export for __main__.py and backward compatibility.
 __all__ = [
@@ -84,6 +96,8 @@ class WelcomeWizard(Gtk.Application):
             "local": default_tts_voice_for_backend("local"),
         }
         self._tts_local_model_path = ""
+        self._tts_local_setup_mode = "automatic"
+        self._tts_local_auto_voice_id = recommended_piper_voice().id
         self._tts_voice_id = self._tts_voice_by_backend[self._tts_backend]
         self._keybind = DEFAULT_KEYBIND_ID
         self._finish_in_progress = False
@@ -488,6 +502,97 @@ class WelcomeWizard(Gtk.Application):
             page.append(backend_desc_label)
             self._set_accessible_description(backend_radio, backend_desc)
 
+        self._tts_local_setup_mode_title = Gtk.Label(label="Local Piper setup")
+        self._tts_local_setup_mode_title.add_css_class("wizard-subtitle")
+        self._tts_local_setup_mode_title.set_halign(Gtk.Align.START)
+        self._tts_local_setup_mode_title.set_margin_top(8)
+        page.append(self._tts_local_setup_mode_title)
+
+        self._tts_local_setup_mode_help = Gtk.Label(
+            label=(
+                "Choose automatic setup to install Piper and download a curated voice, "
+                "or use an existing local model path."
+            )
+        )
+        self._tts_local_setup_mode_help.add_css_class("wizard-desc")
+        self._tts_local_setup_mode_help.set_halign(Gtk.Align.START)
+        self._tts_local_setup_mode_help.set_justify(Gtk.Justification.LEFT)
+        page.append(self._tts_local_setup_mode_help)
+
+        self._tts_local_auto_mode_radio = Gtk.CheckButton(
+            label="Automatic setup (install Piper + download curated voice)"
+        )
+        self._tts_local_auto_mode_radio.add_css_class("wizard-radio")
+        self._tts_local_auto_mode_radio.connect(
+            "toggled",
+            self._on_tts_local_setup_mode_toggled,
+            "automatic",
+        )
+        page.append(self._tts_local_auto_mode_radio)
+
+        self._tts_local_auto_mode_desc = Gtk.Label(
+            label="Recommended. Uses ~/.local/share/shuvoice/models/piper and validates the selected voice."
+        )
+        self._tts_local_auto_mode_desc.add_css_class("wizard-radio-desc")
+        self._tts_local_auto_mode_desc.set_halign(Gtk.Align.START)
+        page.append(self._tts_local_auto_mode_desc)
+
+        self._tts_local_manual_mode_radio = Gtk.CheckButton(
+            label="Use an existing local model path"
+        )
+        self._tts_local_manual_mode_radio.add_css_class("wizard-radio")
+        self._tts_local_manual_mode_radio.set_group(self._tts_local_auto_mode_radio)
+        self._tts_local_manual_mode_radio.connect(
+            "toggled",
+            self._on_tts_local_setup_mode_toggled,
+            "manual",
+        )
+        page.append(self._tts_local_manual_mode_radio)
+
+        self._tts_local_manual_mode_desc = Gtk.Label(
+            label="Advanced/manual mode. Point ShuVoice at a Piper .onnx file or a directory of .onnx voices already on disk."
+        )
+        self._tts_local_manual_mode_desc.add_css_class("wizard-radio-desc")
+        self._tts_local_manual_mode_desc.set_halign(Gtk.Align.START)
+        page.append(self._tts_local_manual_mode_desc)
+
+        self._tts_local_auto_voice_title = Gtk.Label(label="Curated voice")
+        self._tts_local_auto_voice_title.add_css_class("wizard-subtitle")
+        self._tts_local_auto_voice_title.set_halign(Gtk.Align.START)
+        self._tts_local_auto_voice_title.set_margin_top(8)
+        page.append(self._tts_local_auto_voice_title)
+
+        self._tts_local_auto_voice_help = Gtk.Label(
+            label="Pick one voice to download into the managed Local Piper directory."
+        )
+        self._tts_local_auto_voice_help.add_css_class("wizard-desc")
+        self._tts_local_auto_voice_help.set_halign(Gtk.Align.START)
+        self._tts_local_auto_voice_help.set_justify(Gtk.Justification.LEFT)
+        page.append(self._tts_local_auto_voice_help)
+
+        self._tts_local_auto_voice_radios: dict[str, Gtk.CheckButton] = {}
+        self._tts_local_auto_voice_descs: list[Gtk.Label] = []
+        local_voice_group: Gtk.CheckButton | None = None
+        for option in curated_piper_voices():
+            voice_radio = Gtk.CheckButton(label=option.label)
+            voice_radio.add_css_class("wizard-radio")
+            if local_voice_group is None:
+                local_voice_group = voice_radio
+            else:
+                voice_radio.set_group(local_voice_group)
+            if option.id == getattr(self, "_tts_local_auto_voice_id", recommended_piper_voice().id):
+                voice_radio.set_active(True)
+            voice_radio.connect("toggled", self._on_tts_local_auto_voice_toggled, option.id)
+            page.append(voice_radio)
+            self._tts_local_auto_voice_radios[option.id] = voice_radio
+
+            voice_desc = Gtk.Label(label=option.description)
+            voice_desc.add_css_class("wizard-radio-desc")
+            voice_desc.set_halign(Gtk.Align.START)
+            page.append(voice_desc)
+            self._tts_local_auto_voice_descs.append(voice_desc)
+            self._set_accessible_description(voice_radio, option.description)
+
         self._tts_local_model_path_entry = Gtk.Entry()
         self._tts_local_model_path_entry.add_css_class("wizard-entry")
         self._tts_local_model_path_entry.set_halign(Gtk.Align.FILL)
@@ -748,6 +853,19 @@ class WelcomeWizard(Gtk.Application):
         self._set_tts_config_error(None)
         self._sync_tts_voice_controls()
 
+    def _on_tts_local_setup_mode_toggled(self, button: Gtk.CheckButton, mode: str):
+        if not button.get_active():
+            return
+        self._tts_local_setup_mode = mode
+        self._set_tts_config_error(None)
+        self._sync_tts_voice_controls()
+
+    def _on_tts_local_auto_voice_toggled(self, button: Gtk.CheckButton, voice_id: str):
+        if not button.get_active():
+            return
+        self._tts_local_auto_voice_id = voice_id
+        self._set_tts_config_error(None)
+
     def _on_tts_local_model_path_changed(self, entry: Gtk.Entry):
         self._tts_local_model_path = entry.get_text().strip()
         self._set_tts_config_error(None)
@@ -770,7 +888,24 @@ class WelcomeWizard(Gtk.Application):
         label.set_text(message or "")
         label.set_visible(bool(message))
 
+    def _local_tts_auto_mode_enabled(self) -> bool:
+        return (
+            str(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)).strip().lower() == "local"
+            and str(getattr(self, "_tts_local_setup_mode", "automatic")).strip().lower()
+            == "automatic"
+        )
+
+    def _effective_tts_local_model_path(self) -> str:
+        if self._local_tts_auto_mode_enabled():
+            return _display_managed_piper_model_path()
+        return str(getattr(self, "_tts_local_model_path", "")).strip()
+
     def _local_tts_resolved_voice(self) -> str:
+        if self._local_tts_auto_mode_enabled():
+            return str(
+                getattr(self, "_tts_local_auto_voice_id", recommended_piper_voice().id)
+            ).strip() or recommended_piper_voice().id
+
         requested = str(getattr(self, "_tts_voice_id", "")).strip().lower()
         path_text = str(getattr(self, "_tts_local_model_path", "")).strip()
         if not path_text:
@@ -792,6 +927,15 @@ class WelcomeWizard(Gtk.Application):
         self._set_tts_config_error(None)
         backend_id = str(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)).strip().lower()
         if backend_id != "local":
+            return True
+
+        if self._local_tts_auto_mode_enabled():
+            selected_voice = str(
+                getattr(self, "_tts_local_auto_voice_id", recommended_piper_voice().id)
+            ).strip()
+            if not selected_voice:
+                self._set_tts_config_error("Select a curated Local Piper voice for automatic setup.")
+                return False
             return True
 
         path_text = str(getattr(self, "_tts_local_model_path", "")).strip()
@@ -851,13 +995,67 @@ class WelcomeWizard(Gtk.Application):
         self._tts_voice_id = current_voice
         voice_by_backend[backend_id] = current_voice
 
+        is_local = backend_id == "local"
+        auto_mode = self._local_tts_auto_mode_enabled()
+
+        setup_mode_widgets = (
+            getattr(self, "_tts_local_setup_mode_title", None),
+            getattr(self, "_tts_local_setup_mode_help", None),
+            getattr(self, "_tts_local_auto_mode_radio", None),
+            getattr(self, "_tts_local_auto_mode_desc", None),
+            getattr(self, "_tts_local_manual_mode_radio", None),
+            getattr(self, "_tts_local_manual_mode_desc", None),
+        )
+        for widget in setup_mode_widgets:
+            if widget is not None:
+                widget.set_visible(is_local)
+        for widget in (
+            getattr(self, "_tts_local_auto_voice_title", None),
+            getattr(self, "_tts_local_auto_voice_help", None),
+        ):
+            if widget is not None:
+                widget.set_visible(is_local and auto_mode)
+
+        if getattr(self, "_tts_local_auto_mode_radio", None) is not None:
+            if str(getattr(self, "_tts_local_setup_mode", "automatic")).strip().lower() == "manual":
+                self._tts_local_manual_mode_radio.set_active(True)
+            else:
+                self._tts_local_auto_mode_radio.set_active(True)
+                self._tts_local_setup_mode = "automatic"
+
+        auto_voice_radios = getattr(self, "_tts_local_auto_voice_radios", {}) or {}
+        for voice_id, radio in auto_voice_radios.items():
+            radio.set_visible(is_local and auto_mode)
+            if voice_id == getattr(self, "_tts_local_auto_voice_id", recommended_piper_voice().id):
+                radio.set_active(True)
+        for desc in getattr(self, "_tts_local_auto_voice_descs", []) or []:
+            desc.set_visible(is_local and auto_mode)
+
+        for attr_name in ("_tts_local_model_path_entry", "_tts_local_model_path_help"):
+            widget = getattr(self, attr_name, None)
+            if widget is not None:
+                widget.set_visible(is_local and not auto_mode)
+
+        path_entry.set_visible(is_local and not auto_mode)
+        path_help.set_visible(is_local and not auto_mode)
+        entry.set_visible(not is_local or not auto_mode)
+        help_label.set_visible(not is_local or not auto_mode)
+
+        if is_local and auto_mode:
+            path_entry.set_placeholder_text(_display_managed_piper_model_path())
+            path_help.set_text(
+                "Wizard will install Piper if needed and download the selected voice into the managed directory."
+            )
+            entry.set_placeholder_text("")
+            help_label.set_text(
+                f"Managed Local Piper directory: {_display_managed_piper_model_path()}"
+            )
+            return
+
         display_voice = "" if backend_id == "local" and current_voice == default_voice else current_voice
         if entry.get_text() != display_voice:
             entry.set_text(display_voice)
 
-        is_local = backend_id == "local"
-        path_entry.set_visible(is_local)
-        path_help.set_visible(is_local)
         if is_local:
             current_path = str(getattr(self, "_tts_local_model_path", "")).strip()
             if path_entry.get_text() != current_path:
@@ -986,7 +1184,7 @@ class WelcomeWizard(Gtk.Application):
         tts_voice_id = str(
             getattr(self, "_tts_voice_id", default_tts_voice_for_backend(tts_backend))
         ).strip() or default_tts_voice_for_backend(tts_backend)
-        tts_local_model_path = str(getattr(self, "_tts_local_model_path", "")).strip() or None
+        tts_local_model_path = self._effective_tts_local_model_path() or None
         tts_local_voice = None
         if tts_backend == "local":
             tts_voice_id = self._local_tts_resolved_voice()
@@ -1046,7 +1244,7 @@ class WelcomeWizard(Gtk.Application):
             self._apply_download_progress(0.0, initial_progress_text)
 
             threading.Thread(
-                target=self._download_model_async,
+                target=self._run_finish_setup_async,
                 args=(keybind_status, sherpa_model_name),
                 name="wizard-model-download",
                 daemon=True,
@@ -1054,11 +1252,10 @@ class WelcomeWizard(Gtk.Application):
             return
 
         # Fallback path used by tests/headless invocation without full UI.
-        model_status, model_message = maybe_download_model(
-            self._asr_backend,
-            sherpa_model_name=sherpa_model_name,
+        model_status, model_message = self._run_finish_setup(
+            sherpa_model_name,
             progress_callback=None,
-            auto_install_missing=True,
+            cancel_requested=None,
         )
         self._complete_finish(
             keybind_status,
@@ -1067,16 +1264,14 @@ class WelcomeWizard(Gtk.Application):
             model_message,
         )
 
-    def _download_model_async(self, keybind_status: str, sherpa_model_name: str) -> None:
+    def _run_finish_setup_async(self, keybind_status: str, sherpa_model_name: str) -> None:
         def _progress(fraction: float | None, message: str) -> None:
             GLib.idle_add(self._apply_download_progress, fraction, message)
 
-        model_status, model_message = maybe_download_model(
-            self._asr_backend,
-            sherpa_model_name=sherpa_model_name,
+        model_status, model_message = self._run_finish_setup(
+            sherpa_model_name,
             progress_callback=_progress,
             cancel_requested=self._is_download_cancelled,
-            auto_install_missing=True,
         )
 
         GLib.idle_add(
@@ -1086,6 +1281,42 @@ class WelcomeWizard(Gtk.Application):
             model_status,
             model_message,
         )
+
+    def _run_finish_setup(
+        self,
+        sherpa_model_name: str,
+        *,
+        progress_callback,
+        cancel_requested,
+    ) -> tuple[str, str]:
+        messages: list[str] = []
+
+        if self._local_tts_auto_mode_enabled():
+            local_voice_id = self._local_tts_resolved_voice()
+            local_status, local_message = maybe_setup_local_tts(
+                local_voice_id,
+                model_dir=self._effective_tts_local_model_path(),
+                progress_callback=progress_callback,
+                cancel_requested=cancel_requested,
+                auto_install_missing=True,
+            )
+            messages.append(local_message)
+            if local_status in {"error", "cancelled", "skipped_missing_deps"}:
+                return local_status, "\n".join(message for message in messages if message)
+
+        model_status, model_message = maybe_download_model(
+            self._asr_backend,
+            sherpa_model_name=sherpa_model_name,
+            progress_callback=progress_callback,
+            cancel_requested=cancel_requested,
+            auto_install_missing=True,
+        )
+        messages.append(model_message)
+
+        if self._local_tts_auto_mode_enabled() and model_status == "skipped":
+            return "downloaded", "\n".join(message for message in messages if message)
+
+        return model_status, "\n".join(message for message in messages if message)
 
     def _is_download_cancelled(self) -> bool:
         event = getattr(self, "_download_cancel_event", None)
@@ -1206,7 +1437,7 @@ class WelcomeWizard(Gtk.Application):
                     ),
                     tts_backend=resolved_tts_backend,
                     tts_default_voice_id=resolved_tts_voice,
-                    tts_local_model_path=getattr(self, "_tts_local_model_path", None),
+                    tts_local_model_path=self._effective_tts_local_model_path() or None,
                     tts_local_voice=resolved_local_voice,
                 )
             except Exception:  # noqa: BLE001
@@ -1264,6 +1495,8 @@ class WelcomeWizard(Gtk.Application):
         model_status_text = self._model_download_status_text(model_status)
         if model_status_text:
             status_text = f"{status_text}\n{model_status_text}"
+        if model_message:
+            status_text = f"{status_text}\n{model_message}"
 
         self._show_finish_status(status_text)
         self._finish_in_progress = False
@@ -1299,6 +1532,13 @@ class WelcomeWizard(Gtk.Application):
 
     def _starting_model_setup_status_text(self, keybind_status: str) -> str:
         status = self._finish_status_text(keybind_status)
+
+        if self._local_tts_auto_mode_enabled():
+            status = (
+                f"{status}\n"
+                "ℹ Local Piper automatic setup selected. Wizard will install Piper if needed "
+                "and download the selected curated voice."
+            )
 
         if (
             self._asr_backend == "sherpa"
@@ -1374,7 +1614,7 @@ class WelcomeWizard(Gtk.Application):
                 ),
                 tts_backend=tts_backend,
                 tts_default_voice_id=tts_voice_id,
-                tts_local_model_path=getattr(self, "_tts_local_model_path", ""),
+                tts_local_model_path=self._effective_tts_local_model_path(),
             )
         )
 

@@ -96,6 +96,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             install_missing=bool(getattr(args, "install_missing", False)),
             skip_model_download=bool(getattr(args, "skip_model_download", False)),
             skip_preflight=bool(getattr(args, "skip_preflight", False)),
+            tts_local_voice=getattr(args, "tts_local_voice", None),
+            tts_local_model_dir=getattr(args, "tts_local_model_dir", None),
+            non_interactive=bool(getattr(args, "non_interactive", False)),
         )
 
     if resolved == "control":

@@ -118,7 +118,7 @@ def test_tts_backend_toggle_updates_voice_entry():
     assert wizard._tts_voice_entry.get_text() == "onyx"
 
 
-def test_tts_backend_toggle_shows_local_path_controls():
+def test_tts_backend_toggle_shows_local_automatic_setup_controls():
     from shuvoice.wizard import WelcomeWizard
 
     wizard = WelcomeWizard()
@@ -126,8 +126,9 @@ def test_tts_backend_toggle_shows_local_path_controls():
     wizard._tts_backend_radios["local"].set_active(True)
 
     assert wizard._tts_backend == "local"
-    assert wizard._tts_local_model_path_entry.get_visible() is True
-    assert wizard._tts_voice_entry.get_text() == ""
+    assert wizard._tts_local_auto_mode_radio.get_visible() is True
+    assert wizard._tts_local_auto_mode_radio.get_active() is True
+    assert wizard._tts_local_model_path_entry.get_visible() is False
 
 
 def test_model_status_text_maps_incompatible_streaming_state():
@@ -187,6 +188,7 @@ def test_on_finish_writes_config_releases_window_and_quits():
         "moonshine",
         sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
         progress_callback=None,
+        cancel_requested=None,
         auto_install_missing=True,
     )
     write_marker.assert_called_once()
@@ -238,6 +240,7 @@ def test_on_finish_passes_local_tts_settings_to_write_config():
     wizard._asr_backend = "moonshine"
     wizard._keybind = "f9"
     wizard._tts_backend = "local"
+    wizard._tts_local_setup_mode = "manual"
     wizard._tts_voice_id = "default"
     wizard._tts_local_model_path = "/tmp/piper-models"
     wizard.completed = False

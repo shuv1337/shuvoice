@@ -507,13 +507,14 @@ uv sync --extra tts-openai
 ```toml
 [tts]
 tts_backend = "local"
-tts_default_voice_id = "default"                    # first discovered local .onnx model
+tts_default_voice_id = "default"                      # first discovered local .onnx model
 # If you set tts_local_voice, Config normalizes tts_default_voice_id to that value.
 tts_playback_speed = 1.0
 # Faster ShuVoice speeds map to lower Piper --length-scale values.
-tts_local_model_path = "/path/to/piper-model.onnx" # file or directory with .onnx voices
-tts_local_voice = "en_US-amy-medium"                # optional explicit voice/model stem
-tts_local_device = 3                                 # optional output device hint
+tts_local_model_path = "~/.local/share/shuvoice/models/piper" # wizard/setup managed directory
+# Manual mode also accepts a single .onnx file path or a directory of .onnx voices.
+tts_local_voice = "en_US-amy-medium"                  # optional explicit voice/model stem
+tts_local_device = 3                                   # optional output device hint
 ```
 
 Piper `.onnx.json` sidecar files are used to detect the correct playback sample rate.
@@ -523,7 +524,34 @@ If no sidecar is present, ShuVoice falls back to `22050 Hz` for compatibility.
 
 ```bash
 uv sync --extra tts-local
-# requires `piper` or `piper-tts` binary in PATH (Arch AUR: piper-tts)
+# runtime binary: `piper` or `piper-tts` in PATH
+# Arch AUR package / setup automation target: piper-tts
+```
+
+#### Automated setup
+
+ShuVoice now supports first-class Local Piper automation in both entrypoints:
+
+```bash
+# Wizard path
+shuvoice wizard
+# choose: Local Piper -> Automatic setup -> curated voice
+
+# CLI path (when config has tts_backend = "local")
+shuvoice setup --install-missing --tts-local-voice en_US-amy-medium --non-interactive
+```
+
+Automation uses the managed model directory:
+
+```text
+~/.local/share/shuvoice/models/piper/
+```
+
+Curated downloads are stored as:
+
+```text
+~/.local/share/shuvoice/models/piper/<voice-stem>.onnx
+~/.local/share/shuvoice/models/piper/<voice-stem>.onnx.json
 ```
 
 ---
@@ -537,7 +565,7 @@ uv sync --extra tts-local
 | Moonshine | `UsefulSensors/moonshine` | Hugging Face cache (`~/.cache/huggingface/...`) |
 | ElevenLabs TTS | `tts_default_voice_id` + `tts_model_id` | Remote API (`api.elevenlabs.io`); key in env (`tts_api_key_env`) |
 | OpenAI TTS | `tts_default_voice_id` + `tts_model_id` | Remote API (`api.openai.com/v1/audio/speech`); key in env (`tts_api_key_env`) |
-| Local TTS | `tts_local_model_path` / `tts_local_voice` | Local filesystem path (Piper `.onnx` model file(s)) |
+| Local TTS | `tts_local_model_path` / `tts_local_voice` | Local filesystem path (Piper `.onnx` model file(s)); managed automation target: `~/.local/share/shuvoice/models/piper/` |
 
 ---
 

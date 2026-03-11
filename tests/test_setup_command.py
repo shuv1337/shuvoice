@@ -6,7 +6,11 @@ from shuvoice.asr import get_backend_class
 from shuvoice.cli.commands import preflight as preflight_cmd
 from shuvoice.cli.commands import setup as setup_cmd
 from shuvoice.config import Config
-from shuvoice.setup_helpers import DEPENDENCY_EXIT_CODE, BackendSetupReport
+from shuvoice.setup_helpers import (
+    DEPENDENCY_EXIT_CODE,
+    BackendSetupReport,
+    LocalTTSSetupReport,
+)
 
 
 def test_run_setup_returns_dependency_exit_code_when_missing(capsys, monkeypatch):
@@ -302,3 +306,136 @@ def test_preflight_reports_sherpa_decode_mode_status(capsys, monkeypatch):
     assert "sherpa_decode_mode=offline_instant" in out
     assert "sherpa_provider=cuda->cpu" in out
     assert "parakeet_runnable=yes" in out
+
+
+
+def test_run_setup_local_tts_downloads_and_persists_config(capsys, monkeypatch, tmp_path):
+    report = BackendSetupReport(
+        backend="sherpa",
+        missing_dependencies=(),
+        install_hints=(),
+        model_status="present (/tmp/model)",
+    )
+    local_reports = iter(
+        [
+            LocalTTSSetupReport(
+                binary_present=True,
+                binary_name="piper-tts",
+                model_dir=None,
+                installed_voices=(),
+                missing_artifacts=("tts_local_model_path is not configured",),
+                model_status="missing (tts_local_model_path is not configured)",
+            ),
+            LocalTTSSetupReport(
+                binary_present=True,
+                binary_name="piper-tts",
+                model_dir=tmp_path,
+                installed_voices=("en_US-amy-medium",),
+                missing_artifacts=(),
+                model_status="present (ready)",
+            ),
+        ]
+    )
+
+    class _DummyBackend:
+        capabilities = SimpleNamespace(supports_model_download=False)
+
+        @staticmethod
+        def startup_warnings(_cfg, *, apply_fixes: bool = False):
+            return []
+
+        @staticmethod
+        def startup_errors(_cfg):
+            return []
+
+    persisted: dict[str, object] = {}
+
+    monkeypatch.setattr(setup_cmd, "build_backend_setup_report", lambda _cfg: report)
+    monkeypatch.setattr(setup_cmd, "get_backend_class", lambda _name: _DummyBackend)
+    monkeypatch.setattr(setup_cmd, "build_local_tts_setup_report", lambda _cfg: next(local_reports))
+    monkeypatch.setattr(setup_cmd, "format_local_tts_report", lambda _report: "Local TTS (Piper): ok")
+    monkeypatch.setattr(
+        setup_cmd,
+        "ensure_local_piper_ready",
+        lambda voice, **kwargs: SimpleNamespace(
+            status="downloaded",
+            message=f"Local Piper ready: {voice.stem}",
+            model_dir=tmp_path,
+            voice=voice,
+        ),
+    )
+    monkeypatch.setattr(
+        setup_cmd,
+        "_persist_local_tts_selection",
+        lambda cfg, *, model_dir, voice_stem: persisted.update(
+            {
+                "cfg": cfg,
+                "model_dir": model_dir,
+                "voice_stem": voice_stem,
+            }
+        ),
+    )
+
+    cfg = Config(tts_backend="local")
+    code = setup_cmd.run_setup(
+        cfg,
+        install_missing=False,
+        skip_model_download=False,
+        skip_preflight=True,
+        non_interactive=True,
+    )
+
+    assert code == 0
+    assert persisted["model_dir"] == tmp_path
+    assert persisted["voice_stem"] == "en_US-amy-medium"
+    out = capsys.readouterr().out
+    assert "Selected Local Piper voice" in out
+    assert "Local Piper setup: Local Piper ready: en_US-amy-medium" in out
+
+
+
+def test_run_setup_local_tts_returns_dependency_exit_when_runtime_missing(capsys, monkeypatch):
+    report = BackendSetupReport(
+        backend="sherpa",
+        missing_dependencies=(),
+        install_hints=(),
+        model_status="present (/tmp/model)",
+    )
+
+    class _DummyBackend:
+        capabilities = SimpleNamespace(supports_model_download=False)
+
+        @staticmethod
+        def startup_warnings(_cfg, *, apply_fixes: bool = False):
+            return []
+
+        @staticmethod
+        def startup_errors(_cfg):
+            return []
+
+    monkeypatch.setattr(setup_cmd, "build_backend_setup_report", lambda _cfg: report)
+    monkeypatch.setattr(setup_cmd, "get_backend_class", lambda _name: _DummyBackend)
+    monkeypatch.setattr(
+        setup_cmd,
+        "build_local_tts_setup_report",
+        lambda _cfg: LocalTTSSetupReport(
+            binary_present=False,
+            binary_name=None,
+            model_dir=None,
+            installed_voices=(),
+            missing_artifacts=("tts_local_model_path is not configured",),
+            model_status="missing",
+        ),
+    )
+    monkeypatch.setattr(setup_cmd, "format_local_tts_report", lambda _report: "Local TTS (Piper): missing")
+
+    code = setup_cmd.run_setup(
+        Config(tts_backend="local"),
+        install_missing=False,
+        skip_model_download=True,
+        skip_preflight=True,
+        non_interactive=True,
+    )
+
+    assert code == DEPENDENCY_EXIT_CODE
+    assert "Local Piper runtime is still missing" in capsys.readouterr().out

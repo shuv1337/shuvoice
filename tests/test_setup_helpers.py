@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from shuvoice.cli.commands import setup as setup_cmd
 from shuvoice.config import Config
-from shuvoice.setup_helpers import install_hints_for_backend, model_status_for_backend
+from shuvoice.setup_helpers import (
+    build_local_tts_setup_report,
+    install_hints_for_backend,
+    model_status_for_backend,
+)
 
 
 def test_install_hints_for_sherpa_prefer_bin_provider(monkeypatch):
@@ -99,3 +105,33 @@ def test_model_status_mentions_parakeet_streaming_enabled(monkeypatch):
     status = model_status_for_backend(cfg)
 
     assert "Parakeet streaming mode enabled" in status
+
+
+def test_build_local_tts_setup_report_marks_missing_binary_and_path(monkeypatch):
+    monkeypatch.setattr("shuvoice.setup_helpers.find_piper_binary", lambda: None)
+
+    report = build_local_tts_setup_report(Config(tts_backend="local"))
+
+    assert report.binary_present is False
+    assert report.model_dir is None
+    assert report.missing_artifacts == ("tts_local_model_path is not configured",)
+
+
+
+def test_build_local_tts_setup_report_lists_installed_voices(monkeypatch, tmp_path: Path):
+    (tmp_path / "en_US-amy-medium.onnx").write_bytes(b"model")
+    (tmp_path / "en_US-amy-medium.onnx.json").write_text('{"audio": {"sample_rate": 22050}}')
+    monkeypatch.setattr("shuvoice.setup_helpers.find_piper_binary", lambda: "piper-tts")
+
+    report = build_local_tts_setup_report(
+        Config(
+            tts_backend="local",
+            tts_local_model_path=str(tmp_path),
+            tts_local_voice="en_US-amy-medium",
+        )
+    )
+
+    assert report.binary_present is True
+    assert report.binary_name == "piper-tts"
+    assert report.installed_voices == ("en_US-amy-medium",)
+    assert report.missing_artifacts == tuple()

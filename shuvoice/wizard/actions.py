@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from pathlib import Path
 
 from ..asr import get_backend_class
 from ..config import Config
+from ..piper_setup import ensure_local_piper_ready, get_curated_piper_voice, managed_piper_model_dir
 from ..wizard_state import DEFAULT_SHERPA_MODEL_NAME, needs_wizard, write_config, write_marker
 from .hyprland import setup_keybind
 
@@ -22,6 +24,54 @@ def _attempt_auto_install_backend(backend: str, *, prefer_cuda: bool) -> bool:
     except Exception:  # noqa: BLE001
         log.exception("Wizard dependency auto-install failed")
         return False
+
+
+def maybe_setup_local_tts(
+    voice_id: str,
+    *,
+    model_dir: str | None = None,
+    progress_callback: Callable[[float | None, str], None] | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
+    auto_install_missing: bool = False,
+) -> tuple[str, str]:
+    """Best-effort Local Piper runtime + curated voice setup for the wizard."""
+
+    def _emit(fraction: float | None, message: str) -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback(fraction, message)
+        except Exception:  # noqa: BLE001
+            log.debug("Wizard Local Piper progress callback failed", exc_info=True)
+
+    def _is_cancelled() -> bool:
+        if cancel_requested is None:
+            return False
+        try:
+            return bool(cancel_requested())
+        except Exception:  # noqa: BLE001
+            log.debug("Wizard Local Piper cancel callback failed", exc_info=True)
+            return False
+
+    try:
+        option = get_curated_piper_voice(voice_id)
+    except ValueError as exc:
+        return "error", str(exc)
+
+    if _is_cancelled():
+        _emit(1.0, "Local Piper setup cancelled")
+        return "cancelled", "Local Piper setup cancelled by user."
+
+    target_dir = Path(model_dir).expanduser() if model_dir else managed_piper_model_dir()
+    result = ensure_local_piper_ready(
+        option,
+        model_dir=target_dir,
+        auto_install_missing=auto_install_missing,
+        progress_callback=progress_callback,
+        cancel_check=cancel_requested,
+    )
+    return result.status, result.message
+
 
 
 def maybe_download_model(
@@ -351,6 +401,7 @@ def finish_setup(
 __all__ = [
     "finish_setup",
     "maybe_download_model",
+    "maybe_setup_local_tts",
     "needs_wizard",
     "write_config",
     "write_marker",

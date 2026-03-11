@@ -8,6 +8,14 @@ from pathlib import Path
 
 from .asr import get_backend_class
 from .config import Config
+from .piper_setup import (
+    find_piper_binary,
+    installed_piper_voice_stems,
+    piper_install_hints,
+    piper_sample_rate_from_sidecar,
+    validate_piper_voice_artifacts,
+)
+from .tts_base import LOCAL_TTS_AUTO_VOICE_IDS
 
 DEPENDENCY_EXIT_CODE = 78
 """Exit code used for startup-blocking backend/config/runtime errors.
@@ -22,6 +30,16 @@ class BackendSetupReport:
     backend: str
     missing_dependencies: tuple[str, ...]
     install_hints: tuple[str, ...]
+    model_status: str
+
+
+@dataclass(frozen=True)
+class LocalTTSSetupReport:
+    binary_present: bool
+    binary_name: str | None
+    model_dir: Path | None
+    installed_voices: tuple[str, ...]
+    missing_artifacts: tuple[str, ...]
     model_status: str
 
 
@@ -47,6 +65,23 @@ def _is_complete_sherpa_model_dir(model_dir: Path) -> bool:
             return False
 
     return True
+
+
+def _configured_local_tts_voice(config: Config) -> str | None:
+    requested = str(getattr(config, "tts_local_voice", "") or "").strip()
+    if requested and requested.lower() not in LOCAL_TTS_AUTO_VOICE_IDS:
+        return requested
+
+    fallback = str(getattr(config, "tts_default_voice_id", "") or "").strip()
+    if fallback and fallback.lower() not in LOCAL_TTS_AUTO_VOICE_IDS:
+        return fallback
+    return None
+
+
+def _local_tts_model_dir(config: Config) -> Path | None:
+    if not config.tts_local_model_path:
+        return None
+    return Path(config.tts_local_model_path).expanduser()
 
 
 def model_status_for_backend(config: Config) -> str:
@@ -94,6 +129,31 @@ def model_status_for_backend(config: Config) -> str:
         return "fetched lazily from Hugging Face on first load"
 
     return "unknown"
+
+
+def local_tts_model_status(config: Config) -> str:
+    model_dir = _local_tts_model_dir(config)
+    if model_dir is None:
+        return "missing (tts_local_model_path is not configured)"
+
+    voice_id = _configured_local_tts_voice(config)
+    valid, detail = validate_piper_voice_artifacts(model_dir, voice_id=voice_id)
+    if not valid:
+        return f"missing ({detail})"
+
+    try:
+        if model_dir.is_file():
+            model_file = model_dir
+        else:
+            selected = voice_id or next(iter(installed_piper_voice_stems(model_dir)), None)
+            model_file = model_dir / f"{selected}.onnx" if selected else model_dir
+        sample_rate = piper_sample_rate_from_sidecar(model_file)
+    except Exception:  # noqa: BLE001
+        sample_rate = None
+
+    if sample_rate is not None:
+        return f"present ({detail}; path={model_dir})"
+    return f"present ({detail}; path={model_dir})"
 
 
 def install_hints_for_backend(backend: str) -> tuple[str, ...]:
@@ -148,6 +208,29 @@ def build_backend_setup_report(config: Config) -> BackendSetupReport:
     )
 
 
+def build_local_tts_setup_report(config: Config) -> LocalTTSSetupReport:
+    model_dir = _local_tts_model_dir(config)
+    voice_id = _configured_local_tts_voice(config)
+    binary_name = find_piper_binary()
+    missing_artifacts: list[str] = []
+
+    if model_dir is None:
+        missing_artifacts.append("tts_local_model_path is not configured")
+    else:
+        valid, detail = validate_piper_voice_artifacts(model_dir, voice_id=voice_id)
+        if not valid:
+            missing_artifacts.append(detail)
+
+    return LocalTTSSetupReport(
+        binary_present=binary_name is not None,
+        binary_name=binary_name,
+        model_dir=model_dir,
+        installed_voices=installed_piper_voice_stems(model_dir),
+        missing_artifacts=tuple(missing_artifacts),
+        model_status=local_tts_model_status(config),
+    )
+
+
 def format_missing_dependency_report(report: BackendSetupReport) -> str:
     lines = [
         f"Missing dependencies for backend '{report.backend}':",
@@ -164,4 +247,29 @@ def format_missing_dependency_report(report: BackendSetupReport) -> str:
             lines.append(f"  * {hint}")
 
     lines.append("Then run: shuvoice setup")
+    return "\n".join(lines)
+
+
+def format_local_tts_report(report: LocalTTSSetupReport) -> str:
+    lines = ["Local TTS (Piper):"]
+    if report.binary_present:
+        lines.append(f"  Binary: {report.binary_name}")
+    else:
+        lines.append("  Binary: missing")
+        for hint in piper_install_hints():
+            lines.append(f"    * {hint}")
+
+    if report.model_dir is None:
+        lines.append("  Model path: not configured")
+    else:
+        lines.append(f"  Model path: {report.model_dir}")
+
+    lines.append(f"  Model status: {report.model_status}")
+
+    if report.installed_voices:
+        lines.append("  Installed voices: " + ", ".join(report.installed_voices))
+
+    for detail in report.missing_artifacts:
+        lines.append(f"  Missing: {detail}")
+
     return "\n".join(lines)

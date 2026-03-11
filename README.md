@@ -172,8 +172,9 @@ The wizard will:
 2. **Choose a Sherpa profile** (if applicable) — Streaming (Zipformer) or Instant (Parakeet)
 3. **Pick your push-to-talk key** — Right Ctrl, Insert, F9, Super+V, or custom
 4. **Choose your TTS provider + default voice** — ElevenLabs, OpenAI, or Local Piper
-5. **Download model files** — with progress indicator and cancel support
-6. **Auto-configure Hyprland keybinds** — adds `bind`/`bindr` lines if the key isn't already used
+5. **For Local Piper** — choose either automatic setup (install Piper + download a curated voice) or an existing local model path
+6. **Download model files** — with progress indicator and cancel support
+7. **Auto-configure Hyprland keybinds** — adds `bind`/`bindr` lines if the key isn't already used
 
 <p align="center">
   <img src="./docs/assets/screenshots/wizard-asr-selection.png" alt="ASR backend selection" width="760">
@@ -191,6 +192,15 @@ shuvoice setup
 
 # Auto-install missing dependencies (when possible)
 shuvoice setup --install-missing
+
+# Local Piper: auto-install Piper + download a curated voice for the active local TTS config
+shuvoice setup --install-missing --tts-local-voice en_US-amy-medium --non-interactive
+
+# Local Piper: download curated voice assets into a custom managed directory
+shuvoice setup --install-missing \
+  --tts-local-voice en_US-lessac-high \
+  --tts-local-model-dir ~/.local/share/shuvoice/models/piper \
+  --non-interactive
 
 # Quick dependency check only (skip model download + preflight)
 shuvoice setup --skip-model-download --skip-preflight
@@ -508,8 +518,8 @@ tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"   # ElevenLabs default
 # Local Piper defaults are auto-applied when tts_backend = "local":
 # tts_default_voice_id = "default"              # use first discovered local .onnx model
 # tts_model_id = "piper"
-# tts_local_model_path = "/path/to/piper-models"
-# tts_local_voice = "en_US-amy-medium"          # optional explicit model stem
+# tts_local_model_path = "~/.local/share/shuvoice/models/piper"   # wizard/setup managed directory
+# tts_local_voice = "en_US-amy-medium"          # optional explicit curated model stem
 tts_model_id = "eleven_flash_v2_5"
 tts_api_key_env = "ELEVENLABS_API_KEY"          # env var name (not the key itself)
 tts_playback_speed = 1.0                         # default synthesis speed (0.5x to 2.0x)
@@ -525,7 +535,15 @@ ELEVENLABS_API_KEY=sk-your-key-here
 OPENAI_API_KEY=sk-your-key-here
 ```
 
-For Local Piper, set `tts_local_model_path` to a `.onnx` file or a directory of `.onnx` voices.
+For Local Piper, you now have two setup paths:
+
+- **Automatic setup** — use the wizard's Local Piper automatic mode, or run `shuvoice setup --install-missing` with `tts_backend = "local"`. ShuVoice will:
+  - install `piper-tts` on Arch when possible,
+  - download a curated voice into `~/.local/share/shuvoice/models/piper/`,
+  - persist `tts_local_model_path` / `tts_local_voice`, and
+  - validate the resulting setup.
+- **Manual setup** — set `tts_local_model_path` to a `.onnx` file or a directory of `.onnx` voices.
+
 If you point at a directory and leave `tts_local_voice` unset, ShuVoice uses the first discovered
 model automatically. Piper sidecar files (`.onnx.json`) are also used to detect the correct
 playback sample rate.

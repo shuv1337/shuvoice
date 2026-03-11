@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import math
-import shutil
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
+from .piper_setup import find_piper_binary, piper_sample_rate_from_sidecar
 from .tts_base import (
     DEFAULT_LOCAL_TTS_VOICE_ID,
     LOCAL_TTS_AUTO_VOICE_IDS,
@@ -24,19 +23,6 @@ from .tts_speed import TTS_PLAYBACK_SPEED_MAX, TTS_PLAYBACK_SPEED_MIN
 log = logging.getLogger(__name__)
 
 _DEFAULT_PIPER_SAMPLE_RATE_HZ = 22050
-
-# Piper binary names in order of preference.
-# The AUR `piper-tts` package installs as `piper-tts`; upstream installs as
-# `piper`.  We accept whichever is available.
-_PIPER_BINARY_NAMES = ("piper", "piper-tts")
-
-
-def _find_piper_binary() -> str | None:
-    """Return the first available Piper binary name, or ``None``."""
-    for name in _PIPER_BINARY_NAMES:
-        if shutil.which(name) is not None:
-            return name
-    return None
 
 
 class LocalTTSBackend(TTSBackend):
@@ -57,7 +43,7 @@ class LocalTTSBackend(TTSBackend):
 
     def __init__(self, config):
         super().__init__(config)
-        self._piper_binary = _find_piper_binary()
+        self._piper_binary = find_piper_binary()
         if self._piper_binary is None:
             raise RuntimeError(
                 "Missing piper binary for local TTS backend. "
@@ -73,7 +59,7 @@ class LocalTTSBackend(TTSBackend):
     @staticmethod
     def dependency_errors() -> list[str]:
         errors: list[str] = []
-        if _find_piper_binary() is None:
+        if find_piper_binary() is None:
             errors.append(
                 "Missing piper binary for local TTS backend. "
                 "Install Piper (piper or piper-tts) and set [tts].tts_local_model_path."
@@ -161,29 +147,7 @@ class LocalTTSBackend(TTSBackend):
 
     @staticmethod
     def _sample_rate_from_sidecar(model_file: Path) -> int | None:
-        sidecar = model_file.with_name(f"{model_file.name}.json")
-        if not sidecar.is_file():
-            return None
-
-        try:
-            payload = json.loads(sidecar.read_text())
-        except Exception:  # noqa: BLE001
-            log.warning("Failed to read Piper sidecar metadata: %s", sidecar, exc_info=True)
-            return None
-
-        candidates = [
-            payload.get("audio", {}).get("sample_rate") if isinstance(payload.get("audio"), dict) else None,
-            payload.get("sample_rate"),
-            payload.get("sampleRate"),
-        ]
-        for value in candidates:
-            try:
-                sample_rate = int(value)
-            except (TypeError, ValueError):
-                continue
-            if sample_rate > 0:
-                return sample_rate
-        return None
+        return piper_sample_rate_from_sidecar(model_file)
 
     def sample_rate_hz(self) -> int:
         model_file = self._resolve_model_file(self.config.tts_default_voice_id)

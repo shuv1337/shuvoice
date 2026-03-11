@@ -549,8 +549,8 @@ def write_marker():
     marker.write_text("done\n")
 
 
-def _upsert_asr_key(config_file: Path, key: str, value: str):
-    """Update or insert a key under ``[asr]`` in config.toml.
+def _upsert_section_key(config_file: Path, section_name: str, key: str, value: str) -> None:
+    """Update or insert a string key under the requested TOML section.
 
     Preserves unrelated lines/comments and only patches the relevant field.
     """
@@ -559,33 +559,33 @@ def _upsert_asr_key(config_file: Path, key: str, value: str):
     section_re = re.compile(r"^\s*\[([^\]]+)\]\s*$")
     key_re = re.compile(rf"^\s*{re.escape(key)}\s*=")
 
-    asr_start: int | None = None
-    asr_end = len(lines)
+    target_start: int | None = None
+    target_end = len(lines)
 
     for idx, line in enumerate(lines):
         match = section_re.match(line.strip())
         if not match:
             continue
-        section_name = match.group(1).strip().lower()
-        if asr_start is None:
-            if section_name == "asr":
-                asr_start = idx
+        current_section_name = match.group(1).strip().lower()
+        if target_start is None:
+            if current_section_name == section_name.lower():
+                target_start = idx
             continue
-        asr_end = idx
+        target_end = idx
         break
 
     new_line = f'{key} = "{value}"\n'
 
-    if asr_start is None:
+    if target_start is None:
         if lines and not lines[-1].endswith("\n"):
             lines[-1] += "\n"
         if lines and lines[-1].strip():
             lines.append("\n")
-        lines.extend(["[asr]\n", new_line])
+        lines.extend([f"[{section_name}]\n", new_line])
         config_file.write_text("".join(lines))
         return
 
-    for idx in range(asr_start + 1, asr_end):
+    for idx in range(target_start + 1, target_end):
         stripped = lines[idx].lstrip()
         if stripped.startswith("#"):
             continue
@@ -595,11 +595,21 @@ def _upsert_asr_key(config_file: Path, key: str, value: str):
             config_file.write_text("".join(lines))
             return
 
-    insert_at = asr_start + 1
-    while insert_at < asr_end and lines[insert_at].strip().startswith("#"):
+    insert_at = target_start + 1
+    while insert_at < target_end and lines[insert_at].strip().startswith("#"):
         insert_at += 1
     lines.insert(insert_at, new_line)
     config_file.write_text("".join(lines))
+
+
+def _upsert_asr_key(config_file: Path, key: str, value: str):
+    """Update or insert a key under ``[asr]`` in config.toml."""
+    _upsert_section_key(config_file, "asr", key, value)
+
+
+def _upsert_tts_key(config_file: Path, key: str, value: str):
+    """Update or insert a key under ``[tts]`` in config.toml."""
+    _upsert_section_key(config_file, "tts", key, value)
 
 
 def _detect_cuda() -> bool:
