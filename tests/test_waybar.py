@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+import pytest
+
 from shuvoice.config import Config
 from shuvoice.waybar import (
     _action_menu,
@@ -101,6 +103,39 @@ def test_perform_action_menu_calls_menu_handler():
         _perform_action("menu", Config(), "shuvoice.service")
 
     action_menu.assert_called_once()
+
+
+def test_perform_action_service_start_waits_for_control_socket():
+    with (
+        patch("shuvoice.waybar._service_action") as service_action,
+        patch("shuvoice.waybar._wait_for_control_socket", return_value=True) as wait_for_socket,
+    ):
+        _perform_action("service-start", Config(), "shuvoice.service")
+
+    service_action.assert_called_once_with("shuvoice.service", "start")
+    wait_for_socket.assert_called_once()
+
+
+def test_perform_action_service_restart_waits_for_control_socket():
+    with (
+        patch("shuvoice.waybar._service_action") as service_action,
+        patch("shuvoice.waybar._wait_for_control_socket", return_value=True) as wait_for_socket,
+    ):
+        _perform_action("service-restart", Config(), "shuvoice.service")
+
+    service_action.assert_called_once_with("shuvoice.service", "restart")
+    wait_for_socket.assert_called_once()
+
+
+def test_perform_action_service_restart_raises_when_control_socket_never_returns():
+    with (
+        patch("shuvoice.waybar._service_action") as service_action,
+        patch("shuvoice.waybar._wait_for_control_socket", return_value=False),
+    ):
+        with pytest.raises(RuntimeError, match="control socket not ready after restarting service"):
+            _perform_action("service-restart", Config(), "shuvoice.service")
+
+    service_action.assert_called_once_with("shuvoice.service", "restart")
 
 
 def test_action_menu_dispatches_selected_command():

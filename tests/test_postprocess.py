@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from shuvoice.postprocess import apply_text_replacements, capitalize_first
+from shuvoice.postprocess import apply_text_replacements, capitalize_first, lowercase_text
 
 
 def test_capitalize_first_basic_cases():
@@ -12,6 +12,12 @@ def test_capitalize_first_basic_cases():
 def test_capitalize_first_noop_cases():
     assert capitalize_first("") == ""
     assert capitalize_first("12345") == "12345"
+
+
+def test_lowercase_text_basic_cases():
+    assert lowercase_text("Hello, World!") == "hello, world!"
+    assert lowercase_text("ShuVoice") == "shuvoice"
+    assert lowercase_text("") == ""
 
 
 # --- apply_text_replacements ---

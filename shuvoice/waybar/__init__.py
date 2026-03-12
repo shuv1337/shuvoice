@@ -270,6 +270,8 @@ def _perform_action(command: str, config: Config, service: str):
 
     if command == "service-start":
         _service_action(service, "start")
+        if not _wait_for_control_socket(config):
+            raise RuntimeError("control socket not ready after starting service")
         return
 
     if command == "service-stop":
@@ -278,6 +280,8 @@ def _perform_action(command: str, config: Config, service: str):
 
     if command == "service-restart":
         _service_action(service, "restart")
+        if not _wait_for_control_socket(config):
+            raise RuntimeError("control socket not ready after restarting service")
         return
 
     if command == "service-toggle":

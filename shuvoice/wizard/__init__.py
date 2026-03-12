@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 import gi
@@ -33,9 +34,11 @@ from ..wizard_state import (
     DEFAULT_KEYBIND_ID,
     DEFAULT_SHERPA_MODEL_NAME,
     DEFAULT_TTS_BACKEND,
+    DEFAULT_TYPING_TEXT_CASE,
     FINAL_INJECTION_MODES,
     PARAKEET_TDT_V3_INT8_MODEL_NAME,
     TTS_BACKENDS,
+    TYPING_TEXT_CASE_MODES,
     default_tts_voice_for_backend,
 )
 from .actions import maybe_download_model, maybe_setup_local_tts, needs_wizard, write_config, write_marker
@@ -89,6 +92,7 @@ class WelcomeWizard(Gtk.Application):
         self._sherpa_enable_parakeet_streaming = False
         self._sherpa_provider = "cpu"
         self._typing_final_injection_mode = DEFAULT_FINAL_INJECTION_MODE
+        self._typing_text_case = DEFAULT_TYPING_TEXT_CASE
         self._tts_backend = DEFAULT_TTS_BACKEND
         self._tts_voice_by_backend = {
             "elevenlabs": default_tts_voice_for_backend("elevenlabs"),
@@ -130,6 +134,7 @@ class WelcomeWizard(Gtk.Application):
         self._stack.add_named(self._build_welcome_page(), "welcome")
         self._stack.add_named(self._build_asr_page(), "asr")
         self._stack.add_named(self._build_keybind_page(), "keybind")
+        self._stack.add_named(self._build_tts_page(), "tts")
         self._stack.add_named(self._build_done_page(), "done")
 
         win.set_child(self._stack)
@@ -138,6 +143,75 @@ class WelcomeWizard(Gtk.Application):
 
     def _setup_css(self):
         setup_css()
+
+    def _set_dropdown_selected(
+        self,
+        dropdown: Gtk.DropDown | None,
+        options: list[tuple[str, str, str]],
+        selected_id: str,
+    ) -> None:
+        if dropdown is None:
+            return
+
+        selected_idx = next(
+            (idx for idx, (option_id, _label, _desc) in enumerate(options) if option_id == selected_id),
+            0,
+        )
+        if dropdown.get_selected() != selected_idx:
+            dropdown.set_selected(selected_idx)
+
+    def _make_dropdown_section(
+        self,
+        page: Gtk.Box,
+        title: str,
+        options: list[tuple[str, str, str]],
+        default_id: str,
+        on_changed: Callable[[str], None],
+        *,
+        title_margin_top: int = 0,
+    ) -> tuple[Gtk.Label, Gtk.DropDown, Gtk.Label]:
+        subtitle = Gtk.Label(label=title)
+        subtitle.add_css_class("wizard-subtitle")
+        subtitle.set_halign(Gtk.Align.START)
+        if title_margin_top:
+            subtitle.set_margin_top(title_margin_top)
+        page.append(subtitle)
+
+        labels = [label for _id, label, _desc in options]
+        dropdown = Gtk.DropDown.new_from_strings(labels)
+        dropdown.add_css_class("wizard-dropdown")
+        dropdown.set_halign(Gtk.Align.FILL)
+        dropdown.set_hexpand(True)
+
+        default_idx = next(
+            (idx for idx, (option_id, _label, _desc) in enumerate(options) if option_id == default_id),
+            0,
+        )
+        dropdown.set_selected(default_idx)
+
+        desc_label = Gtk.Label(label=options[default_idx][2])
+        desc_label.add_css_class("wizard-radio-desc")
+        desc_label.set_halign(Gtk.Align.START)
+        desc_label.set_wrap(True)
+        desc_label.set_wrap_mode(0)
+        page.append(dropdown)
+        page.append(desc_label)
+
+        description = options[default_idx][2]
+        self._set_accessible_description(dropdown, f"{title}. {description}")
+        dropdown.set_tooltip_text(description)
+
+        def _on_notify_selected(dd, _pspec):
+            idx = dd.get_selected()
+            if 0 <= idx < len(options):
+                option_id, _label, option_desc = options[idx]
+                desc_label.set_text(option_desc)
+                self._set_accessible_description(dd, f"{title}. {option_desc}")
+                dd.set_tooltip_text(option_desc)
+                on_changed(option_id)
+
+        dropdown.connect("notify::selected", _on_notify_selected)
+        return subtitle, dropdown, desc_label
 
     # -- Page builders ---------------------------------------------------------
 
@@ -208,7 +282,7 @@ class WelcomeWizard(Gtk.Application):
             else:
                 radio.set_group(group)
 
-            if backend_id == "sherpa":
+            if backend_id == self._asr_backend:
                 radio.set_active(True)
 
             radio.connect("toggled", self._on_asr_toggled, backend_id)
@@ -221,120 +295,57 @@ class WelcomeWizard(Gtk.Application):
             page.append(desc_label)
             self._set_accessible_description(radio, description)
 
-        self._sherpa_profile_title = Gtk.Label(label="Sherpa profile")
-        self._sherpa_profile_title.add_css_class("wizard-subtitle")
-        self._sherpa_profile_title.set_halign(Gtk.Align.START)
-        self._sherpa_profile_title.set_margin_top(8)
-        page.append(self._sherpa_profile_title)
-
-        self._sherpa_profile_help = Gtk.Label(
-            label=(
-                "Streaming = live overlay updates while holding push-to-talk.\n"
-                "Text is committed only on key release (no live partial typing)."
-            )
+        self._sherpa_profile_options = [
+            (
+                "streaming",
+                "Streaming (Zipformer Kroko)",
+                "Shows incremental transcript updates in the overlay while you hold push-to-talk. Final text is committed on key release.",
+            ),
+            (
+                "instant",
+                "Instant (Parakeet TDT v3 int8, recommended)",
+                "Stable default profile. Emits one final transcript on key release and auto-enables instant_mode + sherpa_decode_mode=offline_instant.",
+            ),
+        ]
+        (
+            self._sherpa_profile_title,
+            self._sherpa_profile_dropdown,
+            self._sherpa_profile_desc_label,
+        ) = self._make_dropdown_section(
+            page,
+            "Sherpa profile",
+            self._sherpa_profile_options,
+            "instant"
+            if getattr(self, "_sherpa_model_name", DEFAULT_WIZARD_SHERPA_MODEL_NAME)
+            == PARAKEET_TDT_V3_INT8_MODEL_NAME
+            else "streaming",
+            self._set_sherpa_profile_selection,
+            title_margin_top=8,
         )
-        self._sherpa_profile_help.add_css_class("wizard-desc")
-        self._sherpa_profile_help.set_halign(Gtk.Align.START)
-        self._sherpa_profile_help.set_justify(Gtk.Justification.LEFT)
-        self._sherpa_profile_help.set_margin_bottom(4)
-        page.append(self._sherpa_profile_help)
 
-        self._sherpa_streaming_radio = Gtk.CheckButton(label="Streaming (Zipformer Kroko model)")
-        self._sherpa_streaming_radio.add_css_class("wizard-radio")
-        self._sherpa_streaming_radio.connect(
-            "toggled",
-            self._on_sherpa_profile_toggled,
-            (DEFAULT_SHERPA_MODEL_NAME, False),
-        )
-        page.append(self._sherpa_streaming_radio)
-
-        sherpa_streaming_desc = (
-            "Shows incremental transcript updates in the overlay while you hold the key. "
-            "Final text is committed on key release."
-        )
-        self._sherpa_streaming_desc = Gtk.Label(label=sherpa_streaming_desc)
-        self._sherpa_streaming_desc.add_css_class("wizard-radio-desc")
-        self._sherpa_streaming_desc.set_halign(Gtk.Align.START)
-        page.append(self._sherpa_streaming_desc)
-        self._set_accessible_description(self._sherpa_streaming_radio, sherpa_streaming_desc)
-
-        self._sherpa_parakeet_radio = Gtk.CheckButton(
-            label="Instant (Parakeet TDT v3 int8 model, recommended)"
-        )
-        self._sherpa_parakeet_radio.add_css_class("wizard-radio")
-        self._sherpa_parakeet_radio.set_group(self._sherpa_streaming_radio)
-        self._sherpa_parakeet_radio.connect(
-            "toggled",
-            self._on_sherpa_profile_toggled,
-            (PARAKEET_TDT_V3_INT8_MODEL_NAME, False),
-        )
-        page.append(self._sherpa_parakeet_radio)
-
-        sherpa_parakeet_desc = (
-            "Stable default profile. Emits one final transcript on key release and "
-            "auto-enables instant_mode + sherpa_decode_mode=offline_instant."
-        )
-        self._sherpa_parakeet_desc = Gtk.Label(label=sherpa_parakeet_desc)
-        self._sherpa_parakeet_desc.add_css_class("wizard-radio-desc")
-        self._sherpa_parakeet_desc.set_halign(Gtk.Align.START)
-        page.append(self._sherpa_parakeet_desc)
-        self._set_accessible_description(self._sherpa_parakeet_radio, sherpa_parakeet_desc)
-
-        self._sherpa_provider_title = Gtk.Label(label="Sherpa compute device")
-        self._sherpa_provider_title.add_css_class("wizard-subtitle")
-        self._sherpa_provider_title.set_halign(Gtk.Align.START)
-        self._sherpa_provider_title.set_margin_top(8)
-        page.append(self._sherpa_provider_title)
-
-        self._sherpa_provider_help = Gtk.Label(
-            label=(
-                "Pick CPU or GPU (CUDA). If GPU is selected, wizard will try to install "
-                "a CUDA-capable Sherpa runtime automatically."
-            )
-        )
-        self._sherpa_provider_help.add_css_class("wizard-desc")
-        self._sherpa_provider_help.set_halign(Gtk.Align.START)
-        self._sherpa_provider_help.set_justify(Gtk.Justification.LEFT)
-        self._sherpa_provider_help.set_margin_bottom(4)
-        page.append(self._sherpa_provider_help)
-
-        self._sherpa_provider_cpu_radio = Gtk.CheckButton(label="CPU")
-        self._sherpa_provider_cpu_radio.add_css_class("wizard-radio")
-        self._sherpa_provider_cpu_radio.connect(
-            "toggled",
-            self._on_sherpa_provider_toggled,
-            "cpu",
-        )
-        page.append(self._sherpa_provider_cpu_radio)
-
-        sherpa_provider_cpu_desc = "Best compatibility and lowest setup friction."
-        self._sherpa_provider_cpu_desc = Gtk.Label(label=sherpa_provider_cpu_desc)
-        self._sherpa_provider_cpu_desc.add_css_class("wizard-radio-desc")
-        self._sherpa_provider_cpu_desc.set_halign(Gtk.Align.START)
-        page.append(self._sherpa_provider_cpu_desc)
-        self._set_accessible_description(self._sherpa_provider_cpu_radio, sherpa_provider_cpu_desc)
-
-        self._sherpa_provider_cuda_radio = Gtk.CheckButton(label="GPU (CUDA)")
-        self._sherpa_provider_cuda_radio.add_css_class("wizard-radio")
-        self._sherpa_provider_cuda_radio.set_group(self._sherpa_provider_cpu_radio)
-        self._sherpa_provider_cuda_radio.connect(
-            "toggled",
-            self._on_sherpa_provider_toggled,
-            "cuda",
-        )
-        page.append(self._sherpa_provider_cuda_radio)
-
-        sherpa_provider_cuda_desc = (
-            "Higher throughput when CUDA runtime is available. "
-            "Wizard will attempt CUDA-capable Sherpa runtime install at finish."
-        )
-        self._sherpa_provider_cuda_desc = Gtk.Label(label=sherpa_provider_cuda_desc)
-        self._sherpa_provider_cuda_desc.add_css_class("wizard-radio-desc")
-        self._sherpa_provider_cuda_desc.set_halign(Gtk.Align.START)
-        page.append(self._sherpa_provider_cuda_desc)
-        self._set_accessible_description(
-            self._sherpa_provider_cuda_radio,
-            sherpa_provider_cuda_desc,
+        self._sherpa_provider_options = [
+            (
+                "cpu",
+                "CPU",
+                "Best compatibility and lowest setup friction.",
+            ),
+            (
+                "cuda",
+                "GPU (CUDA)",
+                "Higher throughput when CUDA runtime is available. Wizard will attempt CUDA-capable Sherpa runtime install at finish.",
+            ),
+        ]
+        (
+            self._sherpa_provider_title,
+            self._sherpa_provider_dropdown,
+            self._sherpa_provider_desc_label,
+        ) = self._make_dropdown_section(
+            page,
+            "Compute device",
+            self._sherpa_provider_options,
+            str(getattr(self, "_sherpa_provider", "cpu")).strip().lower() or "cpu",
+            self._set_sherpa_provider_selection,
+            title_margin_top=8,
         )
 
         self._sync_sherpa_model_controls()
@@ -355,243 +366,161 @@ class WelcomeWizard(Gtk.Application):
         page.set_valign(Gtk.Align.CENTER)
         page.set_spacing(4)
 
-        self._add_text_title(page, "Push-to-Talk Keybind")
+        self._add_text_title(page, "Push-to-Talk & Text Input")
 
         sub = Gtk.Label(
-            label="ShuVoice uses Hyprland bind/bindr for push-to-talk.\n"
-            "Hold the key to record, release to stop. Default: Right Control."
+            label=(
+                "Choose your push-to-talk key and how final text is committed when you release it."
+            )
         )
         sub.add_css_class("wizard-subtitle")
         sub.set_justify(Gtk.Justification.CENTER)
         page.append(sub)
 
-        group: Gtk.CheckButton | None = None
-        self._keybind_radios: dict[str, Gtk.CheckButton] = {}
+        self._keybind_options = [
+            (kb_id, label, description)
+            for kb_id, label, _hypr_key, description in KEYBIND_PRESETS
+        ]
+        (
+            self._keybind_title,
+            self._keybind_dropdown,
+            self._keybind_desc_label,
+        ) = self._make_dropdown_section(
+            page,
+            "Push-to-talk keybind",
+            self._keybind_options,
+            getattr(self, "_keybind", DEFAULT_KEYBIND_ID),
+            self._set_keybind_selection,
+        )
 
-        for kb_id, label, _hypr_key, description in KEYBIND_PRESETS:
-            radio = Gtk.CheckButton(label=label)
-            radio.add_css_class("wizard-radio")
-            if group is None:
-                group = radio
-            else:
-                radio.set_group(group)
-
-            if kb_id == DEFAULT_KEYBIND_ID:
-                radio.set_active(True)
-
-            radio.connect("toggled", self._on_keybind_toggled, kb_id)
-            page.append(radio)
-            self._keybind_radios[kb_id] = radio
-
-            desc_label = Gtk.Label(label=description)
-            desc_label.add_css_class("wizard-radio-desc")
-            desc_label.set_halign(Gtk.Align.START)
-            page.append(desc_label)
-            self._set_accessible_description(radio, description)
-
-        self._auto_add_last_non_custom = True
+        self._auto_add_last_non_custom = getattr(self, "_auto_add_last_non_custom", True)
         self._auto_add_keybind = Gtk.CheckButton(
-            label="Try to add this keybind to ~/.config/hypr/hyprland.conf automatically"
+            label="Try to add this keybind to Hyprland config automatically"
         )
         self._auto_add_keybind.add_css_class("wizard-radio")
-        self._auto_add_keybind.set_active(True)
+        self._auto_add_keybind.set_active(self._auto_add_last_non_custom)
         self._auto_add_keybind.connect("toggled", self._on_auto_add_keybind_toggled)
         page.append(self._auto_add_keybind)
 
         auto_add_desc = Gtk.Label(
             label=(
-                "Only applies when the selected key is not already used by another bind. "
-                "If there is a conflict, wizard will leave your Hyprland config unchanged."
+                "Only applies when the selected key is not already used by another bind. If there is a conflict, wizard will leave your Hyprland config unchanged."
             )
         )
         auto_add_desc.add_css_class("wizard-radio-desc")
         auto_add_desc.set_halign(Gtk.Align.START)
+        auto_add_desc.set_wrap(True)
         page.append(auto_add_desc)
 
-        # Live preview of the Hyprland config lines
-        self._keybind_preview = Gtk.Label()
-        self._keybind_preview.add_css_class("wizard-summary")
-        self._keybind_preview.set_halign(Gtk.Align.START)
-        self._keybind_preview.set_selectable(True)
+        self._final_injection_options = list(FINAL_INJECTION_MODES)
+        (
+            self._final_injection_title,
+            self._final_injection_dropdown,
+            self._final_injection_desc_label,
+        ) = self._make_dropdown_section(
+            page,
+            "Final text injection",
+            self._final_injection_options,
+            getattr(self, "_typing_final_injection_mode", DEFAULT_FINAL_INJECTION_MODE),
+            self._set_final_injection_mode_selection,
+            title_margin_top=12,
+        )
+
+        self._typing_text_case_options = list(TYPING_TEXT_CASE_MODES)
+        (
+            self._typing_text_case_title,
+            self._typing_text_case_dropdown,
+            self._typing_text_case_desc_label,
+        ) = self._make_dropdown_section(
+            page,
+            "Text case",
+            self._typing_text_case_options,
+            getattr(self, "_typing_text_case", DEFAULT_TYPING_TEXT_CASE),
+            self._set_typing_text_case_selection,
+            title_margin_top=12,
+        )
+
         self._sync_auto_add_keybind_state()
-        self._update_keybind_preview()
-        page.append(self._keybind_preview)
 
-        injection_title = Gtk.Label(label="Final text injection")
-        injection_title.add_css_class("wizard-subtitle")
-        injection_title.set_halign(Gtk.Align.START)
-        injection_title.set_margin_top(12)
-        page.append(injection_title)
-
-        injection_help = Gtk.Label(
-            label=(
-                "Choose how the final transcript is committed when you release push-to-talk.\n"
-                "If one mode misbehaves in an app, rerun wizard and switch modes."
-            )
+        nav = self._make_nav_row(
+            back_page="asr",
+            next_page="tts",
         )
-        injection_help.add_css_class("wizard-desc")
-        injection_help.set_halign(Gtk.Align.START)
-        injection_help.set_justify(Gtk.Justification.LEFT)
-        page.append(injection_help)
+        nav.set_margin_top(20)
+        page.append(nav)
 
-        mode_group: Gtk.CheckButton | None = None
-        self._final_injection_radios: dict[str, Gtk.CheckButton] = {}
-        active_mode = getattr(self, "_typing_final_injection_mode", DEFAULT_FINAL_INJECTION_MODE)
+        return page
 
-        for mode_id, mode_label, mode_desc in FINAL_INJECTION_MODES:
-            mode_radio = Gtk.CheckButton(label=mode_label)
-            mode_radio.add_css_class("wizard-radio")
-            if mode_group is None:
-                mode_group = mode_radio
-            else:
-                mode_radio.set_group(mode_group)
+    def _build_tts_page(self) -> Gtk.Widget:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        page.add_css_class("wizard-page")
+        page.set_halign(Gtk.Align.CENTER)
+        page.set_valign(Gtk.Align.CENTER)
+        page.set_spacing(4)
 
-            if mode_id == active_mode:
-                mode_radio.set_active(True)
+        self._add_text_title(page, "Text-to-Speech")
 
-            mode_radio.connect("toggled", self._on_final_injection_toggled, mode_id)
-            page.append(mode_radio)
-            self._final_injection_radios[mode_id] = mode_radio
+        sub = Gtk.Label(label="Choose the TTS provider and default voice for read-aloud shortcuts.")
+        sub.add_css_class("wizard-subtitle")
+        sub.set_justify(Gtk.Justification.CENTER)
+        page.append(sub)
 
-            mode_desc_label = Gtk.Label(label=mode_desc)
-            mode_desc_label.add_css_class("wizard-radio-desc")
-            mode_desc_label.set_halign(Gtk.Align.START)
-            page.append(mode_desc_label)
-            self._set_accessible_description(mode_radio, mode_desc)
-
-        tts_title = Gtk.Label(label="Text-to-Speech provider")
-        tts_title.add_css_class("wizard-subtitle")
-        tts_title.set_halign(Gtk.Align.START)
-        tts_title.set_margin_top(12)
-        page.append(tts_title)
-
-        tts_help = Gtk.Label(
-            label=(
-                "Choose which backend handles the TTS keybind and set the default voice.\n"
-                "For ElevenLabs, paste a voice ID. For OpenAI, use built-in names like onyx or nova.\n"
-                "For Local Piper, point ShuVoice at a .onnx model file or a directory of .onnx voices."
-            )
-        )
-        tts_help.add_css_class("wizard-desc")
-        tts_help.set_halign(Gtk.Align.START)
-        tts_help.set_justify(Gtk.Justification.LEFT)
-        page.append(tts_help)
-
-        tts_group: Gtk.CheckButton | None = None
-        self._tts_backend_radios: dict[str, Gtk.CheckButton] = {}
+        self._tts_backend_options = list(TTS_BACKENDS)
         active_tts_backend = str(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)).strip().lower()
-
-        for backend_id, backend_label, backend_desc in TTS_BACKENDS:
-            backend_radio = Gtk.CheckButton(label=backend_label)
-            backend_radio.add_css_class("wizard-radio")
-            if tts_group is None:
-                tts_group = backend_radio
-            else:
-                backend_radio.set_group(tts_group)
-
-            if backend_id == active_tts_backend:
-                backend_radio.set_active(True)
-
-            backend_radio.connect("toggled", self._on_tts_backend_toggled, backend_id)
-            page.append(backend_radio)
-            self._tts_backend_radios[backend_id] = backend_radio
-
-            backend_desc_label = Gtk.Label(label=backend_desc)
-            backend_desc_label.add_css_class("wizard-radio-desc")
-            backend_desc_label.set_halign(Gtk.Align.START)
-            page.append(backend_desc_label)
-            self._set_accessible_description(backend_radio, backend_desc)
-
-        self._tts_local_setup_mode_title = Gtk.Label(label="Local Piper setup")
-        self._tts_local_setup_mode_title.add_css_class("wizard-subtitle")
-        self._tts_local_setup_mode_title.set_halign(Gtk.Align.START)
-        self._tts_local_setup_mode_title.set_margin_top(8)
-        page.append(self._tts_local_setup_mode_title)
-
-        self._tts_local_setup_mode_help = Gtk.Label(
-            label=(
-                "Choose automatic setup to install Piper and download a curated voice, "
-                "or use an existing local model path."
-            )
+        (
+            self._tts_provider_title,
+            self._tts_provider_dropdown,
+            self._tts_provider_desc_label,
+        ) = self._make_dropdown_section(
+            page,
+            "TTS provider",
+            self._tts_backend_options,
+            active_tts_backend,
+            self._set_tts_backend_selection,
         )
-        self._tts_local_setup_mode_help.add_css_class("wizard-desc")
-        self._tts_local_setup_mode_help.set_halign(Gtk.Align.START)
-        self._tts_local_setup_mode_help.set_justify(Gtk.Justification.LEFT)
-        page.append(self._tts_local_setup_mode_help)
 
-        self._tts_local_auto_mode_radio = Gtk.CheckButton(
-            label="Automatic setup (install Piper + download curated voice)"
+        self._tts_local_setup_options = [
+            (
+                "automatic",
+                "Automatic setup (recommended)",
+                "Install Piper if needed and download a curated voice into ~/.local/share/shuvoice/models/piper.",
+            ),
+            (
+                "manual",
+                "Use existing local path",
+                "Advanced/manual mode. Point ShuVoice at a Piper .onnx model file or a directory of .onnx voices already on disk.",
+            ),
+        ]
+        (
+            self._tts_local_setup_mode_title,
+            self._tts_local_setup_mode_dropdown,
+            self._tts_local_setup_mode_desc,
+        ) = self._make_dropdown_section(
+            page,
+            "Setup mode",
+            self._tts_local_setup_options,
+            str(getattr(self, "_tts_local_setup_mode", "automatic")).strip().lower()
+            or "automatic",
+            self._set_tts_local_setup_mode_selection,
+            title_margin_top=8,
         )
-        self._tts_local_auto_mode_radio.add_css_class("wizard-radio")
-        self._tts_local_auto_mode_radio.connect(
-            "toggled",
-            self._on_tts_local_setup_mode_toggled,
-            "automatic",
+
+        self._tts_local_auto_voice_options = [
+            (option.id, option.label, option.description)
+            for option in curated_piper_voices()
+        ]
+        (
+            self._tts_local_auto_voice_title,
+            self._tts_local_auto_voice_dropdown,
+            self._tts_local_auto_voice_desc,
+        ) = self._make_dropdown_section(
+            page,
+            "Curated voice",
+            self._tts_local_auto_voice_options,
+            getattr(self, "_tts_local_auto_voice_id", recommended_piper_voice().id),
+            self._set_tts_local_auto_voice_selection,
+            title_margin_top=8,
         )
-        page.append(self._tts_local_auto_mode_radio)
-
-        self._tts_local_auto_mode_desc = Gtk.Label(
-            label="Recommended. Uses ~/.local/share/shuvoice/models/piper and validates the selected voice."
-        )
-        self._tts_local_auto_mode_desc.add_css_class("wizard-radio-desc")
-        self._tts_local_auto_mode_desc.set_halign(Gtk.Align.START)
-        page.append(self._tts_local_auto_mode_desc)
-
-        self._tts_local_manual_mode_radio = Gtk.CheckButton(
-            label="Use an existing local model path"
-        )
-        self._tts_local_manual_mode_radio.add_css_class("wizard-radio")
-        self._tts_local_manual_mode_radio.set_group(self._tts_local_auto_mode_radio)
-        self._tts_local_manual_mode_radio.connect(
-            "toggled",
-            self._on_tts_local_setup_mode_toggled,
-            "manual",
-        )
-        page.append(self._tts_local_manual_mode_radio)
-
-        self._tts_local_manual_mode_desc = Gtk.Label(
-            label="Advanced/manual mode. Point ShuVoice at a Piper .onnx file or a directory of .onnx voices already on disk."
-        )
-        self._tts_local_manual_mode_desc.add_css_class("wizard-radio-desc")
-        self._tts_local_manual_mode_desc.set_halign(Gtk.Align.START)
-        page.append(self._tts_local_manual_mode_desc)
-
-        self._tts_local_auto_voice_title = Gtk.Label(label="Curated voice")
-        self._tts_local_auto_voice_title.add_css_class("wizard-subtitle")
-        self._tts_local_auto_voice_title.set_halign(Gtk.Align.START)
-        self._tts_local_auto_voice_title.set_margin_top(8)
-        page.append(self._tts_local_auto_voice_title)
-
-        self._tts_local_auto_voice_help = Gtk.Label(
-            label="Pick one voice to download into the managed Local Piper directory."
-        )
-        self._tts_local_auto_voice_help.add_css_class("wizard-desc")
-        self._tts_local_auto_voice_help.set_halign(Gtk.Align.START)
-        self._tts_local_auto_voice_help.set_justify(Gtk.Justification.LEFT)
-        page.append(self._tts_local_auto_voice_help)
-
-        self._tts_local_auto_voice_radios: dict[str, Gtk.CheckButton] = {}
-        self._tts_local_auto_voice_descs: list[Gtk.Label] = []
-        local_voice_group: Gtk.CheckButton | None = None
-        for option in curated_piper_voices():
-            voice_radio = Gtk.CheckButton(label=option.label)
-            voice_radio.add_css_class("wizard-radio")
-            if local_voice_group is None:
-                local_voice_group = voice_radio
-            else:
-                voice_radio.set_group(local_voice_group)
-            if option.id == getattr(self, "_tts_local_auto_voice_id", recommended_piper_voice().id):
-                voice_radio.set_active(True)
-            voice_radio.connect("toggled", self._on_tts_local_auto_voice_toggled, option.id)
-            page.append(voice_radio)
-            self._tts_local_auto_voice_radios[option.id] = voice_radio
-
-            voice_desc = Gtk.Label(label=option.description)
-            voice_desc.add_css_class("wizard-radio-desc")
-            voice_desc.set_halign(Gtk.Align.START)
-            page.append(voice_desc)
-            self._tts_local_auto_voice_descs.append(voice_desc)
-            self._set_accessible_description(voice_radio, option.description)
 
         self._tts_local_model_path_entry = Gtk.Entry()
         self._tts_local_model_path_entry.add_css_class("wizard-entry")
@@ -603,6 +532,7 @@ class WelcomeWizard(Gtk.Application):
         self._tts_local_model_path_help = Gtk.Label(label="")
         self._tts_local_model_path_help.add_css_class("wizard-radio-desc")
         self._tts_local_model_path_help.set_halign(Gtk.Align.START)
+        self._tts_local_model_path_help.set_wrap(True)
         page.append(self._tts_local_model_path_help)
 
         self._tts_voice_entry = Gtk.Entry()
@@ -615,18 +545,20 @@ class WelcomeWizard(Gtk.Application):
         self._tts_voice_help = Gtk.Label(label="")
         self._tts_voice_help.add_css_class("wizard-radio-desc")
         self._tts_voice_help.set_halign(Gtk.Align.START)
+        self._tts_voice_help.set_wrap(True)
         page.append(self._tts_voice_help)
 
         self._tts_config_error_label = Gtk.Label(label="")
         self._tts_config_error_label.add_css_class("wizard-radio-desc")
         self._tts_config_error_label.set_halign(Gtk.Align.START)
         self._tts_config_error_label.set_visible(False)
+        self._tts_config_error_label.set_wrap(True)
         page.append(self._tts_config_error_label)
 
         self._sync_tts_voice_controls()
 
         nav = self._make_nav_row(
-            back_page="asr",
+            back_page="keybind",
             next_page="done",
             next_label="Finish",
         )
@@ -719,6 +651,15 @@ class WelcomeWizard(Gtk.Application):
             self._asr_backend = backend_id
             self._sync_sherpa_model_controls()
 
+    def _set_sherpa_profile_selection(self, profile_id: str) -> None:
+        if profile_id == "instant":
+            self._sherpa_model_name = PARAKEET_TDT_V3_INT8_MODEL_NAME
+            self._sherpa_enable_parakeet_streaming = False
+            return
+
+        self._sherpa_model_name = DEFAULT_SHERPA_MODEL_NAME
+        self._sherpa_enable_parakeet_streaming = False
+
     def _on_sherpa_profile_toggled(
         self,
         button: Gtk.CheckButton,
@@ -727,97 +668,69 @@ class WelcomeWizard(Gtk.Application):
         if not button.get_active():
             return
 
-        model_name, enable_parakeet_streaming = profile
-        self._sherpa_model_name = model_name
-        self._sherpa_enable_parakeet_streaming = bool(enable_parakeet_streaming)
+        self._set_sherpa_profile_selection(
+            "instant" if profile[0] == PARAKEET_TDT_V3_INT8_MODEL_NAME else "streaming"
+        )
+
+    def _set_sherpa_provider_selection(self, provider: str) -> None:
+        self._sherpa_provider = provider
 
     def _on_sherpa_provider_toggled(self, button: Gtk.CheckButton, provider: str):
         if not button.get_active():
             return
-        self._sherpa_provider = provider
+        self._set_sherpa_provider_selection(provider)
 
     def _sync_sherpa_model_controls(self):
-        title = getattr(self, "_sherpa_profile_title", None)
-        help_text = getattr(self, "_sherpa_profile_help", None)
-        streaming_radio = getattr(self, "_sherpa_streaming_radio", None)
-        streaming_desc = getattr(self, "_sherpa_streaming_desc", None)
-        parakeet_radio = getattr(self, "_sherpa_parakeet_radio", None)
-        parakeet_desc = getattr(self, "_sherpa_parakeet_desc", None)
-
-        provider_title = getattr(self, "_sherpa_provider_title", None)
-        provider_help = getattr(self, "_sherpa_provider_help", None)
-        provider_cpu_radio = getattr(self, "_sherpa_provider_cpu_radio", None)
-        provider_cpu_desc = getattr(self, "_sherpa_provider_cpu_desc", None)
-        provider_cuda_radio = getattr(self, "_sherpa_provider_cuda_radio", None)
-        provider_cuda_desc = getattr(self, "_sherpa_provider_cuda_desc", None)
-
-        if (
-            title is None
-            or help_text is None
-            or streaming_radio is None
-            or streaming_desc is None
-            or parakeet_radio is None
-            or parakeet_desc is None
-            or provider_title is None
-            or provider_help is None
-            or provider_cpu_radio is None
-            or provider_cpu_desc is None
-            or provider_cuda_radio is None
-            or provider_cuda_desc is None
-        ):
+        widgets = (
+            getattr(self, "_sherpa_profile_title", None),
+            getattr(self, "_sherpa_profile_dropdown", None),
+            getattr(self, "_sherpa_profile_desc_label", None),
+            getattr(self, "_sherpa_provider_title", None),
+            getattr(self, "_sherpa_provider_dropdown", None),
+            getattr(self, "_sherpa_provider_desc_label", None),
+        )
+        if any(widget is None for widget in widgets):
             return
 
         is_sherpa = self._asr_backend == "sherpa"
-        for widget in (
-            title,
-            help_text,
-            streaming_radio,
-            streaming_desc,
-            parakeet_radio,
-            parakeet_desc,
-            provider_title,
-            provider_help,
-            provider_cpu_radio,
-            provider_cpu_desc,
-            provider_cuda_radio,
-            provider_cuda_desc,
-        ):
+        for widget in widgets:
             widget.set_visible(is_sherpa)
 
-        streaming_radio.set_sensitive(is_sherpa)
-        parakeet_radio.set_sensitive(is_sherpa)
-        provider_cpu_radio.set_sensitive(is_sherpa)
-        provider_cuda_radio.set_sensitive(is_sherpa)
-
         if not is_sherpa:
-            self._sherpa_model_name = DEFAULT_WIZARD_SHERPA_MODEL_NAME
-            self._sherpa_enable_parakeet_streaming = False
             return
 
-        if self._sherpa_model_name == PARAKEET_TDT_V3_INT8_MODEL_NAME:
-            parakeet_radio.set_active(True)
-        else:
-            streaming_radio.set_active(True)
+        profile_id = (
+            "instant"
+            if getattr(self, "_sherpa_model_name", DEFAULT_WIZARD_SHERPA_MODEL_NAME)
+            == PARAKEET_TDT_V3_INT8_MODEL_NAME
+            else "streaming"
+        )
+        self._set_dropdown_selected(
+            getattr(self, "_sherpa_profile_dropdown", None),
+            getattr(self, "_sherpa_profile_options", []),
+            profile_id,
+        )
+        self._set_sherpa_profile_selection(profile_id)
 
-        if parakeet_radio.get_active():
-            self._sherpa_model_name = PARAKEET_TDT_V3_INT8_MODEL_NAME
-            self._sherpa_enable_parakeet_streaming = False
-        else:
-            self._sherpa_model_name = DEFAULT_SHERPA_MODEL_NAME
-            self._sherpa_enable_parakeet_streaming = False
+        provider_id = (
+            "cuda"
+            if str(getattr(self, "_sherpa_provider", "cpu")).strip().lower() == "cuda"
+            else "cpu"
+        )
+        self._set_dropdown_selected(
+            getattr(self, "_sherpa_provider_dropdown", None),
+            getattr(self, "_sherpa_provider_options", []),
+            provider_id,
+        )
+        self._set_sherpa_provider_selection(provider_id)
 
-        if str(getattr(self, "_sherpa_provider", "cpu")).strip().lower() == "cuda":
-            provider_cuda_radio.set_active(True)
-            self._sherpa_provider = "cuda"
-        else:
-            provider_cpu_radio.set_active(True)
-            self._sherpa_provider = "cpu"
+    def _set_keybind_selection(self, kb_id: str) -> None:
+        self._keybind = kb_id
+        self._sync_auto_add_keybind_state()
 
     def _on_keybind_toggled(self, button: Gtk.CheckButton, kb_id: str):
         if button.get_active():
-            self._keybind = kb_id
-            self._sync_auto_add_keybind_state()
-            self._update_keybind_preview()
+            self._set_keybind_selection(kb_id)
 
     def _on_auto_add_keybind_toggled(self, _button: Gtk.CheckButton):
         if not hasattr(self, "_auto_add_keybind"):
@@ -825,19 +738,23 @@ class WelcomeWizard(Gtk.Application):
 
         if self._auto_add_keybind.get_sensitive():
             self._auto_add_last_non_custom = self._auto_add_keybind.get_active()
-        self._update_keybind_preview()
+
+    def _set_final_injection_mode_selection(self, mode_id: str) -> None:
+        self._typing_final_injection_mode = mode_id
 
     def _on_final_injection_toggled(self, button: Gtk.CheckButton, mode_id: str):
         if not button.get_active():
             return
-        self._typing_final_injection_mode = mode_id
+        self._set_final_injection_mode_selection(mode_id)
 
-    def _on_tts_backend_toggled(self, button: Gtk.CheckButton, backend_id: str):
-        if not button.get_active():
-            return
+    def _set_typing_text_case_selection(self, text_case: str) -> None:
+        self._typing_text_case = text_case
+
+    def _set_tts_backend_selection(self, backend_id: str) -> None:
         current_backend = str(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)).strip().lower()
         current_voice = str(getattr(self, "_tts_voice_id", "")).strip()
         voice_by_backend = getattr(self, "_tts_voice_by_backend", None)
+
         if not isinstance(voice_by_backend, dict):
             voice_by_backend = {}
             self._tts_voice_by_backend = voice_by_backend
@@ -853,18 +770,29 @@ class WelcomeWizard(Gtk.Application):
         self._set_tts_config_error(None)
         self._sync_tts_voice_controls()
 
-    def _on_tts_local_setup_mode_toggled(self, button: Gtk.CheckButton, mode: str):
+    def _on_tts_backend_toggled(self, button: Gtk.CheckButton, backend_id: str):
         if not button.get_active():
             return
+        self._set_tts_backend_selection(backend_id)
+
+    def _set_tts_local_setup_mode_selection(self, mode: str) -> None:
         self._tts_local_setup_mode = mode
         self._set_tts_config_error(None)
         self._sync_tts_voice_controls()
 
+    def _on_tts_local_setup_mode_toggled(self, button: Gtk.CheckButton, mode: str):
+        if not button.get_active():
+            return
+        self._set_tts_local_setup_mode_selection(mode)
+
+    def _set_tts_local_auto_voice_selection(self, voice_id: str) -> None:
+        self._tts_local_auto_voice_id = voice_id
+        self._set_tts_config_error(None)
+
     def _on_tts_local_auto_voice_toggled(self, button: Gtk.CheckButton, voice_id: str):
         if not button.get_active():
             return
-        self._tts_local_auto_voice_id = voice_id
-        self._set_tts_config_error(None)
+        self._set_tts_local_auto_voice_selection(voice_id)
 
     def _on_tts_local_model_path_changed(self, entry: Gtk.Entry):
         self._tts_local_model_path = entry.get_text().strip()
@@ -977,6 +905,7 @@ class WelcomeWizard(Gtk.Application):
         return True
 
     def _sync_tts_voice_controls(self):
+        backend_dropdown = getattr(self, "_tts_provider_dropdown", None)
         entry = getattr(self, "_tts_voice_entry", None)
         help_label = getattr(self, "_tts_voice_help", None)
         path_entry = getattr(self, "_tts_local_model_path_entry", None)
@@ -995,46 +924,44 @@ class WelcomeWizard(Gtk.Application):
         self._tts_voice_id = current_voice
         voice_by_backend[backend_id] = current_voice
 
+        self._set_dropdown_selected(
+            backend_dropdown,
+            getattr(self, "_tts_backend_options", []),
+            backend_id or DEFAULT_TTS_BACKEND,
+        )
+
         is_local = backend_id == "local"
         auto_mode = self._local_tts_auto_mode_enabled()
 
         setup_mode_widgets = (
             getattr(self, "_tts_local_setup_mode_title", None),
-            getattr(self, "_tts_local_setup_mode_help", None),
-            getattr(self, "_tts_local_auto_mode_radio", None),
-            getattr(self, "_tts_local_auto_mode_desc", None),
-            getattr(self, "_tts_local_manual_mode_radio", None),
-            getattr(self, "_tts_local_manual_mode_desc", None),
+            getattr(self, "_tts_local_setup_mode_dropdown", None),
+            getattr(self, "_tts_local_setup_mode_desc", None),
         )
         for widget in setup_mode_widgets:
             if widget is not None:
                 widget.set_visible(is_local)
-        for widget in (
+
+        auto_voice_widgets = (
             getattr(self, "_tts_local_auto_voice_title", None),
-            getattr(self, "_tts_local_auto_voice_help", None),
-        ):
+            getattr(self, "_tts_local_auto_voice_dropdown", None),
+            getattr(self, "_tts_local_auto_voice_desc", None),
+        )
+        for widget in auto_voice_widgets:
             if widget is not None:
                 widget.set_visible(is_local and auto_mode)
 
-        if getattr(self, "_tts_local_auto_mode_radio", None) is not None:
-            if str(getattr(self, "_tts_local_setup_mode", "automatic")).strip().lower() == "manual":
-                self._tts_local_manual_mode_radio.set_active(True)
-            else:
-                self._tts_local_auto_mode_radio.set_active(True)
-                self._tts_local_setup_mode = "automatic"
-
-        auto_voice_radios = getattr(self, "_tts_local_auto_voice_radios", {}) or {}
-        for voice_id, radio in auto_voice_radios.items():
-            radio.set_visible(is_local and auto_mode)
-            if voice_id == getattr(self, "_tts_local_auto_voice_id", recommended_piper_voice().id):
-                radio.set_active(True)
-        for desc in getattr(self, "_tts_local_auto_voice_descs", []) or []:
-            desc.set_visible(is_local and auto_mode)
-
-        for attr_name in ("_tts_local_model_path_entry", "_tts_local_model_path_help"):
-            widget = getattr(self, attr_name, None)
-            if widget is not None:
-                widget.set_visible(is_local and not auto_mode)
+        self._set_dropdown_selected(
+            getattr(self, "_tts_local_setup_mode_dropdown", None),
+            getattr(self, "_tts_local_setup_options", []),
+            str(getattr(self, "_tts_local_setup_mode", "automatic")).strip().lower()
+            or "automatic",
+        )
+        self._set_dropdown_selected(
+            getattr(self, "_tts_local_auto_voice_dropdown", None),
+            getattr(self, "_tts_local_auto_voice_options", []),
+            getattr(self, "_tts_local_auto_voice_id", recommended_piper_voice().id),
+        )
 
         path_entry.set_visible(is_local and not auto_mode)
         path_help.set_visible(is_local and not auto_mode)
@@ -1084,7 +1011,7 @@ class WelcomeWizard(Gtk.Application):
             return
 
         hypr_key = next(
-            (hk for kid, _, hk, _ in KEYBIND_PRESETS if kid == self._keybind),
+            (hk for kid, _label, hk, _desc in KEYBIND_PRESETS if kid == self._keybind),
             None,
         )
         if hypr_key is None:
@@ -1102,32 +1029,6 @@ class WelcomeWizard(Gtk.Application):
             and self._auto_add_keybind is not None
             and self._auto_add_keybind.get_active()
         )
-
-    def _update_keybind_preview(self):
-        """Refresh the keybind preview box based on current selection."""
-        if not hasattr(self, "_keybind_preview") or self._keybind_preview is None:
-            return
-        hypr_key = next(
-            (hk for kid, _, hk, _ in KEYBIND_PRESETS if kid == self._keybind),
-            None,
-        )
-        if hypr_key:
-            bind_text = format_hyprland_bind_for_keybind(self._keybind, hypr_key)
-            indented = "\n".join(f"  {line}" for line in bind_text.splitlines())
-            if self._auto_add_enabled():
-                text = (
-                    "Wizard will try to add this to ~/.config/hypr/hyprland.conf\n"
-                    "(only if no conflicting bind already uses that key):\n\n"
-                    f"{indented}"
-                )
-            else:
-                text = f"Add to ~/.config/hypr/hyprland.conf:\n\n{indented}"
-        else:
-            text = (
-                "Configure your keybind in ~/.config/hypr/hyprland.conf\n"
-                "See README.md for bind/bindr examples."
-            )
-        self._keybind_preview.set_text(text)
 
     def _release_input_and_destroy_window(self):
         win = self._win
@@ -1197,6 +1098,11 @@ class WelcomeWizard(Gtk.Application):
                 self,
                 "_typing_final_injection_mode",
                 DEFAULT_FINAL_INJECTION_MODE,
+            ),
+            "typing_text_case": getattr(
+                self,
+                "_typing_text_case",
+                DEFAULT_TYPING_TEXT_CASE,
             ),
             "tts_backend": tts_backend,
             "tts_default_voice_id": tts_voice_id,
@@ -1435,6 +1341,11 @@ class WelcomeWizard(Gtk.Application):
                         "_typing_final_injection_mode",
                         DEFAULT_FINAL_INJECTION_MODE,
                     ),
+                    typing_text_case=getattr(
+                        self,
+                        "_typing_text_case",
+                        DEFAULT_TYPING_TEXT_CASE,
+                    ),
                     tts_backend=resolved_tts_backend,
                     tts_default_voice_id=resolved_tts_voice,
                     tts_local_model_path=self._effective_tts_local_model_path() or None,
@@ -1611,6 +1522,11 @@ class WelcomeWizard(Gtk.Application):
                     self,
                     "_typing_final_injection_mode",
                     DEFAULT_FINAL_INJECTION_MODE,
+                ),
+                typing_text_case=getattr(
+                    self,
+                    "_typing_text_case",
+                    DEFAULT_TYPING_TEXT_CASE,
                 ),
                 tts_backend=tts_backend,
                 tts_default_voice_id=tts_voice_id,

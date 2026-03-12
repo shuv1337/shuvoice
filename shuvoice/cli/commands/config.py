@@ -10,6 +10,7 @@ from ...config_io import load_raw, toml_dumps, write_atomic
 from ...config_migrations import migrate_to_latest
 
 _ALLOWED_FINAL_INJECTION_MODES = {"auto", "clipboard", "direct"}
+_ALLOWED_TEXT_CASE_MODES = {"default", "lowercase"}
 
 
 def _flatten_candidate(raw: dict[str, Any]) -> dict[str, Any]:
@@ -45,17 +46,27 @@ def config_set(key: str, value: str) -> int:
     key_norm = str(key).strip()
     value_norm = str(value).strip().lower()
 
-    if key_norm != "typing_final_injection_mode":
+    supported_keys = {"typing_final_injection_mode", "typing_text_case"}
+    if key_norm not in supported_keys:
+        supported = ", ".join(sorted(supported_keys))
         print(
-            f"ERROR: unsupported config key '{key_norm}'. Supported keys: typing_final_injection_mode",
+            f"ERROR: unsupported config key '{key_norm}'. Supported keys: {supported}",
             file=sys.stderr,
         )
         return 1
 
-    if value_norm not in _ALLOWED_FINAL_INJECTION_MODES:
+    if key_norm == "typing_final_injection_mode" and value_norm not in _ALLOWED_FINAL_INJECTION_MODES:
         allowed = ", ".join(sorted(_ALLOWED_FINAL_INJECTION_MODES))
         print(
             f"ERROR: typing_final_injection_mode must be one of: {allowed}",
+            file=sys.stderr,
+        )
+        return 1
+
+    if key_norm == "typing_text_case" and value_norm not in _ALLOWED_TEXT_CASE_MODES:
+        allowed = ", ".join(sorted(_ALLOWED_TEXT_CASE_MODES))
+        print(
+            f"ERROR: typing_text_case must be one of: {allowed}",
             file=sys.stderr,
         )
         return 1
@@ -71,9 +82,10 @@ def config_set(key: str, value: str) -> int:
             typing_table = {}
             migrated["typing"] = typing_table
 
-        typing_table["typing_final_injection_mode"] = value_norm
-        # Keep legacy flag synchronized for old config consumers.
-        typing_table["use_clipboard_for_final"] = value_norm != "direct"
+        typing_table[key_norm] = value_norm
+        if key_norm == "typing_final_injection_mode":
+            # Keep legacy flag synchronized for old config consumers.
+            typing_table["use_clipboard_for_final"] = value_norm != "direct"
 
         _validate_candidate(migrated)
         backup = write_atomic(config_file, migrated)
@@ -81,19 +93,16 @@ def config_set(key: str, value: str) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    legacy_value = "true" if value_norm != "direct" else "false"
-    if backup is not None:
-        print(
-            "OK "
-            f"set {key_norm}={value_norm} "
-            f"(use_clipboard_for_final={legacy_value}, path={config_file}, backup={backup})"
-        )
+    if key_norm == "typing_final_injection_mode":
+        legacy_value = "true" if value_norm != "direct" else "false"
+        extra = f" (use_clipboard_for_final={legacy_value}, path={config_file}"
     else:
-        print(
-            "OK "
-            f"set {key_norm}={value_norm} "
-            f"(use_clipboard_for_final={legacy_value}, path={config_file})"
-        )
+        extra = f" (path={config_file}"
+
+    if backup is not None:
+        print("OK " f"set {key_norm}={value_norm}" f"{extra}, backup={backup})")
+    else:
+        print("OK " f"set {key_norm}={value_norm}" f"{extra})")
 
     return 0
 

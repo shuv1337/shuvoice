@@ -127,6 +127,13 @@ def test_subcommand_config_set_route():
     assert route == "config_set"
 
 
+def test_subcommand_config_set_text_case_route():
+    _parser, _args, route, _warnings = _parse(
+        ["config", "set", "typing_text_case", "lowercase"]
+    )
+    assert route == "config_set"
+
+
 def test_subcommand_model_download_route():
     _parser, _args, route, _warnings = _parse(["model", "download"])
     assert route == "model_download"

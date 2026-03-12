@@ -146,10 +146,30 @@ def test_config_set_updates_typing_final_injection_mode(monkeypatch, tmp_path, c
     assert "use_clipboard_for_final = false" in content
 
 
+def test_config_set_updates_typing_text_case(monkeypatch, tmp_path, capsys):
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[typing]\ntyping_text_case = "default"\n', encoding="utf-8")
+
+    monkeypatch.setattr(config_cmd.Config, "config_path", classmethod(lambda cls: config_file))
+
+    assert config_cmd.config_set("typing_text_case", "lowercase") == 0
+    out = capsys.readouterr().out
+    assert "OK set typing_text_case=lowercase" in out
+
+    content = config_file.read_text(encoding="utf-8")
+    assert 'typing_text_case = "lowercase"' in content
+
+
 def test_config_set_rejects_invalid_value(capsys):
     assert config_cmd.config_set("typing_final_injection_mode", "invalid") == 1
     err = capsys.readouterr().err
     assert "typing_final_injection_mode must be one of" in err
+
+
+def test_config_set_rejects_invalid_typing_text_case(capsys):
+    assert config_cmd.config_set("typing_text_case", "invalid") == 1
+    err = capsys.readouterr().err
+    assert "typing_text_case must be one of" in err
 
 
 def test_config_set_rejects_unsupported_key(capsys):

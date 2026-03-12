@@ -15,6 +15,7 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     assert cfg.sample_rate == 16000
     assert cfg.output_mode == "final_only"
     assert cfg.typing_final_injection_mode == "auto"
+    assert cfg.typing_text_case == "default"
     assert cfg.typing_clipboard_settle_delay_ms == 40
     assert cfg.audio_queue_max_size == 200
     assert cfg.auto_gain_target_peak == 0.15
@@ -114,6 +115,7 @@ tts_local_device = "3"
 
 [typing]
 output_mode = "streaming_partial"
+typing_text_case = "lowercase"
 use_clipboard_for_final = true
 preserve_clipboard = true
 typing_retry_attempts = 3
@@ -183,6 +185,7 @@ foo = "bar"
     assert cfg.tts_local_device == 3
     assert cfg.output_mode == "streaming_partial"
     assert cfg.typing_final_injection_mode == "auto"
+    assert cfg.typing_text_case == "lowercase"
     assert cfg.use_clipboard_for_final is True
     assert cfg.preserve_clipboard is True
     assert cfg.typing_retry_attempts == 3
@@ -264,6 +267,14 @@ use_clipboard_for_final = false
 
     assert cfg.use_clipboard_for_final is False
     assert cfg.typing_final_injection_mode == "auto"
+
+
+def test_typing_text_case_validation_and_normalization():
+    cfg = Config(typing_text_case="  LOWERCASE  ")
+    assert cfg.typing_text_case == "lowercase"
+
+    with pytest.raises(ValueError, match="typing_text_case"):
+        Config(typing_text_case="titlecase")
 
 
 def test_config_helpers_create_dirs(monkeypatch, tmp_path: Path):

@@ -83,6 +83,7 @@ def test_write_config_creates_toml_with_cuda(tmp_path):
         assert "sherpa_enable_parakeet_streaming = false" in content
         assert 'output_mode = "final_only"' in content
         assert f'typing_final_injection_mode = "{DEFAULT_FINAL_INJECTION_MODE}"' in content
+        assert 'typing_text_case = "default"' in content
         assert 'tts_backend = "elevenlabs"' in content
         assert 'tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"' in content
         assert "use_clipboard_for_final = true" in content
@@ -108,6 +109,7 @@ def test_write_config_creates_toml_without_cuda(tmp_path):
         assert "sherpa_enable_parakeet_streaming = false" in content
         assert 'output_mode = "final_only"' in content
         assert f'typing_final_injection_mode = "{DEFAULT_FINAL_INJECTION_MODE}"' in content
+        assert 'typing_text_case = "default"' in content
         assert 'tts_backend = "elevenlabs"' in content
         assert 'tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"' in content
         assert "use_clipboard_for_final = true" in content
@@ -153,6 +155,7 @@ def test_write_config_sherpa_custom_model_name(tmp_path):
         assert "sherpa_enable_parakeet_streaming = false" in content
         assert 'output_mode = "final_only"' in content
         assert f'typing_final_injection_mode = "{DEFAULT_FINAL_INJECTION_MODE}"' in content
+        assert 'typing_text_case = "default"' in content
         assert "use_clipboard_for_final = true" in content
 
 
@@ -176,6 +179,7 @@ def test_write_config_sherpa_parakeet_streaming_override(tmp_path):
         assert "sherpa_enable_parakeet_streaming = true" in content
         assert 'output_mode = "final_only"' in content
         assert f'typing_final_injection_mode = "{DEFAULT_FINAL_INJECTION_MODE}"' in content
+        assert 'typing_text_case = "default"' in content
         assert "use_clipboard_for_final = true" in content
 
 
@@ -204,6 +208,7 @@ def test_write_config_typing_mode_direct_updates_legacy_flag(tmp_path):
 
     content = (tmp_path / "config.toml").read_text()
     assert 'typing_final_injection_mode = "direct"' in content
+    assert 'typing_text_case = "default"' in content
     assert "use_clipboard_for_final = false" in content
 
 
@@ -213,6 +218,15 @@ def test_write_config_rejects_invalid_typing_mode(tmp_path):
         with patch("shuvoice.wizard_state._detect_cuda", return_value=False):
             with pytest.raises(ValueError, match="typing_final_injection_mode"):
                 write_config("nemo", typing_final_injection_mode="invalid")
+
+
+
+def test_write_config_rejects_invalid_typing_text_case(tmp_path):
+    with patch("shuvoice.wizard_state.Config") as mock_config:
+        mock_config.config_dir.return_value = tmp_path
+        with patch("shuvoice.wizard_state._detect_cuda", return_value=False):
+            with pytest.raises(ValueError, match="typing_text_case"):
+                write_config("nemo", typing_text_case="titlecase")
 
 
 def test_write_config_rejects_invalid_sherpa_provider(tmp_path):
@@ -341,6 +355,11 @@ def test_format_summary_contains_backend_and_keybind():
 def test_format_summary_shows_selected_final_injection_mode():
     result = format_summary("nemo", typing_final_injection_mode="direct")
     assert "Final injection:  Direct typing (keystroke simulation)" in result
+
+
+def test_format_summary_shows_selected_typing_text_case():
+    result = format_summary("nemo", typing_text_case="lowercase")
+    assert "Text case:        Lowercase" in result
 
 
 def test_format_summary_shows_selected_tts_provider_and_voice():

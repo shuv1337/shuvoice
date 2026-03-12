@@ -90,6 +90,7 @@ CONFIG_SECTION_FIELDS: dict[str, tuple[str, ...]] = {
     "typing": (
         "output_mode",
         "typing_final_injection_mode",
+        "typing_text_case",
         "use_clipboard_for_final",
         "preserve_clipboard",
         "typing_clipboard_settle_delay_ms",
@@ -256,6 +257,7 @@ class Config:
     # Text injection
     output_mode: str = "final_only"  # final_only | streaming_partial
     typing_final_injection_mode: str = "auto"  # auto | clipboard | direct
+    typing_text_case: str = "default"  # default | lowercase
     use_clipboard_for_final: bool = True
     preserve_clipboard: bool = False
     typing_clipboard_settle_delay_ms: int = 40
@@ -514,6 +516,10 @@ class Config:
         self.typing_final_injection_mode = str(self.typing_final_injection_mode).strip().lower()
         if self.typing_final_injection_mode not in {"auto", "clipboard", "direct"}:
             raise ValueError("typing_final_injection_mode must be one of: auto, clipboard, direct")
+
+        self.typing_text_case = str(self.typing_text_case).strip().lower()
+        if self.typing_text_case not in {"default", "lowercase"}:
+            raise ValueError("typing_text_case must be one of: default, lowercase")
 
         if not isinstance(self.use_clipboard_for_final, bool):
             raise ValueError("use_clipboard_for_final must be true or false")

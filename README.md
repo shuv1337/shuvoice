@@ -30,7 +30,7 @@
 - **Text-to-speech** — highlight text and hear it read aloud via ElevenLabs, OpenAI, or local Piper.
 - **Native Wayland overlay** — GTK4 layer-shell overlay with blur, transparency, and live transcription feedback.
 - **Waybar integration** — tray-style status icon with tooltip, state colors, and click actions.
-- **Guided setup wizard** — interactive GTK wizard walks you through backend, keybind, and model selection.
+- **Guided setup wizard** — compact GTK onboarding flow with separate ASR, keybind/typing, and TTS steps plus model setup.
 - **Zero root access** — runs entirely in userspace via Hyprland IPC; no `/dev/input` needed.
 
 ---
@@ -52,7 +52,7 @@ systemctl --user enable --now shuvoice.service
 # 4. Use it! Hold your push-to-talk key, speak, release.
 ```
 
-That's it. The wizard handles backend selection, model downloads, and Hyprland keybind setup.
+That's it. The wizard handles backend selection, keybind + final text injection choices, TTS setup, model downloads, and Hyprland keybind setup.
 
 > **Not on Arch?** See [Manual Installation](#manual-installation-from-source) below.
 
@@ -166,14 +166,15 @@ shuvoice wizard
   <img src="./docs/assets/screenshots/wizard-welcome.png" alt="Setup wizard welcome" width="760">
 </p>
 
-The wizard will:
+The wizard now uses a compact 5-step flow:
 
-1. **Select your ASR backend** — Sherpa-ONNX, NeMo, or Moonshine
-2. **Choose a Sherpa profile** (if applicable) — Streaming (Zipformer) or Instant (Parakeet)
-3. **Pick your push-to-talk key** — Right Ctrl, Insert, F9, Super+V, or custom
-4. **Choose your TTS provider + default voice** — ElevenLabs, OpenAI, or Local Piper
-5. **For Local Piper** — choose either automatic setup (install Piper + download a curated voice) or an existing local model path
-6. **Download model files** — with progress indicator and cancel support
+1. **Welcome** — quick first-run intro
+2. **Select your ASR backend** — Sherpa-ONNX, NeMo, or Moonshine
+3. **Choose a Sherpa profile + device** (if applicable) — Streaming (Zipformer) or Instant (Parakeet), then CPU or GPU
+4. **Pick your push-to-talk key + final text injection mode** — Right Ctrl, Insert, F9, Super+V, or custom, plus Auto / Clipboard / Direct typing
+5. **Choose your TTS provider + default voice** — ElevenLabs, OpenAI, or Local Piper
+   - **For Local Piper** — choose either automatic setup (install Piper + download a curated voice) or an existing local model path
+6. **Review summary + download model files** — with progress indicator and cancel support
 7. **Auto-configure Hyprland keybinds** — adds `bind`/`bindr` lines if the key isn't already used
 
 <p align="center">
@@ -440,18 +441,30 @@ Controls how transcribed text is typed into your focused app:
 ```toml
 [typing]
 typing_final_injection_mode = "auto"   # auto | clipboard | direct
+typing_text_case = "default"           # default | lowercase
 ```
 
-| Mode | Behavior |
+| Setting | Values | Behavior |
+|---|---|---|
+| `typing_final_injection_mode` | `auto`, `clipboard`, `direct` | Controls how final text is injected into the focused app |
+| `typing_text_case` | `default`, `lowercase` | Controls whether final text keeps normal capitalization/punctuation style or is forced to lowercase |
+
+| Injection mode | Behavior |
 |---|---|
 | `auto` (default) | Detects clipboard watchers and chooses the safest method automatically |
 | `clipboard` | Copies text to clipboard and pastes with `Ctrl+V` |
 | `direct` | Types text directly via `wtype` (avoids clipboard) |
 
-Quick toggle from CLI:
+| Text case | Behavior |
+|---|---|
+| `default` (default) | Keeps ShuVoice's normal punctuation/capitalization processing |
+| `lowercase` | Forces final committed text to lowercase for informal chat/conversation |
+
+Quick toggles from CLI:
 
 ```bash
 shuvoice config set typing_final_injection_mode direct
+shuvoice config set typing_text_case lowercase
 ```
 
 ### Text Replacements
@@ -669,6 +682,7 @@ complete examples.
 | Phantom text on silent presses | Raise `silence_rms_threshold` (try `0.010`→`0.015`) or `silence_rms_multiplier` (try `2.0`) |
 | Long phrases cut out | Keep `streaming_stall_guard = true` (default); tune `streaming_stall_chunks` (3–6) |
 | Clipboard pollution | Set `typing_final_injection_mode = "auto"` (detects clipboard managers automatically) |
+| Need casual/lowercase chat output | Set `typing_text_case = "lowercase"` |
 
 </details>
 

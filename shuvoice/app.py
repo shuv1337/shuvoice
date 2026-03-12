@@ -25,7 +25,7 @@ from .control import ControlServer
 from .diagnostics import metrics_to_json
 from .feedback import play_tone
 from .metrics import MetricsCollector
-from .postprocess import apply_text_replacements, capitalize_first
+from .postprocess import apply_text_replacements, capitalize_first, lowercase_text
 from .runtime import (
     append_recording_chunk,
     apply_utterance_gain,
@@ -801,6 +801,9 @@ class ShuVoiceApp(Gtk.Application):
         )
         if not rendered:
             return rendered
+
+        if getattr(self.config, "typing_text_case", "default") == "lowercase":
+            return lowercase_text(rendered)
 
         if self.config.auto_capitalize:
             rendered = capitalize_first(rendered)

@@ -73,6 +73,21 @@ FINAL_INJECTION_MODES = [
 DEFAULT_FINAL_INJECTION_MODE = "auto"
 _FINAL_INJECTION_MODE_SET = {mode for mode, _label, _desc in FINAL_INJECTION_MODES}
 
+TYPING_TEXT_CASE_MODES = [
+    (
+        "default",
+        "Default",
+        "Keeps ShuVoice's normal capitalization behavior for polished sentence-style output.",
+    ),
+    (
+        "lowercase",
+        "Lowercase",
+        "Forces final committed STT output to lowercase for informal chat and casual conversation.",
+    ),
+]
+DEFAULT_TYPING_TEXT_CASE = "default"
+_TYPING_TEXT_CASE_SET = {mode for mode, _label, _desc in TYPING_TEXT_CASE_MODES}
+
 
 def _is_parakeet_sherpa_model_name(model_name: str) -> bool:
     return "parakeet" in str(model_name).strip().lower()
@@ -655,6 +670,7 @@ def write_config(
     sherpa_enable_parakeet_streaming: bool = False,
     sherpa_provider: str | None = None,
     typing_final_injection_mode: str = DEFAULT_FINAL_INJECTION_MODE,
+    typing_text_case: str = "default",
     tts_backend: str = DEFAULT_TTS_BACKEND,
     tts_default_voice_id: str | None = None,
     tts_local_model_path: str | None = None,
@@ -701,6 +717,11 @@ def write_config(
     if injection_mode not in _FINAL_INJECTION_MODE_SET:
         allowed = ", ".join(sorted(_FINAL_INJECTION_MODE_SET))
         raise ValueError(f"typing_final_injection_mode must be one of: {allowed}")
+
+    text_case_mode = str(typing_text_case).strip().lower()
+    if text_case_mode not in _TYPING_TEXT_CASE_SET:
+        allowed = ", ".join(sorted(_TYPING_TEXT_CASE_SET))
+        raise ValueError(f"typing_text_case must be one of: {allowed}")
 
     tts_backend_value = str(tts_backend).strip().lower()
     if tts_backend_value not in {"elevenlabs", "openai", "local"}:
@@ -773,6 +794,7 @@ def write_config(
         asr_table[provider_key] = provider
 
     typing_table["typing_final_injection_mode"] = injection_mode
+    typing_table["typing_text_case"] = text_case_mode
     # Keep legacy compatibility flag in sync for older tooling/parsers.
     typing_table["use_clipboard_for_final"] = injection_mode != "direct"
 
@@ -835,6 +857,7 @@ def format_summary(
     sherpa_enable_parakeet_streaming: bool = False,
     sherpa_provider: str | None = None,
     typing_final_injection_mode: str = DEFAULT_FINAL_INJECTION_MODE,
+    typing_text_case: str = "default",
     tts_backend: str = DEFAULT_TTS_BACKEND,
     tts_default_voice_id: str | None = None,
     tts_local_model_path: str | None = None,
@@ -856,6 +879,12 @@ def format_summary(
         "direct": "Direct typing (keystroke simulation)",
     }.get(injection_mode, injection_mode or DEFAULT_FINAL_INJECTION_MODE)
 
+    text_case_mode = str(typing_text_case).strip().lower() or DEFAULT_TYPING_TEXT_CASE
+    text_case_label = {
+        "default": "Default",
+        "lowercase": "Lowercase",
+    }.get(text_case_mode, text_case_mode)
+
     tts_backend_value = str(tts_backend).strip().lower() or DEFAULT_TTS_BACKEND
     tts_voice_value = str(
         tts_default_voice_id or default_tts_voice_for_backend(tts_backend_value)
@@ -864,6 +893,7 @@ def format_summary(
     lines = [
         f"ASR backend:      {asr_name}",
         f"Final injection:  {injection_label}",
+        f"Text case:        {text_case_label}",
         f"TTS provider:     {tts_backend_label(tts_backend_value)}",
         f"TTS voice:        {tts_voice_label(tts_backend_value, tts_voice_value)}",
         f"Push-to-talk:     {keybind_label}",

@@ -71,6 +71,30 @@ def test_cli_main_dispatches_config_set_without_loading_config(monkeypatch):
     assert called["load"] is False
 
 
+def test_cli_main_dispatches_typing_text_case_config_set_without_loading_config(monkeypatch):
+    called = {"set": False, "load": False}
+    monkeypatch.setattr("shuvoice.cli.load_local_dev_env", lambda: 0)
+
+    def fake_set(key: str, value: str) -> int:
+        called["set"] = True
+        called["key"] = key
+        called["value"] = value
+        return 0
+
+    def fake_load(_args):
+        called["load"] = True
+        return Config()
+
+    monkeypatch.setattr("shuvoice.cli.config_set", fake_set)
+    monkeypatch.setattr("shuvoice.cli._load_config_or_exit", fake_load)
+
+    assert cli_main(["config", "set", "typing_text_case", "lowercase"]) == 0
+    assert called["set"] is True
+    assert called["key"] == "typing_text_case"
+    assert called["value"] == "lowercase"
+    assert called["load"] is False
+
+
 def test_cli_main_dispatches_preflight(monkeypatch):
     monkeypatch.setattr("shuvoice.cli.load_local_dev_env", lambda: 0)
     monkeypatch.setattr("shuvoice.cli._load_config_or_exit", lambda _args: Config())

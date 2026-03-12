@@ -85,6 +85,9 @@ def test_typing_mode_validation():
     with pytest.raises(ValueError, match="typing_final_injection_mode"):
         Config(typing_final_injection_mode="fast")
 
+    with pytest.raises(ValueError, match="typing_text_case"):
+        Config(typing_text_case="titlecase")
+
     with pytest.raises(ValueError, match="use_clipboard_for_final"):
         Config(use_clipboard_for_final="yes")
 

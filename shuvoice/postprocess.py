@@ -8,6 +8,11 @@ from collections.abc import Mapping
 CompiledTextReplacements = tuple[tuple[re.Pattern[str], str], ...]
 
 
+def lowercase_text(text: str) -> str:
+    """Convert text to lowercase for informal/chat-style output."""
+    return text.lower()
+
+
 def capitalize_first(text: str) -> str:
     """Capitalize the first alphabetic character, preserving leading spacing."""
     if not text:

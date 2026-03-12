@@ -378,12 +378,27 @@ def test_render_transcript_text_applies_replacements_and_capitalize():
         config=SimpleNamespace(
             text_replacements={"shove voice": "ShuVoice", "um": ""},
             auto_capitalize=True,
+            typing_text_case="default",
         )
     )
 
     rendered = ShuVoiceApp._render_transcript_text(app, "shove voice um")
 
     assert rendered == "ShuVoice"
+
+
+def test_render_transcript_text_can_force_lowercase_output():
+    app = SimpleNamespace(
+        config=SimpleNamespace(
+            text_replacements={"shove voice": "ShuVoice"},
+            auto_capitalize=True,
+            typing_text_case="lowercase",
+        )
+    )
+
+    rendered = ShuVoiceApp._render_transcript_text(app, "Shove voice Is Great.")
+
+    assert rendered == "shuvoice is great."
 
 
 def test_commit_utterance_uses_rendered_text_for_overlay_and_typing():

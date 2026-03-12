@@ -186,6 +186,7 @@ Empty values delete the matched word.
 | Key | Default | Notes |
 |---|---:|---|
 | `typing_final_injection_mode` | `auto` | `auto`, `clipboard`, `direct`. In `auto`, ShuVoice detects known clipboard watchers (`wl-paste --watch`, `wl-clip-persist`, `elephant`) and switches to direct `wtype` final typing to avoid clipboard-history pollution/races. |
+| `typing_text_case` | `default` | `default` or `lowercase`. `lowercase` forces final committed STT output to lowercase for informal conversation/chat workflows. |
 | `typing_clipboard_settle_delay_ms` | `40` | Delay between `wl-copy` and simulated `Ctrl+V` in clipboard mode to reduce paste timing races. |
 | `use_clipboard_for_final` | `true` (legacy) | Soft-deprecated compatibility flag. If `typing_final_injection_mode` is absent, this maps to `auto` (`true`, safer watcher-aware behavior) or `direct` (`false`). |
 | `preserve_clipboard` | `false` | Capture/restore clipboard around final commit in clipboard mode; direct mode does not touch clipboard. |

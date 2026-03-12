@@ -10,8 +10,11 @@ pytestmark = pytest.mark.gui
 gi = pytest.importorskip("gi")
 try:
     gi.require_version("Gtk4LayerShell", "1.0")
+    gi.require_version("Gtk", "4.0")
 except ValueError:
-    pytest.skip("Gtk4LayerShell not available", allow_module_level=True)
+    pytest.skip("Gtk4LayerShell/Gtk not available", allow_module_level=True)
+
+from gi.repository import Gtk  # noqa: E402
 
 
 def test_release_input_and_destroy_window_releases_keyboard_mode():
@@ -73,62 +76,189 @@ def test_wizard_defaults_to_parakeet_instant_profile():
     assert wizard._tts_voice_id == "zNsotODqUhvbJ5wMG7Ei"
 
 
-def test_asr_page_omits_parakeet_streaming_override_option():
+def test_make_dropdown_section_updates_state_and_description():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard()
+    page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+    seen: list[str] = []
+
+    _title, dropdown, desc = wizard._make_dropdown_section(
+        page,
+        "Example",
+        [
+            ("a", "Option A", "Description A"),
+            ("b", "Option B", "Description B"),
+        ],
+        "a",
+        seen.append,
+    )
+
+    dropdown.set_selected(1)
+
+    assert desc.get_text() == "Description B"
+    assert seen[-1] == "b"
+
+
+def test_asr_page_uses_dropdowns_for_sherpa_controls():
     from shuvoice.wizard import WelcomeWizard
 
     wizard = WelcomeWizard()
     wizard._build_asr_page()
 
-    assert hasattr(wizard, "_sherpa_streaming_radio")
-    assert hasattr(wizard, "_sherpa_parakeet_radio")
-    assert hasattr(wizard, "_sherpa_provider_cpu_radio")
-    assert hasattr(wizard, "_sherpa_provider_cuda_radio")
-    assert not hasattr(wizard, "_sherpa_parakeet_streaming_radio")
+    assert hasattr(wizard, "_sherpa_profile_dropdown")
+    assert isinstance(wizard._sherpa_profile_dropdown, Gtk.DropDown)
+    assert hasattr(wizard, "_sherpa_provider_dropdown")
+    assert isinstance(wizard._sherpa_provider_dropdown, Gtk.DropDown)
+    assert not hasattr(wizard, "_sherpa_streaming_radio")
+    assert not hasattr(wizard, "_sherpa_provider_cpu_radio")
 
 
-def test_keybind_page_includes_tts_controls():
+def test_sherpa_dropdowns_only_visible_when_sherpa_selected():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard()
+    wizard._build_asr_page()
+
+    assert wizard._sherpa_profile_dropdown.get_visible() is True
+    wizard._asr_radios["nemo"].set_active(True)
+
+    assert wizard._sherpa_profile_dropdown.get_visible() is False
+    assert wizard._sherpa_provider_dropdown.get_visible() is False
+
+
+def test_sherpa_profile_dropdown_updates_state_on_selection_change():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard()
+    wizard._build_asr_page()
+    wizard._sherpa_profile_dropdown.set_selected(0)
+
+    assert wizard._sherpa_model_name == "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
+    assert wizard._sherpa_enable_parakeet_streaming is False
+
+
+def test_keybind_page_uses_dropdowns_and_hides_preview():
     from shuvoice.wizard import WelcomeWizard
 
     wizard = WelcomeWizard()
     wizard._build_keybind_page()
 
-    assert hasattr(wizard, "_tts_backend_radios")
-    assert "elevenlabs" in wizard._tts_backend_radios
-    assert "openai" in wizard._tts_backend_radios
-    assert "local" in wizard._tts_backend_radios
-    assert hasattr(wizard, "_tts_local_model_path_entry")
+    assert hasattr(wizard, "_keybind_dropdown")
+    assert isinstance(wizard._keybind_dropdown, Gtk.DropDown)
+    assert hasattr(wizard, "_final_injection_dropdown")
+    assert isinstance(wizard._final_injection_dropdown, Gtk.DropDown)
+    assert not hasattr(wizard, "_keybind_preview")
+    assert not hasattr(wizard, "_tts_provider_dropdown")
+
+
+def test_keybind_dropdown_updates_auto_add_state_for_custom():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard()
+    wizard._build_keybind_page()
+    wizard._keybind_dropdown.set_selected(4)
+
+    assert wizard._keybind == "custom"
+    assert wizard._auto_add_keybind.get_sensitive() is False
+    assert wizard._auto_add_keybind.get_active() is False
+
+
+def test_final_injection_dropdown_updates_state():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard()
+    wizard._build_keybind_page()
+    wizard._final_injection_dropdown.set_selected(2)
+
+    assert wizard._typing_final_injection_mode == "direct"
+
+
+def test_text_case_dropdown_updates_state():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard()
+    wizard._build_keybind_page()
+    wizard._typing_text_case_dropdown.set_selected(1)
+
+    assert wizard._typing_text_case == "lowercase"
+
+
+def test_tts_page_includes_provider_dropdown_and_voice_entry():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard()
+    wizard._build_tts_page()
+
+    assert hasattr(wizard, "_tts_provider_dropdown")
+    assert isinstance(wizard._tts_provider_dropdown, Gtk.DropDown)
     assert hasattr(wizard, "_tts_voice_entry")
     assert wizard._tts_voice_entry.get_text() == "zNsotODqUhvbJ5wMG7Ei"
+
+
+def test_tts_provider_dropdown_updates_voice_entry_for_openai():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard()
+    wizard._build_tts_page()
+    wizard._tts_provider_dropdown.set_selected(1)
+
+    assert wizard._tts_backend == "openai"
+    assert wizard._tts_voice_entry.get_text() == "onyx"
+
+
+def test_local_piper_controls_only_appear_on_tts_page_when_local_selected():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard()
+    wizard._build_keybind_page()
+    assert not hasattr(wizard, "_tts_local_setup_mode_dropdown")
+
+    wizard._build_tts_page()
+    assert wizard._tts_local_setup_mode_dropdown.get_visible() is False
+
+    wizard._tts_provider_dropdown.set_selected(2)
+
+    assert wizard._tts_backend == "local"
+    assert wizard._tts_local_setup_mode_dropdown.get_visible() is True
+    assert wizard._tts_local_auto_voice_dropdown.get_visible() is True
+    assert wizard._tts_local_model_path_entry.get_visible() is False
+
+
+def test_local_manual_mode_shows_path_entry():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard()
+    wizard._build_tts_page()
+    wizard._tts_provider_dropdown.set_selected(2)
+    wizard._tts_local_setup_mode_dropdown.set_selected(1)
+
+    assert wizard._tts_local_setup_mode == "manual"
+    assert wizard._tts_local_model_path_entry.get_visible() is True
+    assert wizard._tts_voice_entry.get_visible() is True
+    assert wizard._tts_local_auto_voice_dropdown.get_visible() is False
+
+
+def test_do_activate_registers_new_page_sequence():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard()
+    with patch("shuvoice.wizard.LayerShell.is_supported", return_value=False):
+        wizard.do_activate()
+
+    assert wizard._stack.get_child_by_name("welcome") is not None
+    assert wizard._stack.get_child_by_name("asr") is not None
+    assert wizard._stack.get_child_by_name("keybind") is not None
+    assert wizard._stack.get_child_by_name("tts") is not None
+    assert wizard._stack.get_child_by_name("done") is not None
+
+    wizard._release_input_and_destroy_window()
 
 
 def test_model_status_text_maps_cancelled_state():
     from shuvoice.wizard import WelcomeWizard
 
     assert "cancelled" in WelcomeWizard._model_download_status_text("cancelled").lower()
-
-
-def test_tts_backend_toggle_updates_voice_entry():
-    from shuvoice.wizard import WelcomeWizard
-
-    wizard = WelcomeWizard()
-    wizard._build_keybind_page()
-    wizard._tts_backend_radios["openai"].set_active(True)
-
-    assert wizard._tts_backend == "openai"
-    assert wizard._tts_voice_entry.get_text() == "onyx"
-
-
-def test_tts_backend_toggle_shows_local_automatic_setup_controls():
-    from shuvoice.wizard import WelcomeWizard
-
-    wizard = WelcomeWizard()
-    wizard._build_keybind_page()
-    wizard._tts_backend_radios["local"].set_active(True)
-
-    assert wizard._tts_backend == "local"
-    assert wizard._tts_local_auto_mode_radio.get_visible() is True
-    assert wizard._tts_local_auto_mode_radio.get_active() is True
-    assert wizard._tts_local_model_path_entry.get_visible() is False
 
 
 def test_model_status_text_maps_incompatible_streaming_state():
@@ -179,6 +309,7 @@ def test_on_finish_writes_config_releases_window_and_quits():
         overwrite_existing=False,
         sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
         typing_final_injection_mode="auto",
+        typing_text_case="default",
         tts_backend="elevenlabs",
         tts_default_voice_id="zNsotODqUhvbJ5wMG7Ei",
         tts_local_model_path=None,
@@ -226,6 +357,7 @@ def test_on_finish_passes_parakeet_streaming_profile_to_write_config():
         sherpa_enable_parakeet_streaming=True,
         sherpa_provider="cuda",
         typing_final_injection_mode="auto",
+        typing_text_case="default",
         tts_backend="openai",
         tts_default_voice_id="onyx",
         tts_local_model_path=None,
@@ -261,6 +393,7 @@ def test_on_finish_passes_local_tts_settings_to_write_config():
         overwrite_existing=False,
         sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
         typing_final_injection_mode="auto",
+        typing_text_case="default",
         tts_backend="local",
         tts_default_voice_id="amy",
         tts_local_model_path="/tmp/piper-models",
@@ -340,6 +473,7 @@ def test_complete_finish_applies_zipformer_fallback_for_incompatible_parakeet_st
         sherpa_enable_parakeet_streaming=False,
         sherpa_provider="cuda",
         typing_final_injection_mode="auto",
+        typing_text_case="default",
         tts_backend="elevenlabs",
         tts_default_voice_id="zNsotODqUhvbJ5wMG7Ei",
         tts_local_model_path=None,
