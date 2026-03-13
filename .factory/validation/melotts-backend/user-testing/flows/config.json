@@ -1,0 +1,136 @@
+{
+  "groupId": "config",
+  "testedAt": "2026-03-13T00:00:00Z",
+  "isolation": {
+    "repo": "/home/shuv/repos/shuvoice",
+    "testFiles": [
+      "tests/test_config.py",
+      "tests/test_config_validation.py",
+      "tests/test_tts_registry.py"
+    ],
+    "mode": "read-only pytest execution + file inspection"
+  },
+  "toolsUsed": ["uv run pytest", "grep"],
+  "assertions": [
+    {
+      "id": "VAL-CFG-001",
+      "title": "melotts backend accepted",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run: uv run pytest tests/test_config.py tests/test_config_validation.py -v --no-header -k melotts",
+          "expected": "test_melotts_tts_backend_validates_without_error PASSED, test_tts_backend_melotts_accepted PASSED",
+          "observed": "test_melotts_tts_backend_validates_without_error PASSED, test_tts_backend_melotts_accepted PASSED"
+        }
+      ],
+      "evidence": {
+        "testOutput": "melotts-backend/config/pytest-melotts-config-output.txt",
+        "testsMatched": [
+          "tests/test_config.py::test_melotts_tts_backend_validates_without_error",
+          "tests/test_config_validation.py::test_tts_backend_melotts_accepted"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CFG-002",
+      "title": "melotts config keys validated",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run: uv run pytest tests/test_config.py tests/test_config_validation.py -v --no-header -k melotts",
+          "expected": "All device validation, venv path, and config section fields tests pass",
+          "observed": "All 8 tests passed: test_melotts_device_accepts_valid_values, test_melotts_device_rejects_invalid_value, test_melotts_device_normalized, test_melotts_venv_path_accepts_none, test_melotts_venv_path_accepts_string, test_melotts_venv_path_empty_string_normalized_to_none, test_melotts_fields_in_config_section_fields, test_tts_melotts_device_validation"
+        }
+      ],
+      "evidence": {
+        "testOutput": "melotts-backend/config/pytest-melotts-config-output.txt",
+        "testsMatched": [
+          "tests/test_config.py::test_melotts_device_accepts_valid_values",
+          "tests/test_config.py::test_melotts_device_rejects_invalid_value",
+          "tests/test_config.py::test_melotts_device_normalized",
+          "tests/test_config.py::test_melotts_venv_path_accepts_none",
+          "tests/test_config.py::test_melotts_venv_path_accepts_string",
+          "tests/test_config.py::test_melotts_venv_path_empty_string_normalized_to_none",
+          "tests/test_config.py::test_melotts_fields_in_config_section_fields",
+          "tests/test_config_validation.py::test_tts_melotts_device_validation"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CFG-003",
+      "title": "Auto-defaults applied for melotts",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run: uv run pytest tests/test_config.py -v --no-header -k melotts",
+          "expected": "test_melotts_tts_backend_auto_defaults, test_melotts_tts_backend_preserves_explicit_voice_id, test_melotts_tts_backend_preserves_explicit_model_id all PASSED",
+          "observed": "All 3 tests PASSED"
+        }
+      ],
+      "evidence": {
+        "testOutput": "melotts-backend/config/pytest-melotts-config-output.txt",
+        "testsMatched": [
+          "tests/test_config.py::test_melotts_tts_backend_auto_defaults",
+          "tests/test_config.py::test_melotts_tts_backend_preserves_explicit_voice_id",
+          "tests/test_config.py::test_melotts_tts_backend_preserves_explicit_model_id"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CFG-004",
+      "title": "Registry resolves melotts",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run: uv run pytest tests/test_tts_registry.py -v --no-header -k melotts",
+          "expected": "test_create_tts_backend_melotts PASSED",
+          "observed": "test_create_tts_backend_melotts PASSED"
+        },
+        {
+          "action": "Run: uv run pytest tests/test_tts_registry.py -v --no-header -k get_tts_backend_class",
+          "expected": "test_get_tts_backend_class_resolves_known_backends PASSED (includes melotts)",
+          "observed": "test_get_tts_backend_class_resolves_known_backends PASSED"
+        }
+      ],
+      "evidence": {
+        "testOutput": [
+          "melotts-backend/config/pytest-melotts-config-output.txt",
+          "melotts-backend/config/pytest-registry-output.txt"
+        ],
+        "testsMatched": [
+          "tests/test_tts_registry.py::test_create_tts_backend_melotts",
+          "tests/test_tts_registry.py::test_get_tts_backend_class_resolves_known_backends"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CFG-005",
+      "title": "pyproject.toml extra exists",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run: grep -n 'tts-melotts' /home/shuv/repos/shuvoice/pyproject.toml",
+          "expected": "At least one line containing 'tts-melotts' under [project.optional-dependencies]",
+          "observed": "Line 46: tts-melotts = []"
+        },
+        {
+          "action": "Run: grep -c 'tts-melotts' /home/shuv/repos/shuvoice/pyproject.toml",
+          "expected": "Count >= 1",
+          "observed": "1"
+        }
+      ],
+      "evidence": {
+        "grepOutput": "melotts-backend/config/pyproject-tts-melotts-grep.txt",
+        "matchedLine": "46:tts-melotts = []"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 5 assertions: 5 passed. All 14 melotts-related config tests pass. pyproject.toml contains the tts-melotts extra group at line 46."
+}

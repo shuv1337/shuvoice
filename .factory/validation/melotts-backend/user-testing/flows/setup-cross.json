@@ -1,0 +1,106 @@
+{
+  "groupId": "setup-cross",
+  "testedAt": "2026-03-13T00:00:00Z",
+  "isolation": {
+    "repo": "/home/shuv/repos/shuvoice",
+    "testFiles": [
+      "tests/test_setup_helpers.py",
+      "tests/test_setup_command.py",
+      "tests/test_tts_registry.py"
+    ],
+    "filter": "-k melotts",
+    "mode": "read-only pytest execution"
+  },
+  "toolsUsed": ["uv run pytest"],
+  "assertions": [
+    {
+      "id": "VAL-SETUP-001",
+      "title": "Setup reports melotts status",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run pytest tests/test_setup_helpers.py tests/test_setup_command.py -v --no-header -k melotts",
+          "expected": "All 6 mapped tests pass: test_run_setup_reports_melotts_status_when_venv_missing, test_run_setup_melotts_success_when_venv_ready, test_build_melotts_setup_report_missing_venv, test_build_melotts_setup_report_ready_venv, test_format_melotts_report_missing_venv, test_format_melotts_report_ready",
+          "observed": "All 6 tests PASSED"
+        }
+      ],
+      "evidence": {
+        "terminalOutput": "melotts-backend/setup-cross/setup-tests-output.txt",
+        "passedTests": [
+          "test_run_setup_reports_melotts_status_when_venv_missing",
+          "test_run_setup_melotts_success_when_venv_ready",
+          "test_build_melotts_setup_report_missing_venv",
+          "test_build_melotts_setup_report_ready_venv",
+          "test_format_melotts_report_missing_venv",
+          "test_format_melotts_report_ready"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SETUP-002",
+      "title": "Setup venv creation logic",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run pytest tests/test_setup_helpers.py tests/test_setup_command.py -v --no-header -k melotts",
+          "expected": "All 2 mapped tests pass: test_melotts_install_commands_default_structure, test_run_setup_melotts_install_missing_generates_commands",
+          "observed": "Both tests PASSED"
+        }
+      ],
+      "evidence": {
+        "terminalOutput": "melotts-backend/setup-cross/setup-tests-output.txt",
+        "passedTests": [
+          "test_melotts_install_commands_default_structure",
+          "test_run_setup_melotts_install_missing_generates_commands"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SETUP-003",
+      "title": "Setup idempotency",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run pytest tests/test_setup_helpers.py tests/test_setup_command.py -v --no-header -k melotts",
+          "expected": "All 5 mapped tests pass: test_melotts_install_commands_idempotent, test_run_setup_melotts_idempotent_skips_venv_creation, test_melotts_venv_valid_true, test_melotts_venv_valid_false_missing, test_melotts_venv_valid_false_not_executable",
+          "observed": "All 5 tests PASSED"
+        }
+      ],
+      "evidence": {
+        "terminalOutput": "melotts-backend/setup-cross/setup-tests-output.txt",
+        "passedTests": [
+          "test_melotts_install_commands_idempotent",
+          "test_run_setup_melotts_idempotent_skips_venv_creation",
+          "test_melotts_venv_valid_true",
+          "test_melotts_venv_valid_false_missing",
+          "test_melotts_venv_valid_false_not_executable"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-001",
+      "title": "Config to backend instantiation",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run pytest tests/test_tts_registry.py -v --no-header -k melotts",
+          "expected": "test_create_tts_backend_melotts passes",
+          "observed": "test_create_tts_backend_melotts PASSED"
+        }
+      ],
+      "evidence": {
+        "terminalOutput": "melotts-backend/setup-cross/registry-tests-output.txt",
+        "passedTests": [
+          "test_create_tts_backend_melotts"
+        ]
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 4 assertions (VAL-SETUP-001, VAL-SETUP-002, VAL-SETUP-003, VAL-CROSS-001): all 4 passed. 14 total unit tests executed, all green. No frictions or blockers encountered."
+}

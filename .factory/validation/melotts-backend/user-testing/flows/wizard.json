@@ -1,0 +1,87 @@
+{
+  "groupId": "wizard",
+  "testedAt": "2026-03-13T00:00:00Z",
+  "isolation": {
+    "repo": "/home/shuv/repos/shuvoice",
+    "testCommand": "uv run pytest tests/test_wizard.py tests/test_wizard_ui.py -v --no-header -k melotts",
+    "mode": "read-only pytest execution"
+  },
+  "toolsUsed": ["uv run pytest"],
+  "assertions": [
+    {
+      "id": "VAL-WIZ-001",
+      "title": "Wizard lists melotts backend",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run pytest with filter: test_tts_backends_includes_melotts",
+          "expected": "Test passes confirming TTS_BACKENDS in wizard_state.py includes a tuple for melotts",
+          "observed": "tests/test_wizard.py::test_tts_backends_includes_melotts PASSED"
+        }
+      ],
+      "evidence": {
+        "testOutput": "melotts-backend/wizard/pytest-output.txt",
+        "passingTests": ["test_tts_backends_includes_melotts"]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-WIZ-002",
+      "title": "Default voice for melotts",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run pytest with filter: test_default_tts_voice_for_backend_melotts",
+          "expected": "Test passes confirming default_tts_voice_for_backend('melotts') returns the correct default voice ID",
+          "observed": "tests/test_wizard.py::test_default_tts_voice_for_backend_melotts PASSED"
+        }
+      ],
+      "evidence": {
+        "testOutput": "melotts-backend/wizard/pytest-output.txt",
+        "passingTests": ["test_default_tts_voice_for_backend_melotts"]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-WIZ-003",
+      "title": "Wizard persists melotts config",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run pytest with filters: test_write_config_persists_melotts_settings, test_write_config_persists_melotts_default_voice, test_write_config_rejects_invalid_tts_backend_but_accepts_melotts",
+          "expected": "All three tests pass confirming write_config() correctly persists melotts TTS settings to config.toml",
+          "observed": "tests/test_wizard.py::test_write_config_persists_melotts_settings PASSED, tests/test_wizard.py::test_write_config_persists_melotts_default_voice PASSED, tests/test_wizard.py::test_write_config_rejects_invalid_tts_backend_but_accepts_melotts PASSED"
+        }
+      ],
+      "evidence": {
+        "testOutput": "melotts-backend/wizard/pytest-output.txt",
+        "passingTests": [
+          "test_write_config_persists_melotts_settings",
+          "test_write_config_persists_melotts_default_voice",
+          "test_write_config_rejects_invalid_tts_backend_but_accepts_melotts"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-002",
+      "title": "Wizard to config round-trip",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run pytest with filter: test_write_config_melotts_round_trip",
+          "expected": "Test passes confirming wizard write → config load round-trip works for melotts",
+          "observed": "tests/test_wizard.py::test_write_config_melotts_round_trip PASSED"
+        }
+      ],
+      "evidence": {
+        "testOutput": "melotts-backend/wizard/pytest-output.txt",
+        "passingTests": ["test_write_config_melotts_round_trip"]
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 4 assertions: 4 passed, 0 failed. All wizard-related melotts tests (14 total including supporting tests) passed successfully in 0.15s."
+}

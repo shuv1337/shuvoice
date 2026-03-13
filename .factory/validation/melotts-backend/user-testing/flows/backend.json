@@ -1,0 +1,156 @@
+{
+  "groupId": "backend",
+  "testedAt": "2026-03-13T00:00:00Z",
+  "isolation": {
+    "repo": "/home/shuv/repos/shuvoice",
+    "testCommand": "uv run pytest tests/test_tts_melotts.py -v --no-header",
+    "testFile": "tests/test_tts_melotts.py"
+  },
+  "toolsUsed": ["uv run pytest"],
+  "assertions": [
+    {
+      "id": "VAL-BACK-001",
+      "title": "Synthesis produces valid PCM audio",
+      "status": "pass",
+      "steps": [
+        { "action": "Run test_synthesize_stream_yields_pcm_chunks", "expected": "PASSED", "observed": "PASSED" },
+        { "action": "Run test_synthesize_stream_sends_json_request", "expected": "PASSED", "observed": "PASSED" }
+      ],
+      "evidence": {
+        "pytestOutput": "melotts-backend/backend/pytest-full-output.txt",
+        "testsRun": ["test_synthesize_stream_yields_pcm_chunks", "test_synthesize_stream_sends_json_request"],
+        "allPassed": true
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-BACK-002",
+      "title": "Backend reports 44100 Hz sample rate",
+      "status": "pass",
+      "steps": [
+        { "action": "Run test_sample_rate_hz_returns_44100", "expected": "PASSED", "observed": "PASSED" }
+      ],
+      "evidence": {
+        "pytestOutput": "melotts-backend/backend/pytest-full-output.txt",
+        "testsRun": ["test_sample_rate_hz_returns_44100"],
+        "allPassed": true
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-BACK-003",
+      "title": "Five English voices available",
+      "status": "pass",
+      "steps": [
+        { "action": "Run test_list_voices_returns_five_entries", "expected": "PASSED", "observed": "PASSED" },
+        { "action": "Run test_list_voices_have_human_readable_names", "expected": "PASSED", "observed": "PASSED" }
+      ],
+      "evidence": {
+        "pytestOutput": "melotts-backend/backend/pytest-full-output.txt",
+        "testsRun": ["test_list_voices_returns_five_entries", "test_list_voices_have_human_readable_names"],
+        "allPassed": true
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-BACK-004",
+      "title": "Speed control supported",
+      "status": "pass",
+      "steps": [
+        { "action": "Run test_capabilities_speed_control_enabled", "expected": "PASSED", "observed": "PASSED" },
+        { "action": "Run test_speed_forwarded_to_helper", "expected": "PASSED", "observed": "PASSED" }
+      ],
+      "evidence": {
+        "pytestOutput": "melotts-backend/backend/pytest-full-output.txt",
+        "testsRun": ["test_capabilities_speed_control_enabled", "test_speed_forwarded_to_helper"],
+        "allPassed": true
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-BACK-005",
+      "title": "Dependency errors reported",
+      "status": "pass",
+      "steps": [
+        { "action": "Run test_dependency_errors_missing_venv", "expected": "PASSED", "observed": "PASSED" },
+        { "action": "Run test_dependency_errors_missing_python_binary", "expected": "PASSED", "observed": "PASSED" },
+        { "action": "Run test_dependency_errors_python_not_executable", "expected": "PASSED", "observed": "PASSED" },
+        { "action": "Run test_dependency_errors_all_ok", "expected": "PASSED", "observed": "PASSED" }
+      ],
+      "evidence": {
+        "pytestOutput": "melotts-backend/backend/pytest-full-output.txt",
+        "testsRun": ["test_dependency_errors_missing_venv", "test_dependency_errors_missing_python_binary", "test_dependency_errors_python_not_executable", "test_dependency_errors_all_ok"],
+        "allPassed": true
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-BACK-006",
+      "title": "Subprocess error handling",
+      "status": "pass",
+      "steps": [
+        { "action": "Run test_subprocess_crash_raises_error", "expected": "PASSED", "observed": "PASSED" },
+        { "action": "Run test_subprocess_timeout_kills_process", "expected": "PASSED", "observed": "PASSED" },
+        { "action": "Run test_subprocess_popen_failure_raises", "expected": "PASSED", "observed": "PASSED" },
+        { "action": "Run test_synthesize_stream_truncated_header_raises", "expected": "PASSED", "observed": "PASSED" },
+        { "action": "Run test_truncated_header_kills_subprocess", "expected": "PASSED", "observed": "PASSED" }
+      ],
+      "evidence": {
+        "pytestOutput": "melotts-backend/backend/pytest-full-output.txt",
+        "testsRun": ["test_subprocess_crash_raises_error", "test_subprocess_timeout_kills_process", "test_subprocess_popen_failure_raises", "test_synthesize_stream_truncated_header_raises", "test_truncated_header_kills_subprocess"],
+        "allPassed": true
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-BACK-007",
+      "title": "Helper protocol correctness",
+      "status": "pass",
+      "steps": [
+        { "action": "Run test_helper_builds_correct_request_json", "expected": "PASSED", "observed": "PASSED" },
+        { "action": "Run test_synthesize_stream_sends_json_request", "expected": "PASSED", "observed": "PASSED" }
+      ],
+      "evidence": {
+        "pytestOutput": "melotts-backend/backend/pytest-full-output.txt",
+        "testsRun": ["test_helper_builds_correct_request_json", "test_synthesize_stream_sends_json_request"],
+        "allPassed": true
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-BACK-008",
+      "title": "Backend capabilities correctly declared",
+      "status": "pass",
+      "steps": [
+        { "action": "Run test_capabilities_supports_streaming_false", "expected": "PASSED", "observed": "PASSED" },
+        { "action": "Run test_capabilities_supports_voice_list", "expected": "PASSED", "observed": "PASSED" },
+        { "action": "Run test_capabilities_requires_no_api_key", "expected": "PASSED", "observed": "PASSED" },
+        { "action": "Run test_capabilities_speed_control_enabled", "expected": "PASSED", "observed": "PASSED" }
+      ],
+      "evidence": {
+        "pytestOutput": "melotts-backend/backend/pytest-full-output.txt",
+        "testsRun": ["test_capabilities_supports_streaming_false", "test_capabilities_supports_voice_list", "test_capabilities_requires_no_api_key", "test_capabilities_speed_control_enabled"],
+        "allPassed": true
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-BACK-009",
+      "title": "Voice model switching",
+      "status": "pass",
+      "steps": [
+        { "action": "Run test_helper_voice_model_routing", "expected": "PASSED", "observed": "PASSED" },
+        { "action": "Run test_helper_voice_model_routing_unknown", "expected": "PASSED", "observed": "PASSED" }
+      ],
+      "evidence": {
+        "pytestOutput": "melotts-backend/backend/pytest-full-output.txt",
+        "testsRun": ["test_helper_voice_model_routing", "test_helper_voice_model_routing_unknown"],
+        "allPassed": true
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 9 assertions (25 tests total): all 9 passed. All 25 unit tests in test_tts_melotts.py passed in 0.02s with no failures, errors, or warnings."
+}

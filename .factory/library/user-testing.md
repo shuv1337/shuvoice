@@ -33,3 +33,17 @@ All MeloTTS backend assertions are verified through pytest unit tests:
 - Registry tested via get_tts_backend_class() calls
 - Wizard tested via write_config() + state assertions
 - Setup tested via mocked subprocess commands
+
+## Flow Validator Guidance: pytest
+
+**Surface**: pytest unit tests
+**Tool**: Direct `uv run pytest` execution (no special skill needed)
+**Isolation**: Each validator runs `uv run pytest` on separate test files — no shared state conflict.
+**Boundaries**:
+- Do NOT modify any source or test files
+- Do NOT install packages or modify the venv
+- Run tests in read-only mode only
+- Each validator targets specific test files and uses `-k` filters when needed
+- Use verbose mode (`-v`) to get individual test names for evidence
+**Concurrency**: Safe to run up to 5 validators in parallel (separate test files, no shared state)
+**Evidence**: Capture test output showing pass/fail for each test mapped to an assertion
