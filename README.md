@@ -27,7 +27,7 @@
 
 - **Push-to-talk dictation** — hold a key, speak, release. Text appears in your focused app.
 - **Pluggable ASR backends** — choose between NeMo (highest accuracy), Sherpa-ONNX (fast, CPU-friendly), or Moonshine (lightweight).
-- **Text-to-speech** — highlight text and hear it read aloud via ElevenLabs, OpenAI, or local Piper.
+- **Text-to-speech** — highlight text and hear it read aloud via ElevenLabs, OpenAI, local Piper, or MeloTTS.
 - **Native Wayland overlay** — GTK4 layer-shell overlay with blur, transparency, and live transcription feedback.
 - **Waybar integration** — tray-style status icon with tooltip, state colors, and click actions.
 - **Guided setup wizard** — compact GTK onboarding flow with separate ASR, keybind/typing, and TTS steps plus model setup.
@@ -146,6 +146,9 @@ uv sync --extra tts-openai
 
 # Local TTS (Piper, experimental)
 uv sync --extra tts-local
+
+# MeloTTS (local, subprocess-isolated — no extra needed, uses separate venv)
+# Setup: shuvoice setup --install-missing (when tts_backend = "melotts")
 ```
 
 </details>
@@ -172,7 +175,7 @@ The wizard now uses a compact 5-step flow:
 2. **Select your ASR backend** — Sherpa-ONNX, NeMo, or Moonshine
 3. **Choose a Sherpa profile + device** (if applicable) — Streaming (Zipformer) or Instant (Parakeet), then CPU or GPU
 4. **Pick your push-to-talk key + final text injection mode** — Right Ctrl, Insert, F9, Super+V, or custom, plus Auto / Clipboard / Direct typing
-5. **Choose your TTS provider + default voice** — ElevenLabs, OpenAI, or Local Piper
+5. **Choose your TTS provider + default voice** — ElevenLabs, OpenAI, Local Piper, or MeloTTS
    - **For Local Piper** — choose either automatic setup (install Piper + download a curated voice) or an existing local model path
 6. **Review summary + download model files** — with progress indicator and cancel support
 7. **Auto-configure Hyprland keybinds** — adds `bind`/`bindr` lines if the key isn't already used
@@ -522,7 +525,7 @@ layerrule = ignorealpha 0.20, tts-overlay
 ```toml
 [tts]
 tts_enabled = true
-tts_backend = "elevenlabs"                      # elevenlabs | openai | local
+tts_backend = "elevenlabs"                      # elevenlabs | openai | local | melotts
 tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"   # ElevenLabs default
 # OpenAI defaults are auto-applied when tts_backend = "openai":
 # tts_default_voice_id = "onyx"
@@ -560,6 +563,24 @@ For Local Piper, you now have two setup paths:
 If you point at a directory and leave `tts_local_voice` unset, ShuVoice uses the first discovered
 model automatically. Piper sidecar files (`.onnx.json`) are also used to detect the correct
 playback sample rate.
+
+For MeloTTS, no API key is required — it runs fully locally using subprocess isolation
+(separate Python 3.12 venv) to avoid dependency conflicts. Five English voices are available:
+American (EN-US), British (EN-BR), Indian (EN-INDIA), Australian (EN-AU), and Newest (EN-Newest).
+CPU real-time inference is supported, with optional CUDA acceleration.
+
+```toml
+[tts]
+tts_enabled = true
+tts_backend = "melotts"
+tts_default_voice_id = "EN-US"                   # EN-US | EN-BR | EN-INDIA | EN-AU | EN-Newest
+tts_playback_speed = 1.0
+# tts_melotts_device = "auto"                    # auto | cpu | cuda
+# tts_melotts_venv_path = "~/.local/share/shuvoice/melotts-venv"  # default managed location
+```
+
+Setup is automated: run `shuvoice setup --install-missing` with `tts_backend = "melotts"`,
+or select MeloTTS in the setup wizard. ShuVoice handles venv creation and model download.
 
 ### Example Configs
 
