@@ -482,3 +482,111 @@ def test_complete_finish_applies_zipformer_fallback_for_incompatible_parakeet_st
     write_marker.assert_called_once()
     assert wizard._sherpa_model_name == "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
     assert wizard._sherpa_enable_parakeet_streaming is False
+
+
+# -- MeloTTS wizard UI (VAL-WIZ-001, VAL-WIZ-002, VAL-WIZ-003) ---------------
+
+
+def test_melotts_controls_visible_when_melotts_selected():
+    """When melotts is selected in TTS dropdown, melotts-specific controls appear."""
+    from shuvoice.wizard import WelcomeWizard
+    from shuvoice.wizard_state import TTS_BACKENDS
+
+    wizard = WelcomeWizard()
+    wizard._build_tts_page()
+
+    # Find melotts index in TTS_BACKENDS
+    melotts_idx = next(i for i, (bid, _, _) in enumerate(TTS_BACKENDS) if bid == "melotts")
+    wizard._tts_provider_dropdown.set_selected(melotts_idx)
+
+    assert wizard._tts_backend == "melotts"
+    # MeloTTS device dropdown should be visible
+    assert wizard._tts_melotts_device_dropdown.get_visible() is True
+    # Local Piper controls should be hidden
+    assert wizard._tts_local_setup_mode_dropdown.get_visible() is False
+    # Voice entry should be visible (for voice selection)
+    assert wizard._tts_voice_entry.get_visible() is True
+
+
+def test_melotts_controls_hidden_when_other_backend_selected():
+    """MeloTTS device dropdown is hidden when a non-melotts backend is selected."""
+    from shuvoice.wizard import WelcomeWizard
+    from shuvoice.wizard_state import TTS_BACKENDS
+
+    wizard = WelcomeWizard()
+    wizard._build_tts_page()
+
+    # Select melotts first
+    melotts_idx = next(i for i, (bid, _, _) in enumerate(TTS_BACKENDS) if bid == "melotts")
+    wizard._tts_provider_dropdown.set_selected(melotts_idx)
+    assert wizard._tts_melotts_device_dropdown.get_visible() is True
+
+    # Switch to elevenlabs (index 0)
+    wizard._tts_provider_dropdown.set_selected(0)
+    assert wizard._tts_backend == "elevenlabs"
+    assert wizard._tts_melotts_device_dropdown.get_visible() is False
+
+
+def test_melotts_device_dropdown_updates_state():
+    """MeloTTS device dropdown updates internal state correctly."""
+    from shuvoice.wizard import WelcomeWizard
+    from shuvoice.wizard_state import TTS_BACKENDS
+
+    wizard = WelcomeWizard()
+    wizard._build_tts_page()
+
+    melotts_idx = next(i for i, (bid, _, _) in enumerate(TTS_BACKENDS) if bid == "melotts")
+    wizard._tts_provider_dropdown.set_selected(melotts_idx)
+
+    # Default should be "auto"
+    assert wizard._tts_melotts_device == "auto"
+
+    # Switch to CPU (index 1)
+    wizard._tts_melotts_device_dropdown.set_selected(1)
+    assert wizard._tts_melotts_device == "cpu"
+
+    # Switch to CUDA (index 2)
+    wizard._tts_melotts_device_dropdown.set_selected(2)
+    assert wizard._tts_melotts_device == "cuda"
+
+
+def test_melotts_voice_entry_shows_default_voice():
+    """When melotts is selected, voice entry shows the default MeloTTS voice."""
+    from shuvoice.wizard import WelcomeWizard
+    from shuvoice.wizard_state import TTS_BACKENDS
+
+    wizard = WelcomeWizard()
+    wizard._build_tts_page()
+
+    melotts_idx = next(i for i, (bid, _, _) in enumerate(TTS_BACKENDS) if bid == "melotts")
+    wizard._tts_provider_dropdown.set_selected(melotts_idx)
+
+    assert wizard._tts_voice_entry.get_text() == "EN-US"
+
+
+def test_on_finish_passes_melotts_settings_to_write_config():
+    """_on_finish correctly passes melotts-specific kwargs to write_config."""
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard.__new__(WelcomeWizard)
+    wizard._asr_backend = "moonshine"
+    wizard._keybind = "f9"
+    wizard._tts_backend = "melotts"
+    wizard._tts_voice_id = "EN-BR"
+    wizard._tts_melotts_device = "cuda"
+    wizard.completed = False
+    wizard._release_input_and_destroy_window = MagicMock()
+    wizard.quit = MagicMock()
+
+    with (
+        patch("shuvoice.wizard.write_config") as mock_write_config,
+        patch("shuvoice.wizard.maybe_download_model", return_value=("skipped", "noop")),
+        patch("shuvoice.wizard.write_marker"),
+    ):
+        WelcomeWizard._on_finish(wizard, None)
+
+    mock_write_config.assert_called_once()
+    call_kwargs = mock_write_config.call_args
+    assert call_kwargs[1]["tts_backend"] == "melotts"
+    assert call_kwargs[1]["tts_default_voice_id"] == "EN-BR"
+    assert call_kwargs[1]["tts_melotts_device"] == "cuda"

@@ -17,6 +17,7 @@ from .asr import get_backend_class
 from .config import (
     CURRENT_CONFIG_VERSION,
     DEFAULT_ELEVENLABS_TTS_VOICE_ID,
+    DEFAULT_MELOTTS_VOICE_ID,
     DEFAULT_OPENAI_TTS_VOICE_ID,
     Config,
 )
@@ -135,6 +136,13 @@ _OPENAI_TTS_VOICE_LABELS: dict[str, str] = {
     "sage": "Sage",
     "shimmer": "Shimmer",
 }
+_MELOTTS_VOICE_LABELS: dict[str, str] = {
+    "EN-US": "American English",
+    "EN-BR": "British English",
+    "EN-INDIA": "Indian English",
+    "EN-AU": "Australian English",
+    "EN-Newest": "Newest English",
+}
 TTS_BACKENDS = [
     (
         "elevenlabs",
@@ -151,6 +159,11 @@ TTS_BACKENDS = [
         "Local Piper",
         "Use a local Piper .onnx model file or a directory of Piper voices already on disk.",
     ),
+    (
+        "melotts",
+        "MeloTTS",
+        "Local TTS using MeloTTS (MIT/MyShell). CPU real-time. 5 English voices.",
+    ),
 ]
 
 
@@ -160,6 +173,8 @@ def default_tts_voice_for_backend(backend: str) -> str:
         return DEFAULT_OPENAI_TTS_VOICE_ID
     if backend_id == "local":
         return DEFAULT_LOCAL_TTS_VOICE_ID
+    if backend_id == "melotts":
+        return DEFAULT_MELOTTS_VOICE_ID
     return DEFAULT_ELEVENLABS_TTS_VOICE_ID
 
 
@@ -176,6 +191,8 @@ def tts_voice_label(backend: str, voice_id: str) -> str:
 
     if backend_id == "openai":
         return _OPENAI_TTS_VOICE_LABELS.get(value.lower(), value)
+    if backend_id == "melotts":
+        return _MELOTTS_VOICE_LABELS.get(value, value)
     if backend_id == "elevenlabs" and value == DEFAULT_ELEVENLABS_TTS_VOICE_ID:
         return f"Default ({value})"
     if backend_id == "local" and value.lower() == DEFAULT_LOCAL_TTS_VOICE_ID:
@@ -675,6 +692,7 @@ def write_config(
     tts_default_voice_id: str | None = None,
     tts_local_model_path: str | None = None,
     tts_local_voice: str | None = None,
+    tts_melotts_device: str | None = None,
 ):
     """Write wizard selections to config.toml.
 
@@ -724,8 +742,8 @@ def write_config(
         raise ValueError(f"typing_text_case must be one of: {allowed}")
 
     tts_backend_value = str(tts_backend).strip().lower()
-    if tts_backend_value not in {"elevenlabs", "openai", "local"}:
-        raise ValueError("tts_backend must be one of: elevenlabs, openai, local")
+    if tts_backend_value not in {"elevenlabs", "openai", "local", "melotts"}:
+        raise ValueError("tts_backend must be one of: elevenlabs, openai, local, melotts")
 
     tts_voice_value = str(
         tts_default_voice_id or default_tts_voice_for_backend(tts_backend_value)
@@ -838,6 +856,14 @@ def write_config(
     else:
         tts_table.pop("tts_local_model_path", None)
         tts_table.pop("tts_local_voice", None)
+
+    # MeloTTS-specific keys
+    if tts_backend_value == "melotts":
+        melotts_device = str(tts_melotts_device or "auto").strip().lower()
+        tts_table["tts_melotts_device"] = melotts_device
+    else:
+        tts_table.pop("tts_melotts_device", None)
+        tts_table.pop("tts_melotts_venv_path", None)
 
     migrated["config_version"] = CURRENT_CONFIG_VERSION
 

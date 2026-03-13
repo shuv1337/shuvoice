@@ -13,11 +13,14 @@ from shuvoice.wizard_state import (
     DEFAULT_SHERPA_MODEL_NAME,
     KEYBIND_PRESETS,
     PARAKEET_TDT_V3_INT8_MODEL_NAME,
+    TTS_BACKENDS,
     auto_add_hyprland_keybind,
+    default_tts_voice_for_backend,
     format_hyprland_bind,
     format_hyprland_bind_for_keybind,
     format_summary,
     needs_wizard,
+    tts_voice_label,
     write_config,
     write_marker,
 )
@@ -218,7 +221,6 @@ def test_write_config_rejects_invalid_typing_mode(tmp_path):
         with patch("shuvoice.wizard_state._detect_cuda", return_value=False):
             with pytest.raises(ValueError, match="typing_final_injection_mode"):
                 write_config("nemo", typing_final_injection_mode="invalid")
-
 
 
 def test_write_config_rejects_invalid_typing_text_case(tmp_path):
@@ -623,3 +625,125 @@ def test_asr_backends_has_three_entries():
     assert "nemo" in ids
     assert "sherpa" in ids
     assert "moonshine" in ids
+
+
+# -- MeloTTS wizard state (VAL-WIZ-001, VAL-WIZ-002, VAL-WIZ-003) -----------
+
+
+def test_tts_backends_includes_melotts():
+    """TTS_BACKENDS includes a melotts entry with name and description."""
+    ids = [bid for bid, _, _ in TTS_BACKENDS]
+    assert "melotts" in ids
+
+    melotts = next(entry for entry in TTS_BACKENDS if entry[0] == "melotts")
+    assert melotts[1] == "MeloTTS"
+    assert "MeloTTS" in melotts[2]
+
+
+def test_default_tts_voice_for_backend_melotts():
+    """default_tts_voice_for_backend('melotts') returns 'EN-US'."""
+    assert default_tts_voice_for_backend("melotts") == "EN-US"
+
+
+def test_tts_voice_label_melotts_voices():
+    """tts_voice_label handles melotts voice IDs with human-readable labels."""
+    assert tts_voice_label("melotts", "EN-US") == "American English"
+    assert tts_voice_label("melotts", "EN-BR") == "British English"
+    assert tts_voice_label("melotts", "EN-INDIA") == "Indian English"
+    assert tts_voice_label("melotts", "EN-AU") == "Australian English"
+    assert tts_voice_label("melotts", "EN-Newest") == "Newest English"
+
+
+def test_tts_voice_label_melotts_unknown_returns_raw():
+    """tts_voice_label for melotts with unknown voice ID returns the raw value."""
+    assert tts_voice_label("melotts", "custom-voice") == "custom-voice"
+
+
+def test_write_config_persists_melotts_settings(tmp_path):
+    """write_config with melotts settings produces correct config.toml."""
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        write_config(
+            "nemo",
+            tts_backend="melotts",
+            tts_default_voice_id="EN-BR",
+            tts_melotts_device="cuda",
+        )
+
+    content = (tmp_path / "config.toml").read_text()
+    assert 'tts_backend = "melotts"' in content
+    assert 'tts_default_voice_id = "EN-BR"' in content
+    assert 'tts_melotts_device = "cuda"' in content
+
+
+def test_write_config_persists_melotts_default_voice(tmp_path):
+    """write_config defaults melotts voice to EN-US when not specified."""
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        write_config("nemo", tts_backend="melotts")
+
+    content = (tmp_path / "config.toml").read_text()
+    assert 'tts_backend = "melotts"' in content
+    assert 'tts_default_voice_id = "EN-US"' in content
+
+
+def test_write_config_melotts_round_trip(tmp_path):
+    """Wizard write → config load round-trip for melotts (VAL-CROSS-002)."""
+    from shuvoice.config import Config as RealConfig
+
+    config_dir = tmp_path / "shuvoice"
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = config_dir
+        write_config(
+            "nemo",
+            tts_backend="melotts",
+            tts_default_voice_id="EN-AU",
+            tts_melotts_device="cpu",
+        )
+
+    config_file = config_dir / "config.toml"
+    assert config_file.exists()
+
+    with patch.object(RealConfig, "config_path", return_value=config_file):
+        cfg = RealConfig.load()
+
+    assert cfg.tts_backend == "melotts"
+    assert cfg.tts_default_voice_id == "EN-AU"
+    assert cfg.tts_melotts_device == "cpu"
+
+
+def test_format_summary_shows_melotts_provider_and_voice():
+    """format_summary displays MeloTTS as TTS provider with correct voice label."""
+    result = format_summary("nemo", tts_backend="melotts", tts_default_voice_id="EN-BR")
+    assert "TTS provider:     MeloTTS" in result
+    assert "TTS voice:        British English" in result
+
+
+def test_write_config_rejects_invalid_tts_backend_but_accepts_melotts(tmp_path):
+    """write_config accepts 'melotts' but rejects unknown tts backends."""
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        with pytest.raises(ValueError, match="tts_backend"):
+            write_config("nemo", tts_backend="nonexistent")
+
+    # melotts should not raise
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        write_config("nemo", tts_backend="melotts")

@@ -41,7 +41,13 @@ from ..wizard_state import (
     TYPING_TEXT_CASE_MODES,
     default_tts_voice_for_backend,
 )
-from .actions import maybe_download_model, maybe_setup_local_tts, needs_wizard, write_config, write_marker
+from .actions import (
+    maybe_download_model,
+    maybe_setup_local_tts,
+    needs_wizard,
+    write_config,
+    write_marker,
+)
 from .flow import summary_text
 from .hyprland import (
     KeybindSetupStatus,
@@ -98,9 +104,11 @@ class WelcomeWizard(Gtk.Application):
             "elevenlabs": default_tts_voice_for_backend("elevenlabs"),
             "openai": default_tts_voice_for_backend("openai"),
             "local": default_tts_voice_for_backend("local"),
+            "melotts": default_tts_voice_for_backend("melotts"),
         }
         self._tts_local_model_path = ""
         self._tts_local_setup_mode = "automatic"
+        self._tts_melotts_device = "auto"
         self._tts_local_auto_voice_id = recommended_piper_voice().id
         self._tts_voice_id = self._tts_voice_by_backend[self._tts_backend]
         self._keybind = DEFAULT_KEYBIND_ID
@@ -154,7 +162,11 @@ class WelcomeWizard(Gtk.Application):
             return
 
         selected_idx = next(
-            (idx for idx, (option_id, _label, _desc) in enumerate(options) if option_id == selected_id),
+            (
+                idx
+                for idx, (option_id, _label, _desc) in enumerate(options)
+                if option_id == selected_id
+            ),
             0,
         )
         if dropdown.get_selected() != selected_idx:
@@ -184,7 +196,11 @@ class WelcomeWizard(Gtk.Application):
         dropdown.set_hexpand(True)
 
         default_idx = next(
-            (idx for idx, (option_id, _label, _desc) in enumerate(options) if option_id == default_id),
+            (
+                idx
+                for idx, (option_id, _label, _desc) in enumerate(options)
+                if option_id == default_id
+            ),
             0,
         )
         dropdown.set_selected(default_idx)
@@ -378,8 +394,7 @@ class WelcomeWizard(Gtk.Application):
         page.append(sub)
 
         self._keybind_options = [
-            (kb_id, label, description)
-            for kb_id, label, _hypr_key, description in KEYBIND_PRESETS
+            (kb_id, label, description) for kb_id, label, _hypr_key, description in KEYBIND_PRESETS
         ]
         (
             self._keybind_title,
@@ -499,15 +514,13 @@ class WelcomeWizard(Gtk.Application):
             page,
             "Setup mode",
             self._tts_local_setup_options,
-            str(getattr(self, "_tts_local_setup_mode", "automatic")).strip().lower()
-            or "automatic",
+            str(getattr(self, "_tts_local_setup_mode", "automatic")).strip().lower() or "automatic",
             self._set_tts_local_setup_mode_selection,
             title_margin_top=8,
         )
 
         self._tts_local_auto_voice_options = [
-            (option.id, option.label, option.description)
-            for option in curated_piper_voices()
+            (option.id, option.label, option.description) for option in curated_piper_voices()
         ]
         (
             self._tts_local_auto_voice_title,
@@ -534,6 +547,33 @@ class WelcomeWizard(Gtk.Application):
         self._tts_local_model_path_help.set_halign(Gtk.Align.START)
         self._tts_local_model_path_help.set_wrap(True)
         page.append(self._tts_local_model_path_help)
+
+        # MeloTTS-specific controls
+        self._tts_melotts_device_options = [
+            (
+                "auto",
+                "Auto",
+                "Automatically select the best available device (CUDA if available, otherwise CPU).",
+            ),
+            ("cpu", "CPU", "Use CPU for MeloTTS inference. Reliable and requires no GPU setup."),
+            (
+                "cuda",
+                "GPU (CUDA)",
+                "Use CUDA GPU for faster MeloTTS inference. Requires NVIDIA GPU with CUDA.",
+            ),
+        ]
+        (
+            self._tts_melotts_device_title,
+            self._tts_melotts_device_dropdown,
+            self._tts_melotts_device_desc,
+        ) = self._make_dropdown_section(
+            page,
+            "Compute device",
+            self._tts_melotts_device_options,
+            str(getattr(self, "_tts_melotts_device", "auto")).strip().lower() or "auto",
+            self._set_tts_melotts_device_selection,
+            title_margin_top=8,
+        )
 
         self._tts_voice_entry = Gtk.Entry()
         self._tts_voice_entry.add_css_class("wizard-entry")
@@ -775,6 +815,10 @@ class WelcomeWizard(Gtk.Application):
             return
         self._set_tts_backend_selection(backend_id)
 
+    def _set_tts_melotts_device_selection(self, device: str) -> None:
+        self._tts_melotts_device = device
+        self._set_tts_config_error(None)
+
     def _set_tts_local_setup_mode_selection(self, mode: str) -> None:
         self._tts_local_setup_mode = mode
         self._set_tts_config_error(None)
@@ -830,9 +874,10 @@ class WelcomeWizard(Gtk.Application):
 
     def _local_tts_resolved_voice(self) -> str:
         if self._local_tts_auto_mode_enabled():
-            return str(
-                getattr(self, "_tts_local_auto_voice_id", recommended_piper_voice().id)
-            ).strip() or recommended_piper_voice().id
+            return (
+                str(getattr(self, "_tts_local_auto_voice_id", recommended_piper_voice().id)).strip()
+                or recommended_piper_voice().id
+            )
 
         requested = str(getattr(self, "_tts_voice_id", "")).strip().lower()
         path_text = str(getattr(self, "_tts_local_model_path", "")).strip()
@@ -862,7 +907,9 @@ class WelcomeWizard(Gtk.Application):
                 getattr(self, "_tts_local_auto_voice_id", recommended_piper_voice().id)
             ).strip()
             if not selected_voice:
-                self._set_tts_config_error("Select a curated Local Piper voice for automatic setup.")
+                self._set_tts_config_error(
+                    "Select a curated Local Piper voice for automatic setup."
+                )
                 return False
             return True
 
@@ -920,7 +967,9 @@ class WelcomeWizard(Gtk.Application):
             self._tts_voice_by_backend = voice_by_backend
 
         default_voice = default_tts_voice_for_backend(backend_id)
-        current_voice = str(voice_by_backend.get(backend_id, default_voice)).strip() or default_voice
+        current_voice = (
+            str(voice_by_backend.get(backend_id, default_voice)).strip() or default_voice
+        )
         self._tts_voice_id = current_voice
         voice_by_backend[backend_id] = current_voice
 
@@ -931,6 +980,7 @@ class WelcomeWizard(Gtk.Application):
         )
 
         is_local = backend_id == "local"
+        is_melotts = backend_id == "melotts"
         auto_mode = self._local_tts_auto_mode_enabled()
 
         setup_mode_widgets = (
@@ -951,11 +1001,27 @@ class WelcomeWizard(Gtk.Application):
             if widget is not None:
                 widget.set_visible(is_local and auto_mode)
 
+        # MeloTTS device dropdown visibility
+        melotts_widgets = (
+            getattr(self, "_tts_melotts_device_title", None),
+            getattr(self, "_tts_melotts_device_dropdown", None),
+            getattr(self, "_tts_melotts_device_desc", None),
+        )
+        for widget in melotts_widgets:
+            if widget is not None:
+                widget.set_visible(is_melotts)
+
+        if is_melotts:
+            self._set_dropdown_selected(
+                getattr(self, "_tts_melotts_device_dropdown", None),
+                getattr(self, "_tts_melotts_device_options", []),
+                str(getattr(self, "_tts_melotts_device", "auto")).strip().lower() or "auto",
+            )
+
         self._set_dropdown_selected(
             getattr(self, "_tts_local_setup_mode_dropdown", None),
             getattr(self, "_tts_local_setup_options", []),
-            str(getattr(self, "_tts_local_setup_mode", "automatic")).strip().lower()
-            or "automatic",
+            str(getattr(self, "_tts_local_setup_mode", "automatic")).strip().lower() or "automatic",
         )
         self._set_dropdown_selected(
             getattr(self, "_tts_local_auto_voice_dropdown", None),
@@ -965,8 +1031,9 @@ class WelcomeWizard(Gtk.Application):
 
         path_entry.set_visible(is_local and not auto_mode)
         path_help.set_visible(is_local and not auto_mode)
-        entry.set_visible(not is_local or not auto_mode)
-        help_label.set_visible(not is_local or not auto_mode)
+        # Voice entry visible for all backends except local auto mode
+        entry.set_visible(not (is_local and auto_mode))
+        help_label.set_visible(not (is_local and auto_mode))
 
         if is_local and auto_mode:
             path_entry.set_placeholder_text(_display_managed_piper_model_path())
@@ -979,7 +1046,9 @@ class WelcomeWizard(Gtk.Application):
             )
             return
 
-        display_voice = "" if backend_id == "local" and current_voice == default_voice else current_voice
+        display_voice = (
+            "" if backend_id == "local" and current_voice == default_voice else current_voice
+        )
         if entry.get_text() != display_voice:
             entry.set_text(display_voice)
 
@@ -997,14 +1066,17 @@ class WelcomeWizard(Gtk.Application):
             )
             return
 
+        if is_melotts:
+            entry.set_placeholder_text("EN-US")
+            help_label.set_text("MeloTTS voices: EN-US, EN-BR, EN-INDIA, EN-AU, EN-Newest")
+            return
+
         if backend_id == "openai":
             entry.set_placeholder_text("onyx")
             help_label.set_text("Examples: onyx, nova, shimmer, alloy, sage")
         else:
             entry.set_placeholder_text(default_tts_voice_for_backend("elevenlabs"))
-            help_label.set_text(
-                "Paste an ElevenLabs voice ID here, or keep the default voice ID."
-            )
+            help_label.set_text("Paste an ElevenLabs voice ID here, or keep the default voice ID.")
 
     def _sync_auto_add_keybind_state(self):
         if not hasattr(self, "_auto_add_keybind"):
@@ -1109,6 +1181,8 @@ class WelcomeWizard(Gtk.Application):
             "tts_local_model_path": tts_local_model_path,
             "tts_local_voice": tts_local_voice,
         }
+        if tts_backend == "melotts":
+            write_kwargs["tts_melotts_device"] = getattr(self, "_tts_melotts_device", "auto")
         if self._asr_backend == "sherpa":
             write_kwargs["sherpa_enable_parakeet_streaming"] = sherpa_enable_parakeet_streaming
             write_kwargs["sherpa_provider"] = getattr(self, "_sherpa_provider", "cpu")
