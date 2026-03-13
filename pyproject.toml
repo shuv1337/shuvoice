@@ -43,6 +43,7 @@ asr-moonshine = [
 tts-elevenlabs = []
 tts-openai = []
 tts-local = []
+tts-melotts = []
 dev = [
     "pytest>=8.0",
     "pytest-cov>=7.0",

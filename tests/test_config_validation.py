@@ -111,3 +111,22 @@ def test_tts_timeout_validation():
 def test_tts_backend_enum_validation():
     with pytest.raises(ValueError, match="tts_backend"):
         Config(tts_backend="azure")
+
+
+def test_tts_backend_melotts_accepted():
+    cfg = Config(tts_backend="melotts")
+    assert cfg.tts_backend == "melotts"
+
+
+def test_tts_melotts_device_validation():
+    # Valid values accepted
+    for val in ("auto", "cpu", "cuda"):
+        cfg = Config(tts_melotts_device=val)
+        assert cfg.tts_melotts_device == val
+
+    # Invalid values rejected
+    with pytest.raises(ValueError, match="tts_melotts_device"):
+        Config(tts_melotts_device="rocm")
+
+    with pytest.raises(ValueError, match="tts_melotts_device"):
+        Config(tts_melotts_device="gpu")

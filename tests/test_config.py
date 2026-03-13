@@ -639,6 +639,66 @@ def test_parakeet_model_detection_case_insensitive():
     assert cfg.resolved_sherpa_decode_mode == "offline_instant"
 
 
+def test_melotts_tts_backend_validates_without_error():
+    cfg = Config(tts_backend="melotts")
+    assert cfg.tts_backend == "melotts"
+
+
+def test_melotts_tts_backend_auto_defaults():
+    cfg = Config(tts_backend="melotts")
+    assert cfg.tts_default_voice_id == "EN-US"
+    assert cfg.tts_model_id == "melotts"
+
+
+def test_melotts_tts_backend_preserves_explicit_voice_id():
+    cfg = Config(tts_backend="melotts", tts_default_voice_id="EN-BR")
+    assert cfg.tts_default_voice_id == "EN-BR"
+
+
+def test_melotts_tts_backend_preserves_explicit_model_id():
+    cfg = Config(tts_backend="melotts", tts_model_id="custom-model")
+    assert cfg.tts_model_id == "custom-model"
+
+
+def test_melotts_device_accepts_valid_values():
+    for device in ("auto", "cpu", "cuda"):
+        cfg = Config(tts_melotts_device=device)
+        assert cfg.tts_melotts_device == device
+
+
+def test_melotts_device_rejects_invalid_value():
+    with pytest.raises(ValueError, match="tts_melotts_device"):
+        Config(tts_melotts_device="rocm")
+
+
+def test_melotts_device_normalized():
+    cfg = Config(tts_melotts_device="  CPU  ")
+    assert cfg.tts_melotts_device == "cpu"
+
+
+def test_melotts_venv_path_accepts_none():
+    cfg = Config(tts_melotts_venv_path=None)
+    assert cfg.tts_melotts_venv_path is None
+
+
+def test_melotts_venv_path_accepts_string():
+    cfg = Config(tts_melotts_venv_path="/home/user/.local/share/shuvoice/melotts-venv")
+    assert cfg.tts_melotts_venv_path == "/home/user/.local/share/shuvoice/melotts-venv"
+
+
+def test_melotts_venv_path_empty_string_normalized_to_none():
+    cfg = Config(tts_melotts_venv_path="   ")
+    assert cfg.tts_melotts_venv_path is None
+
+
+def test_melotts_fields_in_config_section_fields():
+    from shuvoice.config import CONFIG_SECTION_FIELDS
+
+    tts_fields = CONFIG_SECTION_FIELDS["tts"]
+    assert "tts_melotts_device" in tts_fields
+    assert "tts_melotts_venv_path" in tts_fields
+
+
 def test_to_nested_dict_includes_sherpa_decode_mode():
     cfg = Config(
         asr_backend="sherpa",
