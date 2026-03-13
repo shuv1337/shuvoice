@@ -27,10 +27,17 @@ def _resolve_local() -> type[TTSBackend]:
     return LocalTTSBackend
 
 
+def _resolve_melotts() -> type[TTSBackend]:
+    from .tts_melotts import MeloTTSBackend
+
+    return MeloTTSBackend
+
+
 _TTS_BACKEND_REGISTRY: dict[str, BackendResolver] = {
     "elevenlabs": _resolve_elevenlabs,
     "openai": _resolve_openai,
     "local": _resolve_local,
+    "melotts": _resolve_melotts,
 }
 
 

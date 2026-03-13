@@ -86,6 +86,8 @@ CONFIG_SECTION_FIELDS: dict[str, tuple[str, ...]] = {
         "tts_local_model_path",
         "tts_local_voice",
         "tts_local_device",
+        "tts_melotts_device",
+        "tts_melotts_venv_path",
     ),
     "typing": (
         "output_mode",
@@ -129,6 +131,8 @@ DEFAULT_ELEVENLABS_TTS_API_KEY_ENV = "ELEVENLABS_API_KEY"
 DEFAULT_OPENAI_TTS_VOICE_ID = "onyx"
 DEFAULT_OPENAI_TTS_MODEL_ID = "gpt-4o-mini-tts"
 DEFAULT_OPENAI_TTS_API_KEY_ENV = "OPENAI_API_KEY"
+DEFAULT_MELOTTS_VOICE_ID = "EN-US"
+DEFAULT_MELOTTS_MODEL_ID = "melotts"
 
 
 DEFAULT_TEXT_REPLACEMENTS: dict[str, str] = {
@@ -253,6 +257,10 @@ class Config:
     tts_local_model_path: str | None = None
     tts_local_voice: str | None = None
     tts_local_device: str | int | None = None
+
+    # MeloTTS (when tts_backend = "melotts")
+    tts_melotts_device: str = "auto"  # auto | cpu | cuda
+    tts_melotts_venv_path: str | None = None  # path to MeloTTS venv
 
     # Text injection
     output_mode: str = "final_only"  # final_only | streaming_partial
@@ -415,8 +423,8 @@ class Config:
             raise ValueError("tts_enabled must be true or false")
 
         self.tts_backend = str(self.tts_backend).strip().lower()
-        if self.tts_backend not in {"elevenlabs", "openai", "local"}:
-            raise ValueError("tts_backend must be one of: elevenlabs, openai, local")
+        if self.tts_backend not in {"elevenlabs", "openai", "local", "melotts"}:
+            raise ValueError("tts_backend must be one of: elevenlabs, openai, local, melotts")
 
         if self.tts_local_model_path is not None:
             local_model_path = str(self.tts_local_model_path).strip()
@@ -449,6 +457,22 @@ class Config:
                 DEFAULT_OPENAI_TTS_MODEL_ID,
             }:
                 self.tts_model_id = DEFAULT_LOCAL_TTS_MODEL_ID
+        elif self.tts_backend == "melotts":
+            current_voice_id = str(self.tts_default_voice_id).strip()
+            if current_voice_id in {
+                "",
+                DEFAULT_ELEVENLABS_TTS_VOICE_ID,
+                DEFAULT_OPENAI_TTS_VOICE_ID,
+            }:
+                self.tts_default_voice_id = DEFAULT_MELOTTS_VOICE_ID
+
+            current_model_id = str(self.tts_model_id).strip()
+            if current_model_id in {
+                "",
+                DEFAULT_ELEVENLABS_TTS_MODEL_ID,
+                DEFAULT_OPENAI_TTS_MODEL_ID,
+            }:
+                self.tts_model_id = DEFAULT_MELOTTS_MODEL_ID
 
         self.tts_default_voice_id = str(self.tts_default_voice_id).strip()
         if not self.tts_default_voice_id:
@@ -511,6 +535,15 @@ class Config:
         if self.tts_local_voice is not None:
             local_voice = str(self.tts_local_voice).strip()
             self.tts_local_voice = local_voice or None
+
+        # Validate MeloTTS configs
+        self.tts_melotts_device = str(self.tts_melotts_device).strip().lower()
+        if self.tts_melotts_device not in {"auto", "cpu", "cuda"}:
+            raise ValueError("tts_melotts_device must be one of: auto, cpu, cuda")
+
+        if self.tts_melotts_venv_path is not None:
+            melotts_venv = str(self.tts_melotts_venv_path).strip()
+            self.tts_melotts_venv_path = melotts_venv or None
 
         # Validate typing configs
         self.typing_final_injection_mode = str(self.typing_final_injection_mode).strip().lower()
