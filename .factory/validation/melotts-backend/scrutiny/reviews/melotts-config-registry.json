@@ -1,0 +1,34 @@
+{
+  "featureId": "melotts-config-registry",
+  "reviewedAt": "2026-03-13T07:20:00.000Z",
+  "commitId": "ae0e947",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Clean, well-structured implementation that adds MeloTTS config/registry integration with comprehensive tests. The worker correctly verified existing config.py and tts.py changes from the prior worker (melotts in allowed backends, new fields, validation, auto-defaults, CONFIG_SECTION_FIELDS, lazy resolver in registry), then added the missing tts-melotts=[] extra to pyproject.toml and wrote 14 new tests across 3 test files. All code follows existing patterns exactly: auto-defaults mirror the local/openai pattern, device validation mirrors sherpa_provider/moonshine_provider, venv_path normalization follows tts_local_model_path style. The diff is minimal and focused (96 insertions across 5 files including uv.lock).",
+    "issues": [
+      {
+        "file": "shuvoice/config.py",
+        "line": 343,
+        "severity": "non_blocking",
+        "description": "Auto-defaults for melotts check voice_id against ElevenLabs and OpenAI defaults but not against LOCAL default ('default'). If a user switches from local->melotts, the local voice_id would be preserved, which is likely not meaningful for MeloTTS. This matches the existing local backend pattern (which also doesn't check melotts defaults), so it's consistent, but could cause minor UX confusion."
+      },
+      {
+        "file": "tests/test_config.py",
+        "line": 641,
+        "severity": "non_blocking",
+        "description": "Minor test duplication: test_melotts_tts_backend_validates_without_error in test_config.py and test_tts_backend_melotts_accepted in test_config_validation.py test the same behavior (Config(tts_backend='melotts') succeeds). Similarly, device validation is tested in both files. The duplication is harmless and was explicitly requested by the feature description to cover both test files."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The backend-worker skill prescribes strict TDD (write failing tests first, then implement). This worker could not follow strict red-green-refactor because the config.py and tts.py implementation already existed from the prior worker (melotts-backend-and-helper). The worker correctly verified the existing code first, then wrote tests that pass against the already-implemented code. The skill's TDD procedure doesn't account for verification-only features where implementation is pre-existing. Worker's skillFeedback.followedProcedure=true is technically inaccurate for strict TDD but the deviation was justified by the feature description.",
+      "evidence": "Feature description says: 'The previous worker already added melotts to config.py [...] Verify those changes are correct, then focus on what remains.' Transcript shows worker reading config.py/tts.py first, confirming correctness, then writing tests. The skill's step 3 says 'Tests MUST fail at this point' which was impossible for the verification portion."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Feature passes review. Config.py has melotts in allowed backends, new fields (tts_melotts_device, tts_melotts_venv_path) with proper validation and normalization, auto-defaults for voice_id/model_id, CONFIG_SECTION_FIELDS entries. Registry in tts.py has the lazy resolver. pyproject.toml has tts-melotts extra. 14 new tests cover all expectedBehavior items (VAL-CFG-001 through VAL-CFG-005, VAL-CROSS-001). Full suite passes (572 passed), lint/format clean. Two non-blocking observations noted: cross-backend default preservation edge case and minor test duplication."
+}

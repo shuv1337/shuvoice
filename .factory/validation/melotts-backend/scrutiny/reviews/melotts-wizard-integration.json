@@ -1,0 +1,34 @@
+{
+  "featureId": "melotts-wizard-integration",
+  "reviewedAt": "2026-03-13T07:15:00.000Z",
+  "commitId": "3582236d533883fd3c79cb59633ce9de2e8d04b9",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Clean, well-structured implementation that adds MeloTTS to the wizard backend selection and config persistence. The worker followed TDD correctly, writing 14 tests first (9 in test_wizard.py, 5 in test_wizard_ui.py), then implementing changes in wizard_state.py and wizard/__init__.py. All expected behaviors are covered: TTS_BACKENDS includes melotts, default_tts_voice_for_backend returns EN-US, write_config persists melotts settings including tts_melotts_device, wizard UI shows device dropdown when melotts is selected, and the config round-trip test validates end-to-end. Code follows existing patterns precisely — the MeloTTS device dropdown mirrors the Sherpa provider dropdown pattern, voice labels use the same dict-lookup approach as OpenAI, and write_config cleanup properly removes melotts-specific keys when switching away from melotts.",
+    "issues": [
+      {
+        "file": "shuvoice/wizard/__init__.py",
+        "line": 1407,
+        "severity": "non_blocking",
+        "description": "The _complete_finish fallback path for 'incompatible_streaming' Sherpa models calls write_config() without passing tts_melotts_device. If the user selected melotts with a non-default device (e.g., 'cuda'), the fallback rewrite would silently reset tts_melotts_device to 'auto'. This is a pre-existing pattern (the fallback path also doesn't forward other TTS-backend-specific kwargs), and is a rare edge case (requires Sherpa Parakeet incompatibility + melotts TTS). The default 'auto' is reasonable."
+      },
+      {
+        "file": "shuvoice/wizard_state.py",
+        "line": 860,
+        "severity": "non_blocking",
+        "description": "write_config() does not validate that tts_melotts_device is one of 'auto', 'cpu', or 'cuda' before writing to config.toml. The Config class validates this on load, so invalid values would be caught at runtime, but write_config could theoretically write an invalid value. In practice this is safe because the wizard UI only offers the three valid options via the dropdown."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The _complete_finish fallback path in wizard/__init__.py re-calls write_config() with only a subset of TTS kwargs. This is a pre-existing pattern, but as more TTS backends with backend-specific config keys are added (melotts has tts_melotts_device, local has tts_local_model_path/tts_local_voice), the fallback path accumulates more potential data loss. Could benefit from a convention note in AGENTS.md about ensuring fallback write_config calls forward all backend-specific kwargs.",
+      "evidence": "shuvoice/wizard/__init__.py:1407-1426 — fallback write_config call includes tts_local_model_path and tts_local_voice but not tts_melotts_device"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Feature passes review. The implementation correctly adds MeloTTS to the wizard with TTS_BACKENDS entry, default voice resolution, voice labels, write_config persistence (including tts_melotts_device), and wizard UI device dropdown. 14 well-written tests cover all expected behaviors including config round-trip. Two non-blocking issues noted: (1) the pre-existing _complete_finish fallback path doesn't forward tts_melotts_device, and (2) write_config doesn't validate the device value before writing. Neither affects normal operation since the wizard dropdown constrains input to valid values and the fallback path is a rare edge case."
+}

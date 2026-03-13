@@ -1,0 +1,63 @@
+{
+  "featureId": "melotts-backend-and-helper",
+  "reviewedAt": "2026-03-13T07:15:00.000Z",
+  "commitId": "b81da61",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The implementation covers all required functionality (backend subclass, helper script, config integration, registry, tests) with good pattern consistency relative to tts_local.py. However, there is one blocking bug: the subprocess invocation uses `python -m shuvoice.melo_helper` which will fail at runtime because the MeloTTS venv does not have the `shuvoice` package installed. The helper needs to be invoked via its absolute file path instead. Additionally there are several non-blocking issues around process cleanup, config auto-defaults, and unused helper utilities.",
+    "issues": [
+      {
+        "file": "shuvoice/tts_melotts.py",
+        "line": 46,
+        "severity": "blocking",
+        "description": "The helper is invoked as `[python_bin, '-m', 'shuvoice.melo_helper', device]` where `python_bin` is from the isolated MeloTTS venv. The MeloTTS venv only has MeloTTS/numpy/torch installed — `shuvoice` is NOT installed there. Running `python -m shuvoice.melo_helper` will fail with `ModuleNotFoundError: No module named 'shuvoice'`. The fix is to use the absolute path to the helper script: `helper_path = Path(__file__).with_name('melo_helper.py'); command = [python_bin, str(helper_path), self._device]`. The test suite doesn't catch this because `subprocess.Popen` is fully mocked."
+      },
+      {
+        "file": "shuvoice/tts_melotts.py",
+        "line": 148,
+        "severity": "non_blocking",
+        "description": "When the frame header is truncated (0 < len < 4), a RuntimeError is raised inside the try block. This exception is NOT caught by the `except TimeoutExpired` handler, so it propagates out without calling `proc.stdout.close()`, `proc.stderr.read()`, or `proc.wait()`. This could leave the subprocess as a zombie until Python GC collects `proc`. The Piper backend doesn't have this issue because it doesn't use framing headers. Consider adding a `finally` block that calls `proc.kill()` and `proc.wait()` on any exception path, or restructuring the error handling."
+      },
+      {
+        "file": "shuvoice/tts_melotts.py",
+        "line": 91,
+        "severity": "non_blocking",
+        "description": "The `dependency_errors` method signature is `dependency_errors(venv_path: str | None = None)` while the abstract base in tts_base.py declares `dependency_errors() -> list[str]` with no parameters. While Python allows this (the extra param has a default), it's a signature mismatch that could confuse callers expecting the base interface. The tts_local.py reference implementation uses `dependency_errors()` with no extra params."
+      },
+      {
+        "file": "shuvoice/config.py",
+        "line": 459,
+        "severity": "non_blocking",
+        "description": "The melotts auto-default for `tts_default_voice_id` checks against empty, ElevenLabs, and OpenAI defaults, but not `DEFAULT_LOCAL_TTS_VOICE_ID` ('default'). If a user switches from `local` to `melotts` backend, the voice_id 'default' would be retained and used as-is, which is not a valid MeloTTS voice. This is consistent with how the local backend doesn't check for melotts defaults, but could cause a confusing runtime error."
+      },
+      {
+        "file": "shuvoice/melo_helper.py",
+        "line": 72,
+        "severity": "non_blocking",
+        "description": "The variable `stderr_bin = sys.stderr` is named with a `_bin` suffix suggesting binary mode, but `sys.stderr` is a text stream. The code writes strings to it (`error_msg + '\\n'`) which is correct for a text stream, but the naming is misleading. Consider renaming to `stderr_text` or just `stderr`."
+      },
+      {
+        "file": "shuvoice/melo_helper.py",
+        "line": 50,
+        "severity": "non_blocking",
+        "description": "`_build_request_json()` is defined and tested but never used by the backend module. The backend builds its own JSON inline in `synthesize_stream()`. The function exists solely for test verification of the protocol format. Consider either using it in the backend or removing it and testing the protocol via the existing stdin capture tests."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The subprocess invocation pattern for isolated-venv backends differs from the Piper (local) pattern. Piper uses a binary (`piper`) directly, but MeloTTS needs to invoke a Python script from the ShuVoice package using a different venv's Python. The architecture.md and AGENTS.md don't document the correct invocation pattern for this cross-venv scenario (use absolute script path, not `-m module`). This led to the blocking bug.",
+      "evidence": "shuvoice/tts_melotts.py:46 uses `python -m shuvoice.melo_helper` which won't work in an isolated venv. The .factory/library/architecture.md 'Subprocess Isolation Pattern' section only references 'Text goes in via stdin/args, PCM audio comes out via stdout' without specifying how to invoke scripts across venv boundaries."
+    },
+    {
+      "area": "skills",
+      "observation": "The worker followed the skill procedure correctly (TDD, pattern matching, verification). However, the skill's 'Study Existing Patterns' step says 'read tts_local.py (subprocess pattern)' but doesn't warn that the MeloTTS subprocess pattern differs fundamentally from Piper (cross-venv Python module invocation vs. direct binary execution). The skill could benefit from a note about testing actual command construction in integration-like tests.",
+      "evidence": "Transcript shows worker read tts_local.py as instructed, but the Piper pattern (direct binary in PATH) doesn't translate to the MeloTTS pattern (Python script in a different venv). All tests mock subprocess.Popen completely, so the invalid command was never caught."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "The MeloTTS backend implementation is well-structured and follows project patterns closely. Config integration, registry, voice listing, dependency checking, speed forwarding, and error handling are all solid. Test coverage is thorough with 23 tests. However, there is one blocking bug: the helper subprocess is invoked via `python -m shuvoice.melo_helper` using the MeloTTS venv's Python, which will fail at runtime because `shuvoice` is not installed in that venv. The fix is straightforward: use the absolute file path to `melo_helper.py` instead of the module path. This bug was not caught by tests because subprocess.Popen is fully mocked."
+}

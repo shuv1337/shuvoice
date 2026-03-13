@@ -53,3 +53,18 @@ Local TTS backends use subprocess to avoid dependency conflicts:
 - Backend spawns a subprocess per synthesis request
 - Text goes in via stdin/args, PCM audio comes out via stdout
 - The `tts_local.py` Piper backend is the reference implementation
+
+### Cross-venv subprocess invocation (MeloTTS pattern)
+
+When a helper script runs in an **isolated venv** (not the main ShuVoice venv), you must invoke it by **absolute file path**, not `-m module`:
+
+```python
+# CORRECT — works because the file path is independent of which packages are installed:
+helper_path = Path(__file__).with_name("melo_helper.py")
+command = [venv_python_bin, str(helper_path), ...]
+
+# WRONG — fails with ModuleNotFoundError because `shuvoice` is NOT installed in the isolated venv:
+command = [venv_python_bin, "-m", "shuvoice.melo_helper", ...]
+```
+
+The Piper backend doesn't have this issue because it invokes a standalone binary (`piper`) that's in PATH, not a Python module from another package.
