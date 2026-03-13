@@ -555,6 +555,67 @@ Curated downloads are stored as:
 ~/.local/share/shuvoice/models/piper/<voice-stem>.onnx.json
 ```
 
+### MeloTTS
+
+**Status**: ⚠️ Experimental  
+**Backend key**: `tts_backend = "melotts"`  
+**Modules**: `shuvoice/tts_melotts.py` (backend), `shuvoice/melo_helper.py` (subprocess helper)
+
+#### Config
+
+```toml
+[tts]
+tts_backend = "melotts"
+tts_default_voice_id = "EN-US"
+tts_model_id = "melotts"
+tts_playback_speed = 1.0
+tts_melotts_device = "auto"                            # auto | cpu | cuda
+# tts_melotts_venv_path = "~/.local/share/shuvoice/melotts-venv"  # default; override if needed
+```
+
+#### Config keys
+
+| Key | Default | Notes |
+|---|---|---|
+| `tts_melotts_device` | `auto` | `auto`, `cpu`, or `cuda`. Controls device used by the MeloTTS helper subprocess. |
+| `tts_melotts_venv_path` | *none* (auto: `~/.local/share/shuvoice/melotts-venv/`) | Path to the isolated MeloTTS Python venv. If unset, uses the default managed location. |
+
+#### Available voices
+
+| Voice ID | Name | Model |
+|---|---|---|
+| `EN-US` | American English | EN_V2 |
+| `EN-BR` | British English | EN_V2 |
+| `EN-INDIA` | Indian English | EN_V2 |
+| `EN-AU` | Australian English | EN_V2 |
+| `EN-Newest` | Newest English | EN_NEWEST |
+
+#### Dependencies (isolated venv)
+
+MeloTTS runs in a **separate Python 3.12 venv** to avoid dependency conflicts.
+All MeloTTS-specific imports live only in the helper script (`melo_helper.py`).
+
+```bash
+# Automated setup (recommended)
+shuvoice setup --install-missing   # when tts_backend = "melotts"
+
+# Manual setup
+uv python install 3.12
+uv venv --python 3.12 ~/.local/share/shuvoice/melotts-venv
+~/.local/share/shuvoice/melotts-venv/bin/python -m pip install melotts
+~/.local/share/shuvoice/melotts-venv/bin/python -m unidic download
+```
+
+#### Characteristics
+
+- MIT-licensed local TTS (MyShell.ai / MIT)
+- CPU real-time inference; optional CUDA acceleration
+- 44100 Hz PCM int16 mono output
+- 5 English voices across two models (EN_V2 and EN_NEWEST)
+- Speed control via synthesis parameter (0.5×–2.0×)
+- Non-streaming: entire utterance synthesized before playback
+- ~9 GB venv footprint (mainly PyTorch); models ~200 MB each
+
 ---
 
 ## Model Locations
@@ -567,6 +628,7 @@ Curated downloads are stored as:
 | ElevenLabs TTS | `tts_default_voice_id` + `tts_model_id` | Remote API (`api.elevenlabs.io`); key in env (`tts_api_key_env`) |
 | OpenAI TTS | `tts_default_voice_id` + `tts_model_id` | Remote API (`api.openai.com/v1/audio/speech`); key in env (`tts_api_key_env`) |
 | Local TTS | `tts_local_model_path` / `tts_local_voice` | Local filesystem path (Piper `.onnx` model file(s)); managed automation target: `~/.local/share/shuvoice/models/piper/` |
+| MeloTTS | `tts_default_voice_id` + `tts_model_id` | Isolated venv (`~/.local/share/shuvoice/melotts-venv/`); models cached in HuggingFace cache via helper subprocess |
 
 ---
 

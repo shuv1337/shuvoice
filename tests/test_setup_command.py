@@ -10,6 +10,7 @@ from shuvoice.setup_helpers import (
     DEPENDENCY_EXIT_CODE,
     BackendSetupReport,
     LocalTTSSetupReport,
+    MeloTTSSetupReport,
 )
 
 
@@ -93,7 +94,9 @@ def test_run_setup_attempts_cuda_runtime_repair_when_requested(capsys, monkeypat
     )
 
     cfg = Config(asr_backend="sherpa", sherpa_provider="cuda")
-    code = setup_cmd.run_setup(cfg, install_missing=True, skip_model_download=True, skip_preflight=True)
+    code = setup_cmd.run_setup(
+        cfg, install_missing=True, skip_model_download=True, skip_preflight=True
+    )
 
     assert code == 0
     assert calls == [("sherpa", True)]
@@ -308,7 +311,6 @@ def test_preflight_reports_sherpa_decode_mode_status(capsys, monkeypatch):
     assert "parakeet_runnable=yes" in out
 
 
-
 def test_run_setup_local_tts_downloads_and_persists_config(capsys, monkeypatch, tmp_path):
     report = BackendSetupReport(
         backend="sherpa",
@@ -353,7 +355,9 @@ def test_run_setup_local_tts_downloads_and_persists_config(capsys, monkeypatch, 
     monkeypatch.setattr(setup_cmd, "build_backend_setup_report", lambda _cfg: report)
     monkeypatch.setattr(setup_cmd, "get_backend_class", lambda _name: _DummyBackend)
     monkeypatch.setattr(setup_cmd, "build_local_tts_setup_report", lambda _cfg: next(local_reports))
-    monkeypatch.setattr(setup_cmd, "format_local_tts_report", lambda _report: "Local TTS (Piper): ok")
+    monkeypatch.setattr(
+        setup_cmd, "format_local_tts_report", lambda _report: "Local TTS (Piper): ok"
+    )
     monkeypatch.setattr(
         setup_cmd,
         "ensure_local_piper_ready",
@@ -393,7 +397,6 @@ def test_run_setup_local_tts_downloads_and_persists_config(capsys, monkeypatch, 
     assert "Local Piper setup: Local Piper ready: en_US-amy-medium" in out
 
 
-
 def test_run_setup_local_tts_returns_dependency_exit_when_runtime_missing(capsys, monkeypatch):
     report = BackendSetupReport(
         backend="sherpa",
@@ -427,7 +430,9 @@ def test_run_setup_local_tts_returns_dependency_exit_when_runtime_missing(capsys
             model_status="missing",
         ),
     )
-    monkeypatch.setattr(setup_cmd, "format_local_tts_report", lambda _report: "Local TTS (Piper): missing")
+    monkeypatch.setattr(
+        setup_cmd, "format_local_tts_report", lambda _report: "Local TTS (Piper): missing"
+    )
 
     code = setup_cmd.run_setup(
         Config(tts_backend="local"),
@@ -439,3 +444,268 @@ def test_run_setup_local_tts_returns_dependency_exit_when_runtime_missing(capsys
 
     assert code == DEPENDENCY_EXIT_CODE
     assert "Local Piper runtime is still missing" in capsys.readouterr().out
+
+
+# ------------------------------------------------------------------ #
+# MeloTTS setup tests                                                 #
+# ------------------------------------------------------------------ #
+
+
+def test_run_setup_reports_melotts_status_when_venv_missing(capsys, monkeypatch, tmp_path):
+    """Setup with tts_backend='melotts' reports backend status including missing venv."""
+    asr_report = BackendSetupReport(
+        backend="sherpa",
+        missing_dependencies=(),
+        install_hints=(),
+        model_status="present (/tmp/model)",
+    )
+
+    class _DummyBackend:
+        capabilities = SimpleNamespace(supports_model_download=False)
+
+        @staticmethod
+        def startup_warnings(_cfg, *, apply_fixes: bool = False):
+            return []
+
+        @staticmethod
+        def startup_errors(_cfg):
+            return []
+
+    venv_dir = tmp_path / "melotts-venv"
+    melotts_report = MeloTTSSetupReport(
+        venv_present=False,
+        venv_dir=venv_dir,
+        python_executable=False,
+        missing_dependencies=("MeloTTS venv directory does not exist",),
+        model_status=f"not installed (venv missing: {venv_dir})",
+    )
+
+    monkeypatch.setattr(setup_cmd, "build_backend_setup_report", lambda _cfg: asr_report)
+    monkeypatch.setattr(setup_cmd, "get_backend_class", lambda _name: _DummyBackend)
+    monkeypatch.setattr(setup_cmd, "build_melotts_setup_report", lambda _cfg: melotts_report)
+    monkeypatch.setattr(
+        setup_cmd, "format_melotts_report", lambda _report: "MeloTTS:\n  Venv: missing"
+    )
+
+    cfg = Config(
+        tts_backend="melotts",
+        tts_melotts_venv_path=str(venv_dir),
+    )
+    code = setup_cmd.run_setup(
+        cfg,
+        install_missing=False,
+        skip_model_download=True,
+        skip_preflight=True,
+    )
+
+    assert code == DEPENDENCY_EXIT_CODE
+    out = capsys.readouterr().out
+    assert "melotts" in out.lower()
+    assert "[FAIL] MeloTTS backend" in out
+
+
+def test_run_setup_melotts_success_when_venv_ready(capsys, monkeypatch, tmp_path):
+    """Setup succeeds when the MeloTTS venv is already ready."""
+    asr_report = BackendSetupReport(
+        backend="sherpa",
+        missing_dependencies=(),
+        install_hints=(),
+        model_status="present (/tmp/model)",
+    )
+
+    class _DummyBackend:
+        capabilities = SimpleNamespace(supports_model_download=False)
+
+        @staticmethod
+        def startup_warnings(_cfg, *, apply_fixes: bool = False):
+            return []
+
+        @staticmethod
+        def startup_errors(_cfg):
+            return []
+
+    venv_dir = tmp_path / "melotts-venv"
+    melotts_report = MeloTTSSetupReport(
+        venv_present=True,
+        venv_dir=venv_dir,
+        python_executable=True,
+        missing_dependencies=(),
+        model_status=f"ready ({venv_dir})",
+    )
+
+    monkeypatch.setattr(setup_cmd, "build_backend_setup_report", lambda _cfg: asr_report)
+    monkeypatch.setattr(setup_cmd, "get_backend_class", lambda _name: _DummyBackend)
+    monkeypatch.setattr(setup_cmd, "build_melotts_setup_report", lambda _cfg: melotts_report)
+    monkeypatch.setattr(
+        setup_cmd, "format_melotts_report", lambda _report: "MeloTTS:\n  Venv: present"
+    )
+
+    cfg = Config(
+        tts_backend="melotts",
+        tts_melotts_venv_path=str(venv_dir),
+    )
+    code = setup_cmd.run_setup(
+        cfg,
+        install_missing=False,
+        skip_model_download=True,
+        skip_preflight=True,
+    )
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "[PASS] MeloTTS backend" in out
+
+
+def test_run_setup_melotts_install_missing_generates_commands(capsys, monkeypatch, tmp_path):
+    """Setup --install-missing generates the correct melotts install command sequence."""
+    asr_report = BackendSetupReport(
+        backend="sherpa",
+        missing_dependencies=(),
+        install_hints=(),
+        model_status="present (/tmp/model)",
+    )
+
+    class _DummyBackend:
+        capabilities = SimpleNamespace(supports_model_download=False)
+
+        @staticmethod
+        def startup_warnings(_cfg, *, apply_fixes: bool = False):
+            return []
+
+        @staticmethod
+        def startup_errors(_cfg):
+            return []
+
+    venv_dir = tmp_path / "melotts-venv"
+
+    # First report: venv missing, second: venv ready (after install)
+    reports = iter(
+        [
+            MeloTTSSetupReport(
+                venv_present=False,
+                venv_dir=venv_dir,
+                python_executable=False,
+                missing_dependencies=("MeloTTS venv directory does not exist",),
+                model_status=f"not installed (venv missing: {venv_dir})",
+            ),
+            MeloTTSSetupReport(
+                venv_present=True,
+                venv_dir=venv_dir,
+                python_executable=True,
+                missing_dependencies=(),
+                model_status=f"ready ({venv_dir})",
+            ),
+        ]
+    )
+
+    monkeypatch.setattr(setup_cmd, "build_backend_setup_report", lambda _cfg: asr_report)
+    monkeypatch.setattr(setup_cmd, "get_backend_class", lambda _name: _DummyBackend)
+    monkeypatch.setattr(setup_cmd, "build_melotts_setup_report", lambda _cfg: next(reports))
+    monkeypatch.setattr(setup_cmd, "format_melotts_report", lambda _report: "MeloTTS: status")
+
+    # Track which commands were run
+    run_commands: list[list[str]] = []
+
+    def _fake_subprocess_run(cmd, *, check=False):  # noqa: ARG001
+        run_commands.append(cmd)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(setup_cmd.subprocess, "run", _fake_subprocess_run)
+    monkeypatch.setattr(setup_cmd.shutil, "which", lambda exe: f"/usr/bin/{exe}")
+
+    cfg = Config(
+        tts_backend="melotts",
+        tts_melotts_venv_path=str(venv_dir),
+    )
+    code = setup_cmd.run_setup(
+        cfg,
+        install_missing=True,
+        skip_model_download=True,
+        skip_preflight=True,
+    )
+
+    assert code == 0
+
+    # Verify command sequence: uv python install → uv venv → pip install → unidic
+    assert any(cmd[:3] == ["uv", "python", "install"] for cmd in run_commands)
+    assert any(cmd[:2] == ["uv", "venv"] for cmd in run_commands)
+    assert any("melotts" in cmd for cmd in run_commands)
+    assert any("unidic" in cmd for cmd in run_commands)
+
+
+def test_run_setup_melotts_idempotent_skips_venv_creation(capsys, monkeypatch, tmp_path):
+    """Setup --install-missing with existing valid venv skips venv creation step."""
+    asr_report = BackendSetupReport(
+        backend="sherpa",
+        missing_dependencies=(),
+        install_hints=(),
+        model_status="present (/tmp/model)",
+    )
+
+    class _DummyBackend:
+        capabilities = SimpleNamespace(supports_model_download=False)
+
+        @staticmethod
+        def startup_warnings(_cfg, *, apply_fixes: bool = False):
+            return []
+
+        @staticmethod
+        def startup_errors(_cfg):
+            return []
+
+    venv_dir = tmp_path / "melotts-venv"
+
+    # Venv exists but helper is "missing" → has deps issues → triggers install path
+    # Then after install, all good
+    reports = iter(
+        [
+            MeloTTSSetupReport(
+                venv_present=True,
+                venv_dir=venv_dir,
+                python_executable=True,
+                missing_dependencies=("MeloTTS helper script not found",),
+                model_status="incomplete",
+            ),
+            MeloTTSSetupReport(
+                venv_present=True,
+                venv_dir=venv_dir,
+                python_executable=True,
+                missing_dependencies=(),
+                model_status=f"ready ({venv_dir})",
+            ),
+        ]
+    )
+
+    monkeypatch.setattr(setup_cmd, "build_backend_setup_report", lambda _cfg: asr_report)
+    monkeypatch.setattr(setup_cmd, "get_backend_class", lambda _name: _DummyBackend)
+    monkeypatch.setattr(setup_cmd, "build_melotts_setup_report", lambda _cfg: next(reports))
+    monkeypatch.setattr(setup_cmd, "format_melotts_report", lambda _report: "MeloTTS: status")
+
+    # The valid venv should cause "uv venv" to be skipped
+    monkeypatch.setattr(setup_cmd, "melotts_venv_valid", lambda _venv_dir: True)
+
+    run_commands: list[list[str]] = []
+
+    def _fake_subprocess_run(cmd, *, check=False):  # noqa: ARG001
+        run_commands.append(cmd)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(setup_cmd.subprocess, "run", _fake_subprocess_run)
+    monkeypatch.setattr(setup_cmd.shutil, "which", lambda exe: f"/usr/bin/{exe}")
+
+    cfg = Config(
+        tts_backend="melotts",
+        tts_melotts_venv_path=str(venv_dir),
+    )
+    code = setup_cmd.run_setup(
+        cfg,
+        install_missing=True,
+        skip_model_download=True,
+        skip_preflight=True,
+    )
+
+    assert code == 0
+    # Verify venv creation was skipped
+    assert not any(cmd[:2] == ["uv", "venv"] for cmd in run_commands)
+    out = capsys.readouterr().out
+    assert "Skipping venv creation" in out

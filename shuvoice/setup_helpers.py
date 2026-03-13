@@ -16,6 +16,7 @@ from .piper_setup import (
     validate_piper_voice_artifacts,
 )
 from .tts_base import LOCAL_TTS_AUTO_VOICE_IDS
+from .tts_melotts import _DEFAULT_MELOTTS_VENV_DIR
 
 DEPENDENCY_EXIT_CODE = 78
 """Exit code used for startup-blocking backend/config/runtime errors.
@@ -40,6 +41,15 @@ class LocalTTSSetupReport:
     model_dir: Path | None
     installed_voices: tuple[str, ...]
     missing_artifacts: tuple[str, ...]
+    model_status: str
+
+
+@dataclass(frozen=True)
+class MeloTTSSetupReport:
+    venv_present: bool
+    venv_dir: Path
+    python_executable: bool
+    missing_dependencies: tuple[str, ...]
     model_status: str
 
 
@@ -271,5 +281,95 @@ def format_local_tts_report(report: LocalTTSSetupReport) -> str:
 
     for detail in report.missing_artifacts:
         lines.append(f"  Missing: {detail}")
+
+    return "\n".join(lines)
+
+
+# ------------------------------------------------------------------ #
+# MeloTTS helpers                                                     #
+# ------------------------------------------------------------------ #
+
+
+def _melotts_venv_dir(config: Config) -> Path:
+    """Return the MeloTTS venv directory from *config* or the default."""
+    venv_path = getattr(config, "tts_melotts_venv_path", None)
+    if venv_path:
+        return Path(venv_path).expanduser()
+    return Path(_DEFAULT_MELOTTS_VENV_DIR).expanduser()
+
+
+def melotts_venv_valid(venv_dir: Path) -> bool:
+    """Return ``True`` when *venv_dir* contains an executable Python."""
+    python_bin = venv_dir / "bin" / "python"
+    if not python_bin.exists():
+        return False
+    return bool(python_bin.stat().st_mode & 0o111)
+
+
+def build_melotts_setup_report(config: Config) -> MeloTTSSetupReport:
+    """Build a status report for the MeloTTS backend."""
+    venv_dir = _melotts_venv_dir(config)
+    venv_present = venv_dir.is_dir()
+    python_ok = melotts_venv_valid(venv_dir) if venv_present else False
+
+    from .tts_melotts import MeloTTSBackend  # noqa: PLC0415
+
+    missing = tuple(MeloTTSBackend.dependency_errors(venv_path=str(venv_dir)))
+
+    if not venv_present:
+        model_status = f"not installed (venv missing: {venv_dir})"
+    elif not python_ok:
+        model_status = f"broken (venv python not executable: {venv_dir})"
+    elif missing:
+        model_status = f"incomplete ({'; '.join(missing)})"
+    else:
+        model_status = f"ready ({venv_dir})"
+
+    return MeloTTSSetupReport(
+        venv_present=venv_present,
+        venv_dir=venv_dir,
+        python_executable=python_ok,
+        missing_dependencies=missing,
+        model_status=model_status,
+    )
+
+
+def melotts_install_commands(venv_dir: Path | None = None) -> list[list[str]]:
+    """Return the ordered list of commands to create and populate a MeloTTS venv.
+
+    The sequence is idempotent: callers should skip individual steps
+    when the venv already exists and is valid (see :func:`melotts_venv_valid`).
+    """
+    target = venv_dir or Path(_DEFAULT_MELOTTS_VENV_DIR).expanduser()
+    python_bin = str(target / "bin" / "python")
+
+    commands: list[list[str]] = []
+
+    # Step 1: ensure Python 3.12 is available via uv
+    commands.append(["uv", "python", "install", "3.12"])
+
+    # Step 2: create the isolated venv with Python 3.12
+    commands.append(["uv", "venv", "--python", "3.12", str(target)])
+
+    # Step 3: install melotts into the venv
+    commands.append([python_bin, "-m", "pip", "install", "melotts"])
+
+    # Step 4: download the unidic dictionary required by MeloTTS
+    commands.append([python_bin, "-m", "unidic", "download"])
+
+    return commands
+
+
+def format_melotts_report(report: MeloTTSSetupReport) -> str:
+    """Format a human-readable MeloTTS setup status block."""
+    lines = ["MeloTTS:"]
+    lines.append(f"  Venv: {'present' if report.venv_present else 'missing'} ({report.venv_dir})")
+    if report.venv_present:
+        lines.append(f"  Python: {'executable' if report.python_executable else 'not executable'}")
+    lines.append(f"  Status: {report.model_status}")
+
+    if report.missing_dependencies:
+        for dep in report.missing_dependencies:
+            lines.append(f"  Missing: {dep}")
 
     return "\n".join(lines)

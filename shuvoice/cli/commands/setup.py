@@ -21,8 +21,12 @@ from ...setup_helpers import (
     DEPENDENCY_EXIT_CODE,
     build_backend_setup_report,
     build_local_tts_setup_report,
+    build_melotts_setup_report,
     format_local_tts_report,
+    format_melotts_report,
     format_missing_dependency_report,
+    melotts_install_commands,
+    melotts_venv_valid,
 )
 from ...sherpa_cuda import prepare_cuda_runtime
 from ...wizard_state import _upsert_tts_key
@@ -358,10 +362,7 @@ def _run_local_tts_setup(
     )
 
     needs_voice_download = bool(
-        tts_local_voice
-        or tts_local_model_dir
-        or not report.model_dir
-        or report.missing_artifacts
+        tts_local_voice or tts_local_model_dir or not report.model_dir or report.missing_artifacts
     )
 
     if skip_model_download:
@@ -413,6 +414,58 @@ def _run_local_tts_setup(
         print("\nSetup incomplete: Local Piper artifacts are still incomplete.")
         return DEPENDENCY_EXIT_CODE
 
+    return 0
+
+
+def _run_melotts_setup(
+    config: Config,
+    *,
+    install_missing: bool,
+) -> int:
+    """Set up the MeloTTS isolated venv and report status."""
+    print("\nTTS backend: melotts")
+    report = build_melotts_setup_report(config)
+    print(format_melotts_report(report))
+
+    if report.missing_dependencies and install_missing:
+        venv_dir = report.venv_dir
+        already_valid = melotts_venv_valid(venv_dir)
+
+        commands = melotts_install_commands(venv_dir)
+        for command in commands:
+            # Skip venv creation steps when venv already exists and is valid
+            if already_valid and command[0] == "uv" and len(command) > 1:
+                if command[1] == "python":
+                    # uv python install — always safe to run (idempotent)
+                    pass
+                elif command[1] == "venv":
+                    print(f"  Skipping venv creation (already valid): {venv_dir}")
+                    continue
+
+            executable = command[0]
+            if executable not in {sys.executable} and not shutil.which(executable):
+                print(f"  Skipping (executable not found): {executable}")
+                continue
+
+            print(f"  Running: {' '.join(command)}")
+            proc = subprocess.run(command, check=False)
+            if proc.returncode != 0:
+                print(f"  Command failed (exit {proc.returncode}): {' '.join(command)}")
+                break
+
+        # Re-check status after install
+        report = build_melotts_setup_report(config)
+        print(format_melotts_report(report))
+
+    if report.missing_dependencies:
+        print("\n[FAIL] MeloTTS backend")
+        print("Setup incomplete: MeloTTS venv is not ready.")
+        print("Install hints:")
+        for cmd in melotts_install_commands(report.venv_dir):
+            print(f"  $ {' '.join(cmd)}")
+        return DEPENDENCY_EXIT_CODE
+
+    print("\n[PASS] MeloTTS backend")
     return 0
 
 
@@ -520,6 +573,14 @@ def run_setup(
         )
         if local_setup_code != 0:
             return local_setup_code
+
+    if config.tts_backend == "melotts":
+        melotts_setup_code = _run_melotts_setup(
+            config,
+            install_missing=install_missing,
+        )
+        if melotts_setup_code != 0:
+            return melotts_setup_code
 
     if skip_preflight:
         print("Preflight: skipped (--skip-preflight).")
