@@ -608,6 +608,14 @@ def test_run_setup_melotts_install_missing_generates_commands(capsys, monkeypatc
 
     def _fake_subprocess_run(cmd, *, check=False):  # noqa: ARG001
         run_commands.append(cmd)
+        # Simulate venv creation: create the python binary so the
+        # Path.is_file() check finds it for subsequent pip/unidic commands.
+        if len(cmd) >= 2 and cmd[0] == "uv" and cmd[1] == "venv":
+            bin_dir = venv_dir / "bin"
+            bin_dir.mkdir(parents=True, exist_ok=True)
+            py = bin_dir / "python"
+            py.write_text("#!/bin/sh\n")
+            py.chmod(0o755)
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(setup_cmd.subprocess, "run", _fake_subprocess_run)

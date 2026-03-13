@@ -443,9 +443,16 @@ def _run_melotts_setup(
                     continue
 
             executable = command[0]
-            if executable not in {sys.executable} and not shutil.which(executable):
-                print(f"  Skipping (executable not found): {executable}")
-                continue
+            # Use Path.is_file() for absolute paths (e.g. venv python) to
+            # avoid shutil.which() PATH-only lookup on freshly-created venvs.
+            if executable not in {sys.executable}:
+                if "/" in executable:
+                    found = Path(executable).is_file()
+                else:
+                    found = shutil.which(executable) is not None
+                if not found:
+                    print(f"  Skipping (executable not found): {executable}")
+                    continue
 
             print(f"  Running: {' '.join(command)}")
             proc = subprocess.run(command, check=False)

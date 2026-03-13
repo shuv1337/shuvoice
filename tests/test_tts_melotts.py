@@ -68,6 +68,7 @@ class _FakePopen:
 
     def kill(self):
         self.killed = True
+        self._hang = False  # Real processes stop hanging after kill
 
 
 # ---------------------------------------------------------------------------
@@ -541,6 +542,96 @@ def test_synthesize_stream_truncated_header_raises(monkeypatch, tmp_path: Path):
     )
     with pytest.raises(RuntimeError, match="(?i)incomplete|truncated|unexpected"):
         list(backend.synthesize_stream(request))
+
+
+def test_truncated_header_kills_subprocess(monkeypatch, tmp_path: Path):
+    """Truncated frame header error must kill and wait on the subprocess."""
+    from shuvoice.config import Config
+    from shuvoice.tts_melotts import MeloTTSBackend
+
+    venv_dir = tmp_path / "melotts-venv"
+    venv_dir.mkdir()
+    (venv_dir / "bin").mkdir()
+    python_bin = venv_dir / "bin" / "python"
+    python_bin.write_text("#!/bin/sh\n")
+    python_bin.chmod(0o755)
+
+    seen: dict[str, object] = {}
+
+    def fake_popen(command, **kwargs):
+        # Return only 2 bytes of stdout — triggers truncated header error
+        proc = _FakePopen(command, stdout_data=b"\x00\x01")
+        seen["proc"] = proc
+        return proc
+
+    monkeypatch.setattr("shuvoice.tts_melotts.subprocess.Popen", fake_popen)
+
+    cfg = Config(tts_backend="melotts", tts_melotts_venv_path=str(venv_dir))
+    backend = MeloTTSBackend(cfg)
+
+    request = TTSSynthesisRequest(
+        text="Hello",
+        voice_id="EN-US",
+        model_id="melotts",
+        playback_speed=1.0,
+    )
+    with pytest.raises(RuntimeError):
+        list(backend.synthesize_stream(request))
+
+    assert seen["proc"].killed is True
+
+
+# ---------------------------------------------------------------------------
+# Subprocess command uses file path (not -m module)
+# ---------------------------------------------------------------------------
+
+
+def test_subprocess_command_uses_file_path(monkeypatch, tmp_path: Path):
+    """The helper subprocess must be invoked via file path, not ``-m`` module."""
+    from shuvoice.config import Config
+    from shuvoice.tts_melotts import MeloTTSBackend
+
+    venv_dir = tmp_path / "melotts-venv"
+    venv_dir.mkdir()
+    (venv_dir / "bin").mkdir()
+    python_bin = venv_dir / "bin" / "python"
+    python_bin.write_text("#!/bin/sh\n")
+    python_bin.chmod(0o755)
+
+    pcm_data = b"\x00\x01" * 10
+    stdout_payload = _pcm_frame(pcm_data)
+
+    seen: dict[str, object] = {}
+
+    def fake_popen(command, **kwargs):
+        proc = _FakePopen(command, stdout_data=stdout_payload)
+        seen["command"] = list(command)
+        return proc
+
+    monkeypatch.setattr("shuvoice.tts_melotts.subprocess.Popen", fake_popen)
+
+    cfg = Config(tts_backend="melotts", tts_melotts_venv_path=str(venv_dir))
+    backend = MeloTTSBackend(cfg)
+
+    request = TTSSynthesisRequest(
+        text="Hello",
+        voice_id="EN-US",
+        model_id="melotts",
+        playback_speed=1.0,
+    )
+    list(backend.synthesize_stream(request))
+
+    command = seen["command"]
+
+    # Must NOT use -m module invocation
+    assert "-m" not in command, f"Command should not use -m module: {command}"
+
+    # The second argument must be a file path ending with melo_helper.py,
+    # matching the pattern used by dependency_errors()
+    helper_arg = command[1]
+    assert helper_arg.endswith("melo_helper.py"), (
+        f"Command should invoke melo_helper.py by file path: {command}"
+    )
 
 
 # ---------------------------------------------------------------------------

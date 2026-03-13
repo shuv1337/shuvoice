@@ -23,9 +23,6 @@ _MELOTTS_SAMPLE_RATE_HZ = 44100
 # Default venv location managed by ``shuvoice setup``.
 _DEFAULT_MELOTTS_VENV_DIR = "~/.local/share/shuvoice/melotts-venv"
 
-# Path to the helper module inside the ShuVoice package.
-_HELPER_MODULE = "shuvoice.melo_helper"
-
 # Frame header size: 4-byte little-endian uint32.
 _FRAME_HEADER_SIZE = 4
 
@@ -124,7 +121,8 @@ class MeloTTSBackend(TTSBackend):
             )
 
         python_bin = str(self._venv_dir / "bin" / "python")
-        command = [python_bin, "-m", _HELPER_MODULE, self._device]
+        helper_path = Path(__file__).with_name("melo_helper.py")
+        command = [python_bin, str(helper_path), self._device]
 
         log.info(
             "MeloTTS synthesis: voice=%s speed=%sx text_len=%d",
@@ -148,6 +146,7 @@ class MeloTTSBackend(TTSBackend):
         assert proc.stdin is not None
         assert proc.stdout is not None
 
+        stderr_bytes = b""
         try:
             # Send the JSON request followed by a newline, then close stdin
             # so the helper knows there are no more requests.
@@ -191,7 +190,14 @@ class MeloTTSBackend(TTSBackend):
 
         except subprocess.TimeoutExpired as exc:
             proc.kill()
+            proc.wait()
             raise RuntimeError("MeloTTS synthesis timed out") from exc
+        except Exception:
+            # Ensure the subprocess is reaped on any error (e.g. truncated
+            # frame header RuntimeError) to avoid zombie processes.
+            proc.kill()
+            proc.wait()
+            raise
 
         if proc.returncode not in (0, None):
             stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
