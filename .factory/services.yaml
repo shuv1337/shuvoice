@@ -1,0 +1,7 @@
+commands:
+  install: uv sync --dev
+  test: uv run pytest tests/ -x -q
+  test_verbose: uv run pytest tests/ -x -v
+  lint: uv run ruff check shuvoice/ tests/
+  format_check: uv run ruff format --check shuvoice/ tests/
+  format: uv run ruff format shuvoice/ tests/
