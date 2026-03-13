@@ -1,0 +1,96 @@
+{
+  "milestone": "melotts-backend",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": { "passed": true, "command": "uv run pytest tests/ -x -q", "exitCode": 0, "details": "599 passed, 2 skipped in 3.33s" },
+    "lint": { "passed": true, "command": "uv run ruff check shuvoice/ tests/", "exitCode": 0 },
+    "format": { "passed": true, "command": "uv run ruff format --check shuvoice/ tests/", "exitCode": 1, "details": "12 files would be reformatted — all pre-existing (17 before melotts work, 12 after — workers fixed 5 files). No formatting regressions from melotts milestone." }
+  },
+  "reviewsSummary": {
+    "total": 4,
+    "passed": 3,
+    "failed": 1,
+    "failedFeatures": ["melotts-backend-and-helper"]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "melotts-backend-and-helper",
+      "severity": "blocking",
+      "description": "Helper subprocess invoked as `[venv_python, '-m', 'shuvoice.melo_helper', device]` but `shuvoice` is NOT installed in the isolated MeloTTS venv. Will fail at runtime with ModuleNotFoundError. Fix: replace `-m shuvoice.melo_helper` with absolute file path `Path(__file__).with_name('melo_helper.py')` (which is already used correctly in `dependency_errors()`). Tests didn't catch this because subprocess.Popen is fully mocked.",
+      "file": "shuvoice/tts_melotts.py",
+      "line": 127,
+      "suggestedFix": "Change line 127 from `command = [python_bin, \"-m\", _HELPER_MODULE, self._device]` to `helper_path = Path(__file__).with_name(\"melo_helper.py\"); command = [python_bin, str(helper_path), self._device]`. Also remove the unused `_HELPER_MODULE` constant on line 27."
+    }
+  ],
+  "nonBlockingIssues": [
+    {
+      "featureId": "melotts-backend-and-helper",
+      "severity": "non_blocking",
+      "description": "Truncated frame header (0 < len < 4) raises RuntimeError that's not caught, potentially leaving subprocess as zombie. Consider a finally block for proc.kill()/proc.wait()."
+    },
+    {
+      "featureId": "melotts-backend-and-helper",
+      "severity": "non_blocking",
+      "description": "dependency_errors() has extra param (venv_path) not in base class signature. Harmless since it has a default, but mismatches the abstract interface."
+    },
+    {
+      "featureId": "melotts-backend-and-helper",
+      "severity": "non_blocking",
+      "description": "_build_request_json() in melo_helper.py is defined and tested but never called by the backend. The backend builds JSON inline."
+    },
+    {
+      "featureId": "melotts-config-registry",
+      "severity": "non_blocking",
+      "description": "Auto-defaults for melotts don't check local backend's voice_id ('default'). Switching local→melotts would preserve 'default' which is not a valid MeloTTS voice. Consistent with existing cross-backend pattern."
+    },
+    {
+      "featureId": "melotts-wizard-integration",
+      "severity": "non_blocking",
+      "description": "_complete_finish fallback path doesn't forward tts_melotts_device — rare edge case (Sherpa Parakeet incompatibility + melotts TTS), default 'auto' is reasonable."
+    },
+    {
+      "featureId": "melotts-setup-automation",
+      "severity": "non_blocking",
+      "description": "shutil.which() in _run_melotts_setup() won't find venv python at absolute paths after venv creation. The venv python binary exists on disk but shutil.which() only searches PATH. Could silently skip pip install and unidic download steps at runtime."
+    }
+  ],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Added 'Cross-venv subprocess invocation' section to .factory/library/architecture.md documenting the correct pattern (absolute file path) and the anti-pattern (-m module) for invoking helper scripts in isolated venvs.",
+      "sourceFeature": "melotts-backend-and-helper"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Add a warning to the backend-worker skill's 'Study Existing Patterns' step: when the backend uses a cross-venv subprocess (helper runs in a different Python venv), the invocation pattern differs from Piper (which uses a standalone binary). The helper must be invoked by absolute file path, not -m module, since the helper's package is not installed in the target venv. Reference .factory/library/architecture.md 'Cross-venv subprocess invocation' section.",
+      "evidence": "Feature melotts-backend-and-helper: worker followed skill's 'Study tts_local.py' step, but the Piper pattern (binary in PATH) doesn't translate to cross-venv Python module invocation. Result: blocking bug where helper is invoked as `python -m shuvoice.melo_helper` in a venv that doesn't have `shuvoice` installed.",
+      "isSystemic": true
+    },
+    {
+      "target": "skills",
+      "suggestion": "Clarify backend-worker skill TDD procedure for verification-only features: when a feature's primary task is to verify and test pre-existing code (from a prior worker), strict red-green-refactor doesn't apply. The skill should acknowledge that 'Tests MUST fail at this point' is inapplicable when the implementation already exists.",
+      "evidence": "Features melotts-config-registry and melotts-setup-automation both had workers who couldn't follow strict TDD because implementation was partially done by prior workers. Workers' skillFeedback.followedProcedure=true despite the deviation.",
+      "isSystemic": true
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add a note about the _complete_finish fallback path in wizard/__init__.py: when adding new TTS backends with backend-specific config keys, ensure the fallback write_config() call in _complete_finish() forwards those keys. Currently forwards tts_local_model_path and tts_local_voice but not tts_melotts_device. Risk grows with each new backend.",
+      "evidence": "Feature melotts-wizard-integration: reviewer found _complete_finish fallback at wizard/__init__.py:1407 doesn't forward tts_melotts_device, would reset to 'auto' in the rare Sherpa Parakeet incompatibility edge case.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "TDD procedure deviation for melotts-setup-automation (implementation before tests)",
+      "reason": "Pragmatic deviation for a feature extending existing code. Already covered by the broader TDD flexibility suggestion above."
+    },
+    {
+      "observation": "stderr_bin naming in melo_helper.py is misleading",
+      "reason": "Cosmetic naming issue, too minor for shared state action."
+    }
+  ],
+  "previousRound": null
+}

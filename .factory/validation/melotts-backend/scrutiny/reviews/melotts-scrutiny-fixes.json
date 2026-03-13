@@ -1,0 +1,28 @@
+{
+  "featureId": "melotts-scrutiny-fixes",
+  "reviewedAt": "2026-03-13T07:45:00.000Z",
+  "commitId": "c882f5d",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "All three scrutiny issues from the prior review are properly addressed. (1) The blocking helper subprocess invocation bug is fixed: `_HELPER_MODULE` constant is removed and `synthesize_stream()` now uses `Path(__file__).with_name('melo_helper.py')` to construct the file path, consistent with the pattern already used in `dependency_errors()`. (2) The `setup.py` venv python check now distinguishes absolute paths (checked via `Path.is_file()`) from bare command names (checked via `shutil.which()`), correctly handling freshly-created venvs. (3) A bare `except Exception` block with `proc.kill(); proc.wait(); raise` catches all non-timeout errors including truncated frame header RuntimeError, preventing zombie subprocesses. The `stderr_bytes` variable is also properly initialized before the try block. Two new targeted tests were added and all 601 tests pass.",
+    "issues": [
+      {
+        "file": "shuvoice/tts_melotts.py",
+        "line": 88,
+        "severity": "non_blocking",
+        "description": "Pre-existing: `dependency_errors()` has a `venv_path` parameter not in the base class signature. This was noted in the prior review and is not a regression from this fix, but remains a minor interface mismatch."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The fix correctly establishes the cross-venv subprocess invocation pattern (use absolute file path, not -m module) and adds a test for it. The prior review's shared-state observation about documenting this pattern in architecture.md/AGENTS.md still applies — the pattern is now correct in code and tested, but not explicitly documented as a convention for future isolated-venv backends.",
+      "evidence": "shuvoice/tts_melotts.py:122-123 uses `Path(__file__).with_name('melo_helper.py')` and test_subprocess_command_uses_file_path asserts `-m` is not in the command. No architecture.md or AGENTS.md update documents this as a required pattern."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/melotts-backend/scrutiny/reviews/melotts-backend-and-helper.json",
+  "summary": "The fix commit (c882f5d) properly addresses all three issues from the prior scrutiny review of melotts-backend-and-helper. The blocking bug (helper invoked via -m module in isolated venv) is fixed by using an absolute file path. The venv python executable check uses Path.is_file() for absolute paths. The subprocess zombie prevention adds proc.kill()/proc.wait() on all exception paths. Two new tests validate the file-path invocation and subprocess cleanup. All 601 tests pass with no regressions. Status: PASS."
+}
