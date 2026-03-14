@@ -100,11 +100,15 @@ def _sherpa_cuda_compat_packages() -> list[str]:
     ]
 
 
+_K2_FSA_CUDA_WHEEL_INDEX = "https://k2-fsa.github.io/sherpa/onnx/cuda.html"
+
+
 def _venv_install_commands(
     packages: list[str],
     *,
     upgrade: bool = False,
     no_binary: str | None = None,
+    find_links: str | None = None,
     env_vars: dict[str, str] | None = None,
 ) -> list[list[str]]:
     commands: list[list[str]] = []
@@ -120,6 +124,8 @@ def _venv_install_commands(
             uv_cmd.append("--upgrade")
         if no_binary:
             uv_cmd.extend(["--no-binary", no_binary])
+        if find_links:
+            uv_cmd.extend(["--find-links", find_links])
         uv_cmd.extend(packages)
         if env_vars:
             commands.append([*env_prefix, *uv_cmd])
@@ -131,6 +137,8 @@ def _venv_install_commands(
         pip_cmd.append("--upgrade")
     if no_binary:
         pip_cmd.extend(["--no-binary", no_binary])
+    if find_links:
+        pip_cmd.extend(["--find-links", find_links])
     pip_cmd.extend(packages)
     if env_vars:
         commands.append([*env_prefix, *pip_cmd])
@@ -168,18 +176,28 @@ def _auto_install_commands(backend: str, *, prefer_cuda: bool | None = None) -> 
 
         if _running_in_venv():
             if prefer_cuda:
+                # Prefer pre-built CUDA wheels from k2-fsa (fast, reliable).
+                commands.extend(
+                    _venv_install_commands(
+                        ["sherpa-onnx+cuda"],
+                        upgrade=True,
+                        find_links=_K2_FSA_CUDA_WHEEL_INDEX,
+                    )
+                )
+                # Install CUDA compat packages for symlink repair.
+                commands.extend(
+                    _venv_install_commands(
+                        _sherpa_cuda_compat_packages(),
+                        upgrade=True,
+                    )
+                )
+                # Fallback: source rebuild with CUDA enabled.
                 commands.extend(
                     _venv_install_commands(
                         ["sherpa-onnx"],
                         upgrade=True,
                         no_binary="sherpa-onnx",
                         env_vars={"SHERPA_ONNX_CMAKE_ARGS": _sherpa_cuda_cmake_args()},
-                    )
-                )
-                commands.extend(
-                    _venv_install_commands(
-                        _sherpa_cuda_compat_packages(),
-                        upgrade=True,
                     )
                 )
             commands.extend(_venv_install_commands(["sherpa-onnx"], upgrade=True))

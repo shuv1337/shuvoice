@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import types
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -42,6 +43,24 @@ def test_ensure_cuda_compat_libs_links_required_sonames(tmp_path: Path):
         path = sherpa_lib / soname
         assert path.exists()
         assert path.is_symlink()
+
+
+def test_sherpa_lib_dir_supports_namespace_package_without___file__(tmp_path: Path, monkeypatch):
+    sherpa_lib = _make_fake_sherpa_layout(tmp_path)
+    module_root = sherpa_lib.parent
+    fake_module = types.SimpleNamespace(
+        __file__=None,
+        __spec__=types.SimpleNamespace(
+            submodule_search_locations=[str(module_root)],
+            origin=None,
+        ),
+    )
+
+    monkeypatch.setitem(__import__("sys").modules, "sherpa_onnx", fake_module)
+
+    resolved = sherpa_cuda.sherpa_lib_dir()
+
+    assert resolved == sherpa_lib
 
 
 def test_cuda_provider_runtime_status_detects_missing_runtime_symbols(tmp_path: Path, monkeypatch):

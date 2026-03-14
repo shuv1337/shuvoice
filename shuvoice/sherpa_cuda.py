@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 REQUIRED_CUDA_LIBS: tuple[str, ...] = (
     "libcublasLt.so.12",
@@ -28,13 +29,38 @@ _PATCH_RPATH_LIBS: tuple[str, ...] = (
 )
 
 
+def _module_root(module: Any) -> Path | None:
+    module_file = getattr(module, "__file__", None)
+    if module_file:
+        return Path(module_file).resolve().parent
+
+    spec = getattr(module, "__spec__", None)
+    if spec is not None:
+        search_locations = getattr(spec, "submodule_search_locations", None)
+        if search_locations:
+            for location in search_locations:
+                if location:
+                    return Path(location).resolve()
+
+        origin = getattr(spec, "origin", None)
+        if origin:
+            return Path(origin).resolve().parent
+
+    return None
+
+
+
 def sherpa_lib_dir() -> Path | None:
     try:
         import sherpa_onnx  # noqa: PLC0415
     except Exception:
         return None
 
-    lib_dir = Path(sherpa_onnx.__file__).resolve().parent / "lib"
+    module_root = _module_root(sherpa_onnx)
+    if module_root is None:
+        return None
+
+    lib_dir = module_root / "lib"
     if lib_dir.is_dir():
         return lib_dir
     return None
