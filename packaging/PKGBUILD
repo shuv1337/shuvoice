@@ -35,6 +35,7 @@ optdepends=(
   'python-tomli: TOML parsing for Python < 3.11'
   'python-nemo-toolkit: NeMo ASR backend (if packaged for your Arch setup)'
   'python-pip: install optional backend wheels (nemo-toolkit[asr], useful-moonshine-onnx)'
+  'xdotool: XWayland text injection fallback'
   'ydotool: alternative text injection utility'
   'espeak-ng: TTS engine for scripts/tts_roundtrip.py'
 )

@@ -35,6 +35,8 @@ def test_update_partial_batches_backspaces(monkeypatch):
         calls.append((args, op, attempts))
         return True
 
+    monkeypatch.setattr(typer, "_prefer_xdotool", lambda: False)
+    monkeypatch.setattr(typer, "_prefer_ydotool", lambda: False)
     monkeypatch.setattr(typer, "_run", fake_run)
 
     typer.update_partial("abc")
@@ -58,6 +60,8 @@ def test_update_partial_uses_common_prefix_for_small_suffix_edits(monkeypatch):
         calls.append(args)
         return True
 
+    monkeypatch.setattr(typer, "_prefer_xdotool", lambda: False)
+    monkeypatch.setattr(typer, "_prefer_ydotool", lambda: False)
     monkeypatch.setattr(typer, "_run", fake_run)
 
     typer.update_partial("hello there")
@@ -103,6 +107,7 @@ def test_commit_final_auto_mode_prefers_direct_when_watchers_detected(monkeypatc
     typer.last_partial_text = "partial"
     events: list[object] = []
 
+    monkeypatch.setattr(typer, "_prefer_xdotool", lambda: False)
     monkeypatch.setattr(typer, "_detect_clipboard_watchers", lambda: True)
     monkeypatch.setattr(typer, "update_partial", lambda text: events.append(("update", text)))
     monkeypatch.setattr(
@@ -151,6 +156,9 @@ def test_paste_via_clipboard_applies_settle_delay(monkeypatch):
     calls: list[list[str]] = []
     sleeps: list[float] = []
 
+    monkeypatch.setattr(typer, "_prefer_xdotool", lambda: False)
+    monkeypatch.setattr(typer, "_prefer_ydotool", lambda: False)
+    monkeypatch.setattr(typer, "_ydotool_installed", lambda: False)
     monkeypatch.setattr(
         typer,
         "_run",
@@ -164,6 +172,188 @@ def test_paste_via_clipboard_applies_settle_delay(monkeypatch):
     assert calls[1] == ["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"]
     assert len(sleeps) == 1
     assert sleeps[0] == pytest.approx(0.04)
+
+
+def test_type_direct_prefers_ydotool_for_xwayland(monkeypatch):
+    typer = StreamingTyper(retry_attempts=1, retry_delay_ms=0)
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr(typer, "_prefer_xdotool", lambda: False)
+    monkeypatch.setattr(typer, "_prefer_ydotool", lambda: True)
+    monkeypatch.setattr(
+        typer,
+        "_run",
+        lambda args, op, attempts=None: calls.append(args) or True,
+    )
+
+    assert typer._type_direct("hello") is True
+    assert calls == [
+        ["ydotool", "type", "--key-delay", "0", "--key-hold", "0", "--", "hello"]
+    ]
+
+
+def test_type_direct_falls_back_to_ydotool_when_wtype_fails(monkeypatch):
+    typer = StreamingTyper(retry_attempts=1, retry_delay_ms=0)
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr(typer, "_prefer_xdotool", lambda: False)
+    monkeypatch.setattr(typer, "_prefer_ydotool", lambda: False)
+    monkeypatch.setattr(typer, "_ydotool_installed", lambda: True)
+    monkeypatch.setattr(typer, "_active_window_is_xwayland", lambda: False)
+
+    def fake_run(args, op, attempts=None):
+        calls.append(args)
+        return args[0] == "ydotool"
+
+    monkeypatch.setattr(typer, "_run", fake_run)
+
+    assert typer._type_direct("hello") is True
+    assert calls == [
+        ["wtype", "--", "hello"],
+        ["ydotool", "type", "--key-delay", "0", "--key-hold", "0", "--", "hello"],
+    ]
+
+
+def test_paste_via_clipboard_prefers_ydotool_for_xwayland(monkeypatch):
+    typer = StreamingTyper(clipboard_settle_delay_ms=40, retry_attempts=1, retry_delay_ms=0)
+    calls: list[list[str]] = []
+    sleeps: list[float] = []
+
+    monkeypatch.setattr(typer, "_prefer_xdotool", lambda: False)
+    monkeypatch.setattr(typer, "_prefer_ydotool", lambda: True)
+    monkeypatch.setattr(
+        typer,
+        "_run",
+        lambda args, op, attempts=None: calls.append(args) or True,
+    )
+    monkeypatch.setattr("shuvoice.typer.time.sleep", lambda value: sleeps.append(value))
+
+    assert typer._paste_via_clipboard("hello") is True
+    assert calls == [
+        ["wl-copy", "--", "hello"],
+        ["ydotool", "key", "-d", "0", "29:1", "47:1", "47:0", "29:0"],
+    ]
+    assert sleeps == [pytest.approx(0.04)]
+
+
+def test_type_direct_prefers_xdotool_for_xwayland(monkeypatch):
+    typer = StreamingTyper(retry_attempts=1, retry_delay_ms=0)
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr(typer, "_prefer_xdotool", lambda: True)
+    monkeypatch.setattr(typer, "_active_xdotool_window_id", lambda: "123")
+    monkeypatch.setattr(
+        typer,
+        "_run",
+        lambda args, op, attempts=None: calls.append(args) or True,
+    )
+
+    assert typer._type_direct("hello") is True
+    assert calls == [["xdotool", "type", "--clearmodifiers", "--delay", "0", "--window", "123", "hello"]]
+
+
+def test_paste_via_clipboard_prefers_xdotool_for_xwayland(monkeypatch):
+    typer = StreamingTyper(clipboard_settle_delay_ms=40, retry_attempts=1, retry_delay_ms=0)
+    calls: list[list[str]] = []
+    sleeps: list[float] = []
+
+    monkeypatch.setattr(typer, "_prefer_xdotool", lambda: True)
+    monkeypatch.setattr(typer, "_active_xdotool_window_id", lambda: "123")
+    monkeypatch.setattr(
+        typer,
+        "_run",
+        lambda args, op, attempts=None: calls.append(args) or True,
+    )
+    monkeypatch.setattr("shuvoice.typer.time.sleep", lambda value: sleeps.append(value))
+
+    assert typer._paste_via_clipboard("hello") is True
+    assert calls == [
+        ["wl-copy", "--", "hello"],
+        ["xdotool", "key", "--clearmodifiers", "--delay", "0", "--window", "123", "ctrl+v"],
+    ]
+    assert sleeps == [pytest.approx(0.04)]
+
+
+def test_commit_final_auto_mode_prefers_clipboard_for_xwayland(monkeypatch):
+    typer = StreamingTyper(final_injection_mode="auto", preserve_clipboard=False)
+    events: list[object] = []
+
+    monkeypatch.setattr(typer, "_prefer_xdotool", lambda: True)
+    monkeypatch.setattr(typer, "_detect_clipboard_watchers", lambda: True)
+    monkeypatch.setattr(typer, "_backspace_partial", lambda: events.append("backspace") or True)
+    monkeypatch.setattr(
+        typer,
+        "_paste_via_clipboard",
+        lambda text: events.append(("paste", text)) or True,
+    )
+    monkeypatch.setattr(
+        typer,
+        "_type_direct",
+        lambda text: events.append(("direct", text)) or True,
+    )
+
+    typer.commit_final("hello")
+
+    assert "backspace" in events
+    assert ("paste", "hello") in events
+    assert ("direct", "hello") not in events
+
+
+def test_detect_active_window_reports_xwayland_when_present(monkeypatch):
+    typer = StreamingTyper(retry_attempts=1, retry_delay_ms=0)
+
+    def fake_run(args, check, capture_output, text, timeout):
+        assert args == ["hyprctl", "activewindow", "-j"]
+        return SimpleNamespace(stdout='{"xwayland": true}')
+
+    monkeypatch.setattr("shuvoice.typer.subprocess.run", fake_run)
+
+    assert typer._active_window_is_xwayland() is True
+
+
+def test_send_backspaces_prefers_xdotool_for_xwayland(monkeypatch):
+    typer = StreamingTyper(retry_attempts=1, retry_delay_ms=0)
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr(typer, "_prefer_xdotool", lambda: True)
+    monkeypatch.setattr(typer, "_active_xdotool_window_id", lambda: "123")
+    monkeypatch.setattr(
+        typer,
+        "_run",
+        lambda args, op, attempts=None: calls.append(args) or True,
+    )
+
+    assert typer._send_backspaces(55, "backspace") is True
+    assert calls == [
+        [
+            "xdotool",
+            "key",
+            "--clearmodifiers",
+            "--delay",
+            "0",
+            "--window",
+            "123",
+            "--repeat",
+            "50",
+            "--repeat-delay",
+            "0",
+            "BackSpace",
+        ],
+        [
+            "xdotool",
+            "key",
+            "--clearmodifiers",
+            "--delay",
+            "0",
+            "--window",
+            "123",
+            "--repeat",
+            "5",
+            "--repeat-delay",
+            "0",
+            "BackSpace",
+        ],
+    ]
 
 
 def test_restore_clipboard_clear_when_no_prior_content(monkeypatch):

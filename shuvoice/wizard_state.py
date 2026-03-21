@@ -58,7 +58,7 @@ FINAL_INJECTION_MODES = [
     (
         "auto",
         "Auto (recommended)",
-        "Uses clipboard paste by default, and falls back to direct typing when clipboard watchers are detected.",
+        "Uses clipboard paste by default. On XWayland apps it prefers xdotool-based paste, otherwise it falls back to direct typing when clipboard watchers are detected.",
     ),
     (
         "clipboard",
@@ -68,7 +68,7 @@ FINAL_INJECTION_MODES = [
     (
         "direct",
         "Direct typing (keystroke simulation)",
-        "Types final text directly with wtype and avoids clipboard changes.",
+        "Types final text directly with wtype on Wayland or xdotool on XWayland, and avoids clipboard changes.",
     ),
 ]
 DEFAULT_FINAL_INJECTION_MODE = "auto"

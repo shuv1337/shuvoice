@@ -22,8 +22,12 @@ def test_typer_does_not_log_sensitive_text(caplog):
         typer._type_direct(sensitive_text)
 
         # Check logs
+        saw_direct_type_failure = False
         for record in caplog.records:
             assert sensitive_text not in record.message, (
                 f"Sensitive text found in log: {record.message}"
             )
-            assert "wtype direct type failed" in record.message
+            if "direct type failed" in record.message:
+                saw_direct_type_failure = True
+
+        assert saw_direct_type_failure
