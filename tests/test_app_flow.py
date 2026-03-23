@@ -341,7 +341,9 @@ def test_on_transcript_update_skips_partials_in_offline_mode():
     metrics = SimpleNamespace(observe_partial_update=Mock())
     app = SimpleNamespace(
         _render_transcript_text=lambda text: f"rendered:{text}",
+        _debug_current_transcript="",
         overlay=SimpleNamespace(set_text=Mock()),
+        _update_debug_overlay=Mock(),
         config=SimpleNamespace(output_mode="streaming_partial"),
         _is_offline_instant_mode=True,
         typer=SimpleNamespace(update_partial=Mock()),
@@ -351,6 +353,8 @@ def test_on_transcript_update_skips_partials_in_offline_mode():
     ShuVoiceApp._on_transcript_update(app, "hello")
 
     app.overlay.set_text.assert_called_once_with("rendered:hello")
+    assert app._debug_current_transcript == "rendered:hello"
+    app._update_debug_overlay.assert_called_once_with()
     app.typer.update_partial.assert_not_called()
     metrics.observe_partial_update.assert_not_called()
 
@@ -359,7 +363,9 @@ def test_on_transcript_update_keeps_partials_in_streaming_mode():
     metrics = SimpleNamespace(observe_partial_update=Mock())
     app = SimpleNamespace(
         _render_transcript_text=lambda text: f"rendered:{text}",
+        _debug_current_transcript="",
         overlay=SimpleNamespace(set_text=Mock()),
+        _update_debug_overlay=Mock(),
         config=SimpleNamespace(output_mode="streaming_partial"),
         _is_offline_instant_mode=False,
         typer=SimpleNamespace(update_partial=Mock()),
@@ -369,6 +375,8 @@ def test_on_transcript_update_keeps_partials_in_streaming_mode():
     ShuVoiceApp._on_transcript_update(app, "hello")
 
     app.overlay.set_text.assert_called_once_with("rendered:hello")
+    assert app._debug_current_transcript == "rendered:hello"
+    app._update_debug_overlay.assert_called_once_with()
     app.typer.update_partial.assert_called_once_with("rendered:hello")
     metrics.observe_partial_update.assert_called_once()
 
@@ -406,7 +414,10 @@ def test_commit_utterance_uses_rendered_text_for_overlay_and_typing():
     typer = SimpleNamespace(commit_final=Mock(), update_partial=Mock(), reset=Mock())
     app = SimpleNamespace(
         _render_transcript_text=lambda _text: "Rendered final",
+        _debug_current_transcript="draft",
+        _debug_last_final_transcript="",
         overlay=overlay,
+        _update_debug_overlay=Mock(),
         typer=typer,
         config=SimpleNamespace(use_clipboard_for_final=True),
     )
@@ -415,6 +426,9 @@ def test_commit_utterance_uses_rendered_text_for_overlay_and_typing():
     ShuVoiceApp._commit_utterance(app, state)
 
     overlay.set_text.assert_called_once_with("Rendered final")
+    assert app._debug_current_transcript == ""
+    assert app._debug_last_final_transcript == "Rendered final"
+    app._update_debug_overlay.assert_called_once_with(state)
     typer.commit_final.assert_called_once_with("Rendered final")
     typer.update_partial.assert_not_called()
 
@@ -424,7 +438,10 @@ def test_commit_utterance_does_not_branch_on_legacy_clipboard_flag():
     typer = SimpleNamespace(commit_final=Mock(), update_partial=Mock(), reset=Mock())
     app = SimpleNamespace(
         _render_transcript_text=lambda _text: "Rendered final",
+        _debug_current_transcript="draft",
+        _debug_last_final_transcript="",
         overlay=overlay,
+        _update_debug_overlay=Mock(),
         typer=typer,
         config=SimpleNamespace(use_clipboard_for_final=False),
     )
@@ -433,6 +450,9 @@ def test_commit_utterance_does_not_branch_on_legacy_clipboard_flag():
     ShuVoiceApp._commit_utterance(app, state)
 
     overlay.set_text.assert_called_once_with("Rendered final")
+    assert app._debug_current_transcript == ""
+    assert app._debug_last_final_transcript == "Rendered final"
+    app._update_debug_overlay.assert_called_once_with(state)
     typer.commit_final.assert_called_once_with("Rendered final")
     typer.update_partial.assert_not_called()
 
@@ -442,7 +462,10 @@ def test_commit_utterance_skips_when_rendered_text_is_empty():
     typer = SimpleNamespace(commit_final=Mock(), update_partial=Mock(), reset=Mock())
     app = SimpleNamespace(
         _render_transcript_text=lambda _text: "",
+        _debug_current_transcript="draft",
+        _debug_last_final_transcript="",
         overlay=overlay,
+        _update_debug_overlay=Mock(),
         typer=typer,
         config=SimpleNamespace(use_clipboard_for_final=True),
     )
@@ -450,6 +473,8 @@ def test_commit_utterance_skips_when_rendered_text_is_empty():
 
     ShuVoiceApp._commit_utterance(app, state)
 
+    assert app._debug_current_transcript == "draft"
+    assert app._debug_last_final_transcript == ""
     overlay.set_text.assert_not_called()
     typer.commit_final.assert_not_called()
     typer.update_partial.assert_not_called()

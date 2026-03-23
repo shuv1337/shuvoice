@@ -25,6 +25,8 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     assert cfg.auto_capitalize is True
     assert cfg.text_replacements == DEFAULT_TEXT_REPLACEMENTS
     assert cfg.font_family is None
+    assert cfg.overlay_debug_mode is False
+    assert cfg.overlay_debug_max_lines == 12
     assert cfg.streaming_stall_guard is True
     assert cfg.streaming_stall_chunks == 4
     assert cfg.asr_backend == "sherpa"
@@ -96,6 +98,8 @@ moonshine_max_tokens = 160
 [overlay]
 font_size = 28
 font_family = "JetBrains Mono"
+overlay_debug_mode = true
+overlay_debug_max_lines = 20
 
 [tts]
 tts_enabled = true
@@ -169,6 +173,8 @@ foo = "bar"
     assert cfg.moonshine_max_tokens == 160
     assert cfg.font_size == 28
     assert cfg.font_family == "JetBrains Mono"
+    assert cfg.overlay_debug_mode is True
+    assert cfg.overlay_debug_max_lines == 20
     assert cfg.tts_enabled is True
     assert cfg.tts_backend == "local"
     assert cfg.tts_default_voice_id == "voice-test"
@@ -699,6 +705,14 @@ def test_melotts_fields_in_config_section_fields():
     assert "tts_melotts_venv_path" in tts_fields
 
 
+def test_overlay_debug_fields_in_config_section_fields():
+    from shuvoice.config import CONFIG_SECTION_FIELDS
+
+    overlay_fields = CONFIG_SECTION_FIELDS["overlay"]
+    assert "overlay_debug_mode" in overlay_fields
+    assert "overlay_debug_max_lines" in overlay_fields
+
+
 def test_to_nested_dict_includes_sherpa_decode_mode():
     cfg = Config(
         asr_backend="sherpa",
@@ -707,11 +721,15 @@ def test_to_nested_dict_includes_sherpa_decode_mode():
         tts_backend="local",
         tts_playback_speed=1.4,
         tts_local_model_path="/tmp/models",
+        overlay_debug_mode=True,
+        overlay_debug_max_lines=15,
     )
 
     data = cfg.to_nested_dict()
     assert data["asr"]["sherpa_decode_mode"] == "offline_instant"
     assert data["asr"]["sherpa_enable_parakeet_streaming"] is True
+    assert data["overlay"]["overlay_debug_mode"] is True
+    assert data["overlay"]["overlay_debug_max_lines"] == 15
     assert data["tts"]["tts_backend"] == "local"
     assert data["tts"]["tts_playback_speed"] == 1.4
     assert data["tts"]["tts_local_model_path"] == "/tmp/models"

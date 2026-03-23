@@ -75,6 +75,8 @@ def on_recording_start(app) -> None:
         app.overlay.show()
         app.overlay.set_state("listening")
         app.overlay.set_text("Listening…")
+    if hasattr(app, "_update_debug_overlay"):
+        app._update_debug_overlay()
 
     app._play_feedback_tone(is_start=True)
 
@@ -95,6 +97,8 @@ def on_recording_stop(app) -> None:
 
     if app.overlay:
         app.overlay.set_state("processing")
+    if hasattr(app, "_update_debug_overlay"):
+        app._update_debug_overlay()
 
 
 def on_recording_toggle(app) -> None:

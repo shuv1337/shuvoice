@@ -10,6 +10,10 @@ def metrics_to_json(metrics: dict[str, Any]) -> str:
     return json.dumps(metrics, ensure_ascii=False, sort_keys=True)
 
 
+def debug_status_to_json(status: dict[str, Any]) -> str:
+    return json.dumps(status, ensure_ascii=False, sort_keys=True)
+
+
 def metrics_to_human(metrics: dict[str, Any]) -> str:
     counters = metrics.get("counters", {})
     timings = metrics.get("timings", {})

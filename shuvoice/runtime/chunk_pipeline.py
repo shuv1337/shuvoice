@@ -100,6 +100,9 @@ def transcribe_native_chunk(app, state, error_context: str) -> bool:
     if metrics is not None:
         metrics.observe_chunk(chunk_rms, app.audio.queue.qsize())
 
+    if hasattr(app, "_update_debug_overlay"):
+        app._update_debug_overlay(state)
+
     log.debug(
         "ASR step=%s queue_size=%d raw_text_len=%d chunk_rms=%.4f gain=%.1f",
         app.asr.debug_step_num,

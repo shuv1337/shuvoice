@@ -51,3 +51,8 @@ def test_waybar_format_shows_tts_disabled_state():
     cfg = Config(tts_enabled=False)
     lines = config_info_lines(cfg)
     assert "TTS:      Disabled" in lines
+
+
+def test_waybar_format_shows_debug_overlay_state():
+    lines = config_info_lines(Config(overlay_debug_mode=True))
+    assert "Debug:    Overlay on" in lines

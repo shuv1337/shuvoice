@@ -17,6 +17,7 @@ CONTROL_COMMAND_CHOICES = [
     "status",
     "ping",
     "metrics",
+    "debug_status",
     "tts_speak",
     "tts_pause",
     "tts_resume",
@@ -279,12 +280,12 @@ def create_parser() -> argparse.ArgumentParser:
     config_set_parser = config_sub.add_parser("set", help="Set supported config keys")
     config_set_parser.add_argument(
         "key",
-        choices=["typing_final_injection_mode", "typing_text_case"],
+        choices=["typing_final_injection_mode", "typing_text_case", "overlay_debug_mode"],
         help="Config key to set",
     )
     config_set_parser.add_argument(
         "value",
-        choices=["auto", "clipboard", "direct", "default", "lowercase"],
+        choices=["auto", "clipboard", "direct", "default", "lowercase", "true", "false"],
         help="New value for the selected key",
     )
 

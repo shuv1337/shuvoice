@@ -74,6 +74,9 @@ font_size = 22
 bg_opacity = 0.75
 border_radius = 16
 bottom_margin = 60
+# Debug overlay adds live runtime stats + recent logs under the main caption overlay.
+# overlay_debug_mode = false
+# overlay_debug_max_lines = 12
 
 [control]
 # Optional control socket override (defaults to "$XDG_RUNTIME_DIR/shuvoice/control.sock")

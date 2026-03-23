@@ -90,6 +90,8 @@ def config_info_lines(config: Config) -> list[str]:
     else:
         lines.append("TTS:      Disabled")
 
+    lines.append(f"Debug:    {'Overlay on' if config.overlay_debug_mode else 'Overlay off'}")
+
     return lines
 
 

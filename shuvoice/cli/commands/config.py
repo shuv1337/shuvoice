@@ -11,6 +11,7 @@ from ...config_migrations import migrate_to_latest
 
 _ALLOWED_FINAL_INJECTION_MODES = {"auto", "clipboard", "direct"}
 _ALLOWED_TEXT_CASE_MODES = {"default", "lowercase"}
+_ALLOWED_OVERLAY_DEBUG_MODES = {"true", "false"}
 
 
 def _flatten_candidate(raw: dict[str, Any]) -> dict[str, Any]:
@@ -46,7 +47,7 @@ def config_set(key: str, value: str) -> int:
     key_norm = str(key).strip()
     value_norm = str(value).strip().lower()
 
-    supported_keys = {"typing_final_injection_mode", "typing_text_case"}
+    supported_keys = {"typing_final_injection_mode", "typing_text_case", "overlay_debug_mode"}
     if key_norm not in supported_keys:
         supported = ", ".join(sorted(supported_keys))
         print(
@@ -71,21 +72,34 @@ def config_set(key: str, value: str) -> int:
         )
         return 1
 
+    if key_norm == "overlay_debug_mode" and value_norm not in _ALLOWED_OVERLAY_DEBUG_MODES:
+        allowed = ", ".join(sorted(_ALLOWED_OVERLAY_DEBUG_MODES))
+        print(
+            f"ERROR: overlay_debug_mode must be one of: {allowed}",
+            file=sys.stderr,
+        )
+        return 1
+
     config_file = Config.config_path()
 
     try:
         raw = load_raw(config_file)
         migrated, _report = migrate_to_latest(raw)
 
-        typing_table = migrated.get("typing")
-        if not isinstance(typing_table, dict):
-            typing_table = {}
-            migrated["typing"] = typing_table
+        target_section = "typing" if key_norm in {"typing_final_injection_mode", "typing_text_case"} else "overlay"
+        target_table = migrated.get(target_section)
+        if not isinstance(target_table, dict):
+            target_table = {}
+            migrated[target_section] = target_table
 
-        typing_table[key_norm] = value_norm
+        normalized_value: Any = value_norm
+        if key_norm == "overlay_debug_mode":
+            normalized_value = value_norm == "true"
+
+        target_table[key_norm] = normalized_value
         if key_norm == "typing_final_injection_mode":
             # Keep legacy flag synchronized for old config consumers.
-            typing_table["use_clipboard_for_final"] = value_norm != "direct"
+            target_table["use_clipboard_for_final"] = value_norm != "direct"
 
         _validate_candidate(migrated)
         backup = write_atomic(config_file, migrated)

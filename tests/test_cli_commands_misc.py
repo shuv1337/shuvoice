@@ -172,6 +172,26 @@ def test_config_set_rejects_invalid_typing_text_case(capsys):
     assert "typing_text_case must be one of" in err
 
 
+def test_config_set_updates_overlay_debug_mode(monkeypatch, tmp_path, capsys):
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[overlay]\noverlay_debug_mode = false\n', encoding="utf-8")
+
+    monkeypatch.setattr(config_cmd.Config, "config_path", classmethod(lambda cls: config_file))
+
+    assert config_cmd.config_set("overlay_debug_mode", "true") == 0
+    out = capsys.readouterr().out
+    assert "OK set overlay_debug_mode=true" in out
+
+    content = config_file.read_text(encoding="utf-8")
+    assert "overlay_debug_mode = true" in content
+
+
+def test_config_set_rejects_invalid_overlay_debug_mode(capsys):
+    assert config_cmd.config_set("overlay_debug_mode", "maybe") == 1
+    err = capsys.readouterr().err
+    assert "overlay_debug_mode must be one of" in err
+
+
 def test_config_set_rejects_unsupported_key(capsys):
     assert config_cmd.config_set("unknown_key", "value") == 1
     err = capsys.readouterr().err
@@ -261,6 +281,7 @@ def test_diagnostics_text_and_error_status(monkeypatch, capsys):
     responses = {
         "status": RuntimeError("down"),
         "metrics": "OK {}",
+        "debug_status": "OK {}",
     }
 
     def fake_send(command: str, _socket: str | None, timeout: float | None = None) -> str:
@@ -277,6 +298,7 @@ def test_diagnostics_text_and_error_status(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "status: ERROR: down" in out
     assert "metrics: OK {}" in out
+    assert "debug_status: OK {}" in out
 
 
 def test_diagnostics_json_success(monkeypatch, capsys):
@@ -292,6 +314,7 @@ def test_diagnostics_json_success(monkeypatch, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"].startswith("OK")
     assert payload["metrics"].startswith("OK")
+    assert payload["debug_status"].startswith("OK")
 
 
 def test_download_model_passes_nemo_model_name(monkeypatch, capsys):

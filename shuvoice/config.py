@@ -69,6 +69,8 @@ CONFIG_SECTION_FIELDS: dict[str, tuple[str, ...]] = {
         "bg_opacity",
         "border_radius",
         "bottom_margin",
+        "overlay_debug_mode",
+        "overlay_debug_max_lines",
     ),
     "control": ("control_socket",),
     "tts": (
@@ -238,6 +240,8 @@ class Config:
     bg_opacity: float = 0.75
     border_radius: int = 16
     bottom_margin: int = 60
+    overlay_debug_mode: bool = False
+    overlay_debug_max_lines: int = 12
 
     # Control socket (Hyprland bind/bindr integration)
     control_socket: str | None = None  # default: $XDG_RUNTIME_DIR/shuvoice/control.sock
@@ -417,6 +421,13 @@ class Config:
         if int(self.bottom_margin) < 0:
             raise ValueError("bottom_margin must be >= 0")
         self.bottom_margin = int(self.bottom_margin)
+
+        if not isinstance(self.overlay_debug_mode, bool):
+            raise ValueError("overlay_debug_mode must be true or false")
+
+        if int(self.overlay_debug_max_lines) < 1:
+            raise ValueError("overlay_debug_max_lines must be >= 1")
+        self.overlay_debug_max_lines = int(self.overlay_debug_max_lines)
 
         # Validate TTS configs
         if not isinstance(self.tts_enabled, bool):

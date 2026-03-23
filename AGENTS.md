@@ -191,6 +191,17 @@ Empty values delete the matched word.
 | `use_clipboard_for_final` | `true` (legacy) | Soft-deprecated compatibility flag. If `typing_final_injection_mode` is absent, this maps to `auto` (`true`, safer watcher-aware behavior) or `direct` (`false`). |
 | `preserve_clipboard` | `false` | Capture/restore clipboard around final commit in clipboard mode; direct mode does not touch clipboard. |
 
+### Debug overlay mode
+
+| Key | Default | Notes |
+|---|---:|---|
+| `overlay_debug_mode` | `false` | Shows a multi-line diagnostics section under the normal STT caption overlay with live runtime state, audio/ASR counters, and recent in-process logs. |
+| `overlay_debug_max_lines` | `12` | Maximum number of recent log lines rendered inside the debug overlay and returned by `shuvoice diagnostics`. |
+
+Additional control/diagnostics surface:
+- `shuvoice control debug_status` returns JSON with app state, audio/ASR stats, metrics, and recent logs.
+- `shuvoice diagnostics` now includes `debug_status` alongside `status` and `metrics`.
+
 ---
 
 ## ASR Backends

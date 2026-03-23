@@ -168,6 +168,24 @@ def _prompt_menu_choice(prompt: str, options: list[str]) -> str | None:
     )
 
 
+def _toggle_debug_overlay(config: Config, service: str) -> None:
+    try:
+        from ..cli.commands.config import config_set
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"failed to load config writer: {e}") from e
+
+    new_value = "false" if config.overlay_debug_mode else "true"
+    result = config_set("overlay_debug_mode", new_value)
+    if result != 0:
+        raise RuntimeError(f"failed to set overlay_debug_mode={new_value}")
+
+    config.overlay_debug_mode = new_value == "true"
+
+    _service_action(service, "restart")
+    if not _wait_for_control_socket(config):
+        raise RuntimeError("control socket not ready after restarting service")
+
+
 def _action_menu(config: Config, service: str):
     runtime_state, _, _ = _query_runtime_state(config, service)
     service_state = _service_active_state(service)
@@ -180,10 +198,12 @@ def _action_menu(config: Config, service: str):
         if service_state in {"active", "activating", "reloading"}
         else "Start service"
     )
+    debug_label = "Disable debug overlay" if config.overlay_debug_mode else "Enable debug overlay"
 
     options: list[tuple[str, str]] = [
         (recording_label, recording_command),
         ("Toggle recording", "toggle-record"),
+        (debug_label, "toggle-debug-overlay"),
         (service_label, "service-toggle"),
         ("Relaunch setup wizard", "launch-wizard"),
         ("Restart service (advanced)", "service-restart"),
@@ -246,6 +266,10 @@ def _perform_action(command: str, config: Config, service: str):
 
     if command == "toggle-record":
         _action_toggle_record(config, service)
+        return
+
+    if command == "toggle-debug-overlay":
+        _toggle_debug_overlay(config, service)
         return
 
     if command == "start-record":

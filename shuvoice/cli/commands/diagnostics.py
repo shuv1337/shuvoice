@@ -21,6 +21,11 @@ def diagnostics(config: Config, *, json_output: bool = False) -> int:
     except Exception as exc:  # noqa: BLE001
         payload["metrics"] = f"ERROR: {exc}"
 
+    try:
+        payload["debug_status"] = send_control_command("debug_status", config.control_socket)
+    except Exception as exc:  # noqa: BLE001
+        payload["debug_status"] = f"ERROR: {exc}"
+
     if json_output:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:

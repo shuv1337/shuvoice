@@ -105,6 +105,14 @@ def test_perform_action_menu_calls_menu_handler():
     action_menu.assert_called_once()
 
 
+def test_perform_action_toggle_debug_overlay_calls_toggle_helper():
+    cfg = Config()
+    with patch("shuvoice.waybar._toggle_debug_overlay") as toggle_debug:
+        _perform_action("toggle-debug-overlay", cfg, "shuvoice.service")
+
+    toggle_debug.assert_called_once_with(cfg, "shuvoice.service")
+
+
 def test_perform_action_service_start_waits_for_control_socket():
     with (
         patch("shuvoice.waybar._service_action") as service_action,
@@ -149,6 +157,19 @@ def test_action_menu_dispatches_selected_command():
         _action_menu(config, "shuvoice.service")
 
     perform_action.assert_called_once_with("launch-wizard", config, "shuvoice.service")
+
+
+def test_action_menu_dispatches_debug_overlay_toggle():
+    config = Config(overlay_debug_mode=False)
+    with (
+        patch("shuvoice.waybar._query_runtime_state", return_value=("idle", None, None)),
+        patch("shuvoice.waybar._service_active_state", return_value="active"),
+        patch("shuvoice.waybar._prompt_menu_choice", return_value="Enable debug overlay"),
+        patch("shuvoice.waybar._perform_action") as perform_action,
+    ):
+        _action_menu(config, "shuvoice.service")
+
+    perform_action.assert_called_once_with("toggle-debug-overlay", config, "shuvoice.service")
 
 
 # -- config_info_lines ---------------------------------------------------------

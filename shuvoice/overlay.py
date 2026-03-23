@@ -34,9 +34,11 @@ class CaptionOverlay:
         self._config = config
         self._window = Gtk.Window(application=app)
         self._label: Gtk.Label | None = None
+        self._debug_label: Gtk.Label | None = None
         self._box: Gtk.Box | None = None
         self._visible = False
         self._state = OVERLAY_STATE_LISTENING
+        self._debug_mode = bool(getattr(config, "overlay_debug_mode", False))
         self._setup_layer_shell()
         self._setup_css()
         self._setup_widgets()
@@ -97,6 +99,12 @@ class CaptionOverlay:
             f"{font_family_css}"
             "  font-weight: bold;\n"
             "}\n"
+            ".caption-debug-label {\n"
+            "  color: rgba(255, 255, 255, 0.9);\n"
+            f"  font-size: {max(11, int(cfg.font_size * 0.56))}px;\n"
+            f"{font_family_css}"
+            "  font-weight: 500;\n"
+            "}\n"
             ".recording-icon {\n"
             "  color: white;\n"
             "}\n"
@@ -120,12 +128,28 @@ class CaptionOverlay:
         self._icon.set_tooltip_text("Microphone active")
         box.append(self._icon)
 
+        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        text_box.set_spacing(6)
+
         self._label = Gtk.Label(label="")
         self._label.add_css_class("caption-label")
         self._label.set_accessible_role(Gtk.AccessibleRole.STATUS)
         self._label.set_wrap(True)
         self._label.set_max_width_chars(60)
-        box.append(self._label)
+        self._label.set_halign(Gtk.Align.START)
+        text_box.append(self._label)
+
+        if self._debug_mode:
+            self._debug_label = Gtk.Label(label="")
+            self._debug_label.add_css_class("caption-debug-label")
+            self._debug_label.set_selectable(False)
+            self._debug_label.set_wrap(True)
+            self._debug_label.set_max_width_chars(80)
+            self._debug_label.set_halign(Gtk.Align.START)
+            self._debug_label.set_xalign(0.0)
+            text_box.append(self._debug_label)
+
+        box.append(text_box)
 
         self._box = box
         self._window.set_child(box)
@@ -166,6 +190,9 @@ class CaptionOverlay:
     def set_text(self, text: str):
         GLib.idle_add(self._do_set_text, text)
 
+    def set_debug_text(self, text: str):
+        GLib.idle_add(self._do_set_debug_text, text)
+
     def set_state(self, state: str):
         GLib.idle_add(self._do_set_state, state)
 
@@ -181,6 +208,13 @@ class CaptionOverlay:
         if self._label:
             self._label.set_text(text)
             self._label.update_property([Gtk.AccessibleProperty.LABEL], [text])
+            if text and not self._visible:
+                self._do_show()
+        return GLib.SOURCE_REMOVE
+
+    def _do_set_debug_text(self, text: str):
+        if self._debug_label:
+            self._debug_label.set_text(text)
             if text and not self._visible:
                 self._do_show()
         return GLib.SOURCE_REMOVE
@@ -205,4 +239,6 @@ class CaptionOverlay:
             self._apply_state(OVERLAY_STATE_LISTENING)
             if self._label:
                 self._label.set_text("")
+            if self._debug_label:
+                self._debug_label.set_text("")
         return GLib.SOURCE_REMOVE

@@ -36,22 +36,34 @@ def app_stub() -> SimpleNamespace:
     )
 
 
-def test_transcribe_logs_length_not_raw_text(app_stub: SimpleNamespace, caplog):
+def test_transcript_partial_logs_rendered_text(caplog):
     caplog.set_level(logging.DEBUG, logger="shuvoice.app")
-    state = _state_with_chunk()
 
-    ShuVoiceApp._transcribe_native_chunk(app_stub, state, "test context")
+    app = SimpleNamespace(
+        _render_transcript_text=lambda text: text,
+        _debug_current_transcript="",
+        overlay=None,
+        _update_debug_overlay=Mock(),
+        config=SimpleNamespace(output_mode="final_only"),
+        _is_offline_instant_mode=False,
+        typer=SimpleNamespace(update_partial=Mock()),
+        metrics=SimpleNamespace(observe_partial_update=Mock()),
+    )
+
+    ShuVoiceApp._on_transcript_update(app, "Sensitive Password")
 
     messages = [record.getMessage() for record in caplog.records]
-    assert all("Sensitive Password" not in message for message in messages)
-    assert any("raw_text_len=" in message for message in messages)
+    assert any("Transcript partial: Sensitive Password" in message for message in messages)
 
 
-def test_commit_logs_length_not_final_text(caplog):
+def test_commit_logs_final_text(caplog):
     caplog.set_level(logging.INFO, logger="shuvoice.app")
 
     app = SimpleNamespace(
         _render_transcript_text=lambda text: text,
+        _update_debug_overlay=Mock(),
+        _debug_current_transcript="draft",
+        _debug_last_final_transcript="",
         overlay=None,
         typer=SimpleNamespace(commit_final=Mock(), update_partial=Mock(), reset=Mock()),
         config=SimpleNamespace(use_clipboard_for_final=True),
@@ -61,8 +73,7 @@ def test_commit_logs_length_not_final_text(caplog):
     ShuVoiceApp._commit_utterance(app, state)
 
     messages = [record.getMessage() for record in caplog.records]
-    assert all("Final Sensitive Text" not in message for message in messages)
-    assert any("Final: len=" in message for message in messages)
+    assert any("Final transcript: Final Sensitive Text" in message for message in messages)
 
 
 def test_moonshine_repetition_logs_pattern_size_not_words(caplog):

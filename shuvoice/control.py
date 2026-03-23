@@ -27,6 +27,7 @@ VALID_COMMANDS = {
     "status",
     "ping",
     "metrics",
+    "debug_status",
     "tts_speak",
     "tts_pause",
     "tts_resume",
@@ -107,6 +108,7 @@ class ControlServer:
         on_toggle: Callable[[], None],
         on_status: Callable[[], str],
         on_metrics: Callable[[], str] | None = None,
+        on_debug_status: Callable[[], str] | None = None,
         on_tts_command: Callable[[str], str] | None = None,
     ):
         self.socket_path = resolve_control_socket_path(socket_path)
@@ -115,6 +117,7 @@ class ControlServer:
         self._on_toggle = on_toggle
         self._on_status = on_status
         self._on_metrics = on_metrics or (lambda: "metrics unavailable")
+        self._on_debug_status = on_debug_status or (lambda: "debug unavailable")
         self._on_tts_command = on_tts_command
 
         self._running = threading.Event()
@@ -222,6 +225,8 @@ class ControlServer:
             return f"OK {self._on_status()}"
         if command == "metrics":
             return f"OK {self._on_metrics()}"
+        if command == "debug_status":
+            return f"OK {self._on_debug_status()}"
         if command == "ping":
             return "OK pong"
         if command.startswith("tts_"):

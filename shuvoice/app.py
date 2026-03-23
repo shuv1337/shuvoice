@@ -22,7 +22,8 @@ from .asr import create_backend
 from .audio import AudioCapture, audio_rms
 from .config import Config
 from .control import ControlServer
-from .diagnostics import metrics_to_json
+from .debug_log import RecentLogBuffer
+from .diagnostics import debug_status_to_json, metrics_to_json
 from .feedback import play_tone
 from .metrics import MetricsCollector
 from .postprocess import apply_text_replacements, capitalize_first, lowercase_text
@@ -95,6 +96,8 @@ class ShuVoiceApp(Gtk.Application):
             retry_delay_ms=config.typing_retry_delay_ms,
         )
         self.metrics = MetricsCollector()
+        self._recent_logs = RecentLogBuffer()
+        logging.getLogger().addHandler(self._recent_logs)
 
         self.tts_backend = None
         self.tts_player: TTSPlayer | None = None
@@ -102,6 +105,8 @@ class ShuVoiceApp(Gtk.Application):
         self._tts_voice_id = str(config.tts_default_voice_id).strip()
         self._tts_playback_speed = normalize_tts_playback_speed(config.tts_playback_speed)
         self._tts_last_preview_text = ""
+        self._debug_current_transcript = ""
+        self._debug_last_final_transcript = ""
 
         if config.tts_enabled:
             try:
@@ -139,6 +144,7 @@ class ShuVoiceApp(Gtk.Application):
             on_toggle=self._on_recording_toggle,
             on_status=self._recording_status,
             on_metrics=self._metrics_status,
+            on_debug_status=self._debug_status,
             on_tts_command=self._handle_tts_command,
         )
 
@@ -342,6 +348,10 @@ class ShuVoiceApp(Gtk.Application):
 
         self.control.stop()
         self.audio.stop()
+        try:
+            logging.getLogger().removeHandler(self._recent_logs)
+        except Exception:
+            pass
         Gtk.Application.do_shutdown(self)
 
     def _on_sigint(self):
@@ -499,6 +509,97 @@ class ShuVoiceApp(Gtk.Application):
 
     def _metrics_status(self) -> str:
         return metrics_to_json(self.metrics.snapshot())
+
+    def _debug_status(self) -> str:
+        return debug_status_to_json(self._build_debug_status())
+
+    def _build_debug_status(self) -> dict[str, object]:
+        max_log_lines = max(1, int(getattr(self.config, "overlay_debug_max_lines", 12)))
+        return {
+            "app": {
+                "asr_backend": self.config.asr_backend,
+                "tts_backend": self.config.tts_backend,
+                "overlay_debug_mode": bool(getattr(self.config, "overlay_debug_mode", False)),
+                "recording": self._recording.is_set(),
+                "processing": self._processing.is_set(),
+                "asr_disabled": bool(self._asr_disabled),
+                "asr_thread_alive": bool(self._asr_thread_alive),
+                "model_load_failed": bool(self._model_load_failed),
+                "control_socket": str(self.control.socket_path),
+            },
+            "audio": {
+                "queue_depth": self.audio.queue.qsize(),
+                "queue_max": getattr(self.audio.queue, "maxsize", None),
+                "noise_floor_rms": round(float(self._noise_floor_rms), 6),
+                "speech_rms_threshold": round(float(self._speech_rms_threshold), 6),
+                "speech_rms_multiplier": round(float(self._speech_rms_multiplier), 3),
+            },
+            "asr": {
+                "debug_step_num": self.asr.debug_step_num,
+                "native_chunk_samples": self.asr.native_chunk_samples,
+                "wants_raw_audio": bool(self.asr.wants_raw_audio),
+                "consecutive_failures": int(self._consecutive_asr_failures),
+                "current_transcript": self._debug_current_transcript,
+                "last_final_transcript": self._debug_last_final_transcript,
+            },
+            "metrics": self.metrics.snapshot(),
+            "logs": self._recent_logs.tail(max_lines=max_log_lines),
+        }
+
+    def _update_debug_overlay(self, state: _UtteranceState | None = None) -> None:
+        overlay = getattr(self, "overlay", None)
+        if overlay is None or not bool(getattr(self.config, "overlay_debug_mode", False)):
+            return
+
+        metrics = self.metrics.snapshot()
+        counters = metrics.get("counters", {})
+        timings = metrics.get("timings", {})
+        runtime = metrics.get("runtime", {})
+        max_log_lines = max(1, int(getattr(self.config, "overlay_debug_max_lines", 12)))
+
+        lines = [
+            (
+                f"state rec={int(self._recording.is_set())} proc={int(self._processing.is_set())} "
+                f"asr_disabled={int(self._asr_disabled)} thread_alive={int(self._asr_thread_alive)}"
+            ),
+            (
+                f"audio q={self.audio.queue.qsize()}/{getattr(self.audio.queue, 'maxsize', 0)} "
+                f"noise={self._noise_floor_rms:.4f} thr={self._speech_rms_threshold:.4f}"
+            ),
+            (
+                f"asr backend={self.config.asr_backend} step={self.asr.debug_step_num} "
+                f"chunk={self.asr.native_chunk_samples} raw={int(self.asr.wants_raw_audio)}"
+            ),
+            (
+                f"metrics chunks={counters.get('chunks_processed', 0)} partials={counters.get('partial_updates', 0)} "
+                f"commits={counters.get('final_commits', 0)} resets={counters.get('recovery_resets', 0)}"
+            ),
+            (
+                f"utt avg={timings.get('utterance_duration_sec', {}).get('avg', 0.0):.2f}s "
+                f"recording_for={runtime.get('recording_duration_sec', 0.0):.2f}s "
+                f"queue_avg={timings.get('queue_depth', {}).get('avg', 0.0):.2f}"
+            ),
+        ]
+
+        if state is not None:
+            lines.append(
+                (
+                    f"utt buf={state.total} speech_samples={state.speech_samples} peak={state.peak_rms:.4f} "
+                    f"gain={state.utterance_gain:.2f} unchanged={state.unchanged_steps}"
+                )
+            )
+
+        if self._debug_current_transcript:
+            lines.append(f"partial: {self._debug_current_transcript}")
+        if self._debug_last_final_transcript:
+            lines.append(f"final: {self._debug_last_final_transcript}")
+
+        log_lines = self._recent_logs.tail(max_lines=max_log_lines)
+        if log_lines:
+            lines.append("logs:")
+            lines.extend(log_lines)
+
+        overlay.set_debug_text("\n".join(lines))
 
     # -- TTS control surface (called from control socket threads) -----------
 
@@ -772,8 +873,11 @@ class ShuVoiceApp(Gtk.Application):
 
     def _on_transcript_update(self, text: str):
         rendered_text = self._render_transcript_text(text)
+        self._debug_current_transcript = rendered_text
+        log.debug("Transcript partial: %s", rendered_text)
         if self.overlay:
             self.overlay.set_text(rendered_text)
+        self._update_debug_overlay()
         if self.config.output_mode == "streaming_partial" and not self._is_offline_instant_mode:
             self.typer.update_partial(rendered_text)
             metrics = getattr(self, "metrics", None)
@@ -868,9 +972,12 @@ class ShuVoiceApp(Gtk.Application):
         if not final_text:
             return
 
-        log.info("Final: len=%d", len(final_text))
+        self._debug_current_transcript = ""
+        self._debug_last_final_transcript = final_text
+        log.info("Final transcript: %s", final_text)
         if self.overlay:
             self.overlay.set_text(final_text)
+        self._update_debug_overlay(state)
 
         # Delegate fully to typer, which resolves the correct final injection mode
         self.typer.commit_final(final_text)
@@ -918,6 +1025,7 @@ class ShuVoiceApp(Gtk.Application):
                 state.speech_samples,
                 self._min_speech_samples,
             )
+            self._debug_current_transcript = ""
             if self.overlay:
                 self.overlay.hide()
             state.reset(rms_threshold=self._speech_rms_threshold)
@@ -930,6 +1038,7 @@ class ShuVoiceApp(Gtk.Application):
 
             if self.overlay:
                 self.overlay.hide()
+            self._debug_current_transcript = ""
             state.reset(rms_threshold=self._speech_rms_threshold)
             self.typer.reset()
             return
@@ -969,6 +1078,7 @@ class ShuVoiceApp(Gtk.Application):
 
         if self.overlay:
             self.overlay.hide()
+        self._debug_current_transcript = ""
         state.reset(rms_threshold=self._speech_rms_threshold)
         self.typer.reset()
 
@@ -982,6 +1092,7 @@ class ShuVoiceApp(Gtk.Application):
         while self._running.is_set():
             chunk = self.audio.get_chunk(timeout=0.05)
             is_recording = self._recording.is_set()
+            self._update_debug_overlay(state)
 
             if is_recording and not was_recording:
                 self._begin_utterance(state)

@@ -64,6 +64,18 @@ def test_overlay_bottom_margin_validation():
         Config(bottom_margin="10; margin: 0")
 
 
+def test_overlay_debug_validation():
+    cfg = Config(overlay_debug_mode=True, overlay_debug_max_lines=20)
+    assert cfg.overlay_debug_mode is True
+    assert cfg.overlay_debug_max_lines == 20
+
+    with pytest.raises(ValueError, match="overlay_debug_mode"):
+        Config(overlay_debug_mode="yes")
+
+    with pytest.raises(ValueError, match="overlay_debug_max_lines"):
+        Config(overlay_debug_max_lines=0)
+
+
 def test_input_gain_validation():
     # Should be float > 0
     with pytest.raises(ValueError, match="input_gain"):

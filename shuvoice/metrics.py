@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from collections import defaultdict, deque
@@ -109,6 +110,7 @@ class MetricsCollector:
         with self._lock:
             counters = dict(self._counters)
             timings = {k: list(v) for k, v in self._timings.items()}
+            recording_started_at = self._recording_started_at
 
         timing_summary: dict[str, dict[str, float]] = {
             name: {
@@ -119,9 +121,19 @@ class MetricsCollector:
             for name, values in timings.items()
         }
 
+        recording_active = recording_started_at is not None
+        recording_duration_sec = (
+            max(0.0, time.monotonic() - recording_started_at) if recording_started_at is not None else 0.0
+        )
+
         summary: dict[str, Any] = {
             "counters": counters,
             "timings": timing_summary,
+            "runtime": {
+                "pid": os.getpid(),
+                "recording_active": recording_active,
+                "recording_duration_sec": recording_duration_sec,
+            },
             "tts": {
                 "speak_count": counters.get("tts_speak_count", 0),
                 "interrupt_count": counters.get("tts_interrupt_count", 0),
