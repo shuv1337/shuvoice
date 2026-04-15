@@ -103,7 +103,7 @@ def config_set(key: str, value: str) -> int:
 
         _validate_candidate(migrated)
         backup = write_atomic(config_file, migrated)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
@@ -131,7 +131,7 @@ def config_validate() -> int:
         raw = load_raw(Config.config_path())
         _migrated, report = migrate_to_latest(raw)
         cfg = Config.load()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
@@ -146,7 +146,7 @@ def config_validate() -> int:
 def config_effective() -> int:
     try:
         cfg = Config.load()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

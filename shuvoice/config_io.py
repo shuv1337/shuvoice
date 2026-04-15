@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
 import tempfile
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 try:  # Python 3.11+
     import tomllib
@@ -17,6 +19,8 @@ except ModuleNotFoundError:  # Python 3.10
     import tomli as tomllib
 
 from .config import CURRENT_CONFIG_VERSION
+
+log = logging.getLogger(__name__)
 
 
 def load_raw(path: str | Path) -> dict[str, Any]:
@@ -104,7 +108,7 @@ def _serialize_table(data: Mapping[str, Any], prefix: tuple[str, ...] = ()) -> l
     for idx, (key, child) in enumerate(nested):
         if lines:
             lines.append("")
-        lines.extend(_serialize_table(child, prefix + (key,)))
+        lines.extend(_serialize_table(child, (*prefix, key)))
         if idx < len(nested) - 1:
             lines.append("")
 
@@ -161,7 +165,7 @@ def write_atomic(path: str | Path, data: Mapping[str, Any]) -> Path | None:
         try:
             tmp_path.unlink(missing_ok=True)
         except Exception:
-            pass
+            log.debug("Failed to clean up temp config file %s", tmp_path, exc_info=True)
 
         # Recovery path for catastrophic replacement failure where destination
         # disappears and a backup exists.

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 import time
 from typing import Any
 
 _CACHE_TTL_SEC = 2.0
+_cache_lock = threading.Lock()
 _cached_value: dict[str, str | None] | None = None
 _cached_at_monotonic: float = 0.0
 _COMMAND_PATTERNS: dict[str, tuple[str, ...]] = {
@@ -32,7 +34,7 @@ def _format_bind(bind: dict[str, Any]) -> str | None:
     if modmask & 1:
         mod_names.append("Shift")
     if mod_names:
-        return " + ".join(mod_names + [key])
+        return " + ".join([*mod_names, key])
     return key
 
 
@@ -75,13 +77,14 @@ def detect_keybinds(*, ttl_sec: float = _CACHE_TTL_SEC) -> dict[str, str | None]
     """Detect active ShuVoice Hyprland keybinds with short-lived caching."""
     global _cached_at_monotonic, _cached_value
 
-    now = time.monotonic()
-    if _cached_value is not None and now - _cached_at_monotonic <= ttl_sec:
-        return dict(_cached_value)
+    with _cache_lock:
+        now = time.monotonic()
+        if _cached_value is not None and now - _cached_at_monotonic <= ttl_sec:
+            return dict(_cached_value)
 
-    _cached_value = _detect_keybinds_uncached()
-    _cached_at_monotonic = now
-    return dict(_cached_value)
+        _cached_value = _detect_keybinds_uncached()
+        _cached_at_monotonic = now
+        return dict(_cached_value)
 
 
 def detect_keybind(command: str = "start", *, ttl_sec: float = _CACHE_TTL_SEC) -> str | None:
@@ -95,5 +98,6 @@ def detect_keybind(command: str = "start", *, ttl_sec: float = _CACHE_TTL_SEC) -
 
 def clear_keybind_cache() -> None:
     global _cached_at_monotonic, _cached_value
-    _cached_at_monotonic = 0.0
-    _cached_value = None
+    with _cache_lock:
+        _cached_at_monotonic = 0.0
+        _cached_value = None

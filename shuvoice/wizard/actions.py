@@ -21,7 +21,7 @@ def _attempt_auto_install_backend(backend: str, *, prefer_cuda: bool) -> bool:
         from ..cli.commands import setup as setup_cmd
 
         return bool(setup_cmd._attempt_auto_install(backend, prefer_cuda=prefer_cuda))
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("Wizard dependency auto-install failed")
         return False
 
@@ -41,7 +41,7 @@ def maybe_setup_local_tts(
             return
         try:
             progress_callback(fraction, message)
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.debug("Wizard Local Piper progress callback failed", exc_info=True)
 
     def _is_cancelled() -> bool:
@@ -49,7 +49,7 @@ def maybe_setup_local_tts(
             return False
         try:
             return bool(cancel_requested())
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.debug("Wizard Local Piper cancel callback failed", exc_info=True)
             return False
 
@@ -107,7 +107,7 @@ def maybe_download_model(
             return
         try:
             progress_callback(fraction, message)
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.debug("Wizard progress callback failed", exc_info=True)
 
     def _is_cancelled() -> bool:
@@ -115,7 +115,7 @@ def maybe_download_model(
             return False
         try:
             return bool(cancel_requested())
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.debug("Wizard cancel callback failed", exc_info=True)
             return False
 
@@ -154,7 +154,7 @@ def maybe_download_model(
 
         try:
             compatible, detail = checker(cfg)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             compatible, detail = False, f"compatibility probe failed ({exc})"
 
         if compatible:
@@ -277,7 +277,7 @@ def maybe_download_model(
                 )
                 if incompatible is not None:
                     return incompatible
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _emit(1.0, "Model download setup failed")
         return "error", f"Could not prepare model download: {exc}"
 
@@ -311,7 +311,7 @@ def maybe_download_model(
 
     try:
         backend_cls.download_model(**kwargs)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         if _is_cancelled() or "cancelled" in str(exc).lower():
             _emit(1.0, "Model download cancelled")
             return "cancelled", _with_provider_note("Model download cancelled by user.")

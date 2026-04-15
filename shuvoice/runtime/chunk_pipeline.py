@@ -36,10 +36,10 @@ def begin_utterance(app, state) -> None:
     # Defensive reset: ensure ASR model is clean after any potential contamination
     # from tail flush race conditions.
     with app._asr_lock:
-        if not app._asr_disabled:
+        if not app._asr_disabled_event.is_set():
             try:
                 app.asr.reset()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("ASR reset failed at utterance start")
                 app._recover_asr_after_failure("ASR reset at utterance start")
 
@@ -91,7 +91,7 @@ def transcribe_native_chunk(app, state, error_context: str) -> bool:
 
     try:
         text = app._process_chunk_safe(to_process)
-    except Exception:  # noqa: BLE001
+    except Exception:
         app._recover_asr_after_failure(error_context)
         return False
 
@@ -128,7 +128,7 @@ def transcribe_native_chunk(app, state, error_context: str) -> bool:
 def process_recording_chunks(app, state) -> None:
     while (
         app._recording.is_set()
-        and not app._asr_disabled
+        and not app._asr_disabled_event.is_set()
         and state.total >= app.asr.native_chunk_samples
     ):
         has_more = transcribe_native_chunk(app, state, "ASR chunk processing failed")

@@ -52,7 +52,7 @@ def _module_root(module: Any) -> Path | None:
 
 def sherpa_lib_dir() -> Path | None:
     try:
-        import sherpa_onnx  # noqa: PLC0415
+        import sherpa_onnx
     except Exception:
         return None
 

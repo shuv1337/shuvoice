@@ -14,7 +14,7 @@ def run_control(command: str, config: Config, *, wait_sec: float = 2.0) -> int:
     if command == "toggle" and wait_sec > 0:
         try:
             status_before = send_control_command("status", config.control_socket)
-        except Exception:  # noqa: BLE001
+        except Exception:
             status_before = ""
 
     try:
@@ -35,7 +35,7 @@ def run_control(command: str, config: Config, *, wait_sec: float = 2.0) -> int:
                 if state != "processing":
                     break
                 time.sleep(0.05)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

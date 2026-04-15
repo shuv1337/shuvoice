@@ -15,8 +15,8 @@ import logging
 import os
 import socket
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 log = logging.getLogger(__name__)
 
@@ -144,7 +144,7 @@ class ControlServer:
         try:
             send_control_command("ping", str(self.socket_path), timeout=0.2)
         except Exception:
-            pass
+            log.debug("Control socket ping during stop failed", exc_info=True)
 
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
@@ -156,7 +156,7 @@ class ControlServer:
             if self.socket_path.exists():
                 self.socket_path.unlink()
         except Exception:
-            log.debug("Failed to remove control socket %s", self.socket_path)
+            log.debug("Failed to remove control socket %s", self.socket_path, exc_info=True)
 
     def _run(self):
         self._cleanup_socket_file()
@@ -178,7 +178,7 @@ class ControlServer:
             while self._running.is_set():
                 try:
                     conn, _ = server.accept()
-                except socket.timeout:
+                except TimeoutError:
                     continue
                 except OSError:
                     if self._running.is_set():
@@ -192,7 +192,7 @@ class ControlServer:
                         payload = conn.recv(1024)
                         command = payload.decode("utf-8", errors="replace").strip().lower()
                         response = self._handle_command(command)
-                    except socket.timeout:
+                    except TimeoutError:
                         log.warning("Control command timed out")
                         response = "ERROR timeout"
                     except Exception:
@@ -202,12 +202,12 @@ class ControlServer:
                     try:
                         conn.sendall((response + "\n").encode("utf-8"))
                     except OSError:
-                        pass
+                        log.debug("Failed to send control response")
         finally:
             try:
                 server.close()
             except Exception:
-                pass
+                log.debug("Control server socket close failed", exc_info=True)
             self._cleanup_socket_file()
             log.info("Control socket stopped")
 
@@ -262,7 +262,7 @@ def send_control_command(
         try:
             client.shutdown(socket.SHUT_WR)
         except OSError:
-            pass
+            log.debug("Control client socket shutdown failed")
 
         response = client.recv(4096).decode("utf-8", errors="replace").strip()
         if not response:

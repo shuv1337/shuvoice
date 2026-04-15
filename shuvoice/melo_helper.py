@@ -112,7 +112,7 @@ def _main() -> None:  # pragma: no cover — requires MeloTTS venv
             stdout_bin.write(pcm_bytes)
             stdout_bin.flush()
 
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             error_msg = json.dumps({"error": str(exc)})
             stderr_bin.write(error_msg + "\n")
             stderr_bin.flush()

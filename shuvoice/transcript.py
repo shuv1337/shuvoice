@@ -121,8 +121,10 @@ def prefer_transcript(previous: str, candidate: str) -> str:
     if prev.startswith(new):
         return previous_raw
 
-    min_len = min(len(prev), len(new))
-    for overlap in range(min_len, MIN_OVERLAP_CHARS - 1, -1):
+    # Bound the overlap search to a reasonable window. Full O(n^2) suffix
+    # matching on very long transcripts causes stuttering.
+    max_overlap_chars = min(len(prev), len(new), 200)
+    for overlap in range(max_overlap_chars, MIN_OVERLAP_CHARS - 1, -1):
         if prev.endswith(new[:overlap]):
             return prev + new[overlap:]
 

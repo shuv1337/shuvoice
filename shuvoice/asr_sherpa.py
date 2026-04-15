@@ -65,7 +65,7 @@ class SherpaBackend(ASRBackend):
         errors: list[str] = []
 
         try:
-            import sherpa_onnx  # noqa: F401
+            pass
         except Exception as e:
             errors.append(
                 f"Missing sherpa-onnx dependency: {e}. Install with: uv sync --extra asr-sherpa"
@@ -156,8 +156,8 @@ class SherpaBackend(ASRBackend):
     @staticmethod
     def _cuda_provider_available() -> tuple[bool, str]:
         try:
-            import sherpa_onnx  # noqa: F401
-        except Exception as exc:  # noqa: BLE001
+            pass
+        except Exception as exc:
             return False, f"failed to import sherpa_onnx ({exc})"
 
         lib_dir = sherpa_lib_dir()
@@ -243,7 +243,7 @@ class SherpaBackend(ASRBackend):
         if seconds is None or not math.isfinite(seconds):
             return "--:--"
 
-        clamped = max(0, int(round(seconds)))
+        clamped = max(0, round(seconds))
         minutes, sec = divmod(clamped, 60)
         hours, minutes = divmod(minutes, 60)
 
@@ -273,7 +273,7 @@ class SherpaBackend(ASRBackend):
                 return
             try:
                 progress_callback(fraction, message)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.debug("Sherpa progress callback failed", exc_info=True)
 
         def _check_cancel() -> None:
@@ -380,7 +380,7 @@ class SherpaBackend(ASRBackend):
                 try:
                     if not cls._is_model_dir_complete(target_dir):
                         shutil.rmtree(target_dir)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     log.debug("Failed to clean partial Sherpa model directory", exc_info=True)
             raise
 
@@ -539,12 +539,12 @@ class SherpaBackend(ASRBackend):
 
         try:
             encoder = cls._pick_model_onnx(model_dir, "encoder")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return False, f"unable to locate encoder ONNX file ({exc})"
 
         try:
             has_window_size = cls._onnx_file_contains_token(encoder, b"window_size")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return False, f"failed to inspect encoder metadata ({exc})"
 
         if not has_window_size:
@@ -677,7 +677,7 @@ class SherpaBackend(ASRBackend):
                 return
             try:
                 progress_callback(fraction, message)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.debug("Sherpa load progress callback failed", exc_info=True)
 
         _emit_progress(None, "Validating Sherpa model…")

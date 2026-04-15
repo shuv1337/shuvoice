@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import subprocess
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -225,6 +226,25 @@ class LocalTTSBackend(TTSBackend):
         assert proc.stdin is not None
         assert proc.stdout is not None
 
+        # Drain stderr in a background thread to prevent pipe buffer deadlock.
+        # Piper can fill the 64KB OS pipe buffer if it emits enough warnings,
+        # blocking its write() while we block on stdout.read().
+        stderr_chunks: list[bytes] = []
+
+        def _drain_stderr():
+            try:
+                if proc.stderr:
+                    while True:
+                        data = proc.stderr.read(4096)
+                        if not data:
+                            break
+                        stderr_chunks.append(data)
+            except Exception:
+                pass
+
+        stderr_thread = threading.Thread(target=_drain_stderr, name="piper-stderr", daemon=True)
+        stderr_thread.start()
+
         try:
             proc.stdin.write(text_value.encode("utf-8"))
             proc.stdin.close()
@@ -235,17 +255,26 @@ class LocalTTSBackend(TTSBackend):
                     break
                 yield chunk
 
-            # stdin is already closed; use wait() + stderr.read() instead of
-            # communicate() which would try to flush the closed stdin handle.
-            proc.stdout.close()
-            stderr_bytes = proc.stderr.read() if proc.stderr else b""
+            stderr_thread.join(timeout=2.0)
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             proc.kill()
+            proc.wait()
             raise RuntimeError("Local TTS synthesis timed out") from exc
+        except Exception:
+            proc.kill()
+            proc.wait()
+            raise
+        finally:
+            for handle in (proc.stdin, proc.stdout, proc.stderr):
+                try:
+                    if handle and not handle.closed:
+                        handle.close()
+                except Exception:
+                    pass
 
         if proc.returncode not in (0, None):
-            stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
+            stderr_text = b"".join(stderr_chunks).decode("utf-8", errors="replace").strip()
             if stderr_text:
                 raise RuntimeError(f"Local TTS synthesis failed: {stderr_text}")
             raise RuntimeError(f"Local TTS synthesis failed with exit code {proc.returncode}")

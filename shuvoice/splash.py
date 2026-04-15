@@ -221,7 +221,7 @@ class SplashOverlay:
         if text:
             progress.set_text(text)
         else:
-            progress.set_text(f"Loading model… {int(round(bounded * 100))}%")
+            progress.set_text(f"Loading model… {round(bounded * 100)}%")
         return GLib.SOURCE_REMOVE
 
     def _do_dismiss(self):

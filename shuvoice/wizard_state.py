@@ -411,7 +411,7 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
     for config_file in existing_files:
         try:
             content_by_file[config_file] = config_file.read_text()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return "error", f"Failed to read {config_file}: {exc}"
 
     shuvoice_command = _resolve_shuvoice_command()
@@ -555,7 +555,7 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
             new_content = "".join(filtered_lines)
             if new_content != content:
                 config_file.write_text(new_content)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return "error", f"Failed to update Hyprland config: {exc}"
 
     return "added", f"Added ShuVoice keybind to {destination}."
@@ -570,9 +570,7 @@ def needs_wizard() -> bool:
     """
     if (Config.data_dir() / _MARKER_FILE).exists():
         return False
-    if (Config.config_dir() / "config.toml").exists():
-        return False
-    return True
+    return not (Config.config_dir() / "config.toml").exists()
 
 
 def write_marker():
@@ -647,13 +645,13 @@ def _upsert_tts_key(config_file: Path, key: str, value: str):
 def _detect_cuda() -> bool:
     """Return True if CUDA is likely usable for inference."""
     try:
-        import torch  # noqa: PLC0415
+        import torch
 
         return torch.cuda.is_available()
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     # Fallback: check for nvidia-smi
-    import shutil  # noqa: PLC0415
+    import shutil
 
     return shutil.which("nvidia-smi") is not None
 
@@ -666,7 +664,7 @@ def _detect_sherpa_cuda_provider() -> bool:
         if callable(checker):
             ok, _detail = checker()
             return bool(ok)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return False
 

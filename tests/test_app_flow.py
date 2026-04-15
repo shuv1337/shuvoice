@@ -20,10 +20,11 @@ def test_recording_start_stop_transitions():
     app = SimpleNamespace(
         _recording=threading.Event(),
         _processing=threading.Event(),
+        _processing_done=threading.Event(),
         _asr_thread_alive=True,
         _show_overlay_error=Mock(),
         _asr_lock=threading.Lock(),
-        _asr_disabled=False,
+        _asr_disabled_event=threading.Event(),
         _consecutive_asr_failures=0,
         _disable_asr=Mock(),
         audio=SimpleNamespace(clear=Mock()),
@@ -53,7 +54,7 @@ def test_recording_start_stop_transitions():
 
 def test_recording_status_reports_processing_between_stop_and_commit():
     app = SimpleNamespace(
-        _asr_disabled=False,
+        _asr_disabled_event=threading.Event(),
         _asr_thread_alive=True,
         _recording=threading.Event(),
         _processing=threading.Event(),
@@ -92,10 +93,11 @@ def test_recording_start_allows_restart_after_processing_rearm_window(monkeypatc
     app = SimpleNamespace(
         _recording=threading.Event(),
         _processing=threading.Event(),
+        _processing_done=threading.Event(),
         _asr_thread_alive=True,
         _show_overlay_error=Mock(),
         _asr_lock=threading.Lock(),
-        _asr_disabled=False,
+        _asr_disabled_event=threading.Event(),
         _consecutive_asr_failures=0,
         _disable_asr=Mock(),
         _last_stop_monotonic=10.0,
@@ -124,7 +126,7 @@ def test_begin_utterance_resets_asr_before_threshold_setup():
     state = _UtteranceState(last_text="stale", speech_samples=123, utterance_rms_threshold=0.0)
     app = SimpleNamespace(
         _asr_lock=threading.Lock(),
-        _asr_disabled=False,
+        _asr_disabled_event=threading.Event(),
         asr=SimpleNamespace(reset=reset),
         _recover_asr_after_failure=Mock(),
         _speech_rms_threshold=0.008,
@@ -154,7 +156,7 @@ def test_flush_tail_silence_aborts_when_new_recording_already_started():
 
     state = _UtteranceState(last_text="existing transcript")
     app = SimpleNamespace(
-        _asr_disabled=False,
+        _asr_disabled_event=threading.Event(),
         _recording=recording,
         asr=SimpleNamespace(native_chunk_samples=1600, wants_raw_audio=True),
         _make_flush_noise=lambda _n, escalation=1.0: None,
@@ -183,7 +185,7 @@ def test_flush_tail_silence_aborts_if_recording_restarts_mid_flush():
 
     state = _UtteranceState(last_text="")
     app = SimpleNamespace(
-        _asr_disabled=False,
+        _asr_disabled_event=threading.Event(),
         _recording=recording,
         asr=SimpleNamespace(native_chunk_samples=1600, wants_raw_audio=True),
         _make_flush_noise=lambda n, escalation=1.0: [0.0] * n,
@@ -219,7 +221,7 @@ def test_handle_recording_stop_ignores_silent_utterances_without_commit():
         _min_speech_samples=100,
         _speech_rms_threshold=0.008,
         typer=SimpleNamespace(reset=Mock()),
-        _asr_disabled=False,
+        _asr_disabled_event=threading.Event(),
         _is_offline_instant_mode=False,
         _commit_utterance=commit,
     )
@@ -249,7 +251,7 @@ def test_handle_recording_stop_commits_when_speech_threshold_met():
         overlay=SimpleNamespace(set_state=Mock(), hide=Mock()),
         _drain_and_buffer=lambda _state: None,
         _min_speech_samples=100,
-        _asr_disabled=False,
+        _asr_disabled_event=threading.Event(),
         _is_offline_instant_mode=False,
         asr=SimpleNamespace(native_chunk_samples=1600, wants_raw_audio=True, debug_step_num=0),
         _flush_tail_silence=lambda _state: None,
@@ -281,7 +283,7 @@ def test_handle_recording_stop_offline_mode_decodes_once_and_commits():
         overlay=SimpleNamespace(set_state=Mock(), hide=Mock()),
         _drain_and_buffer=lambda _state: None,
         _min_speech_samples=100,
-        _asr_disabled=False,
+        _asr_disabled_event=threading.Event(),
         _is_offline_instant_mode=True,
         _decode_offline_utterance=decode,
         _commit_utterance=commit,
@@ -306,7 +308,7 @@ def test_decode_offline_utterance_applies_gain_for_non_raw_backend():
     )
 
     app = SimpleNamespace(
-        _asr_disabled=False,
+        _asr_disabled_event=threading.Event(),
         asr=SimpleNamespace(wants_raw_audio=False),
         _apply_utterance_gain=Mock(return_value=gained_audio),
         _process_utterance_safe=Mock(return_value="offline text"),

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from typing import Sequence
+from collections.abc import Sequence
 
 from ..env_loader import load_local_dev_env, local_dev_env_path
 from .commands.audio import list_audio_devices
@@ -40,7 +40,7 @@ def _load_config_or_exit(args):
         return load_effective_config(args)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
     return None
 

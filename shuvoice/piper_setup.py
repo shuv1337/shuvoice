@@ -11,6 +11,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .config import Config
 
@@ -213,7 +214,7 @@ def piper_sample_rate_from_sidecar(model_file: Path) -> int | None:
 
     try:
         payload = json.loads(sidecar.read_text())
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.warning("Failed to read Piper sidecar metadata: %s", sidecar, exc_info=True)
         return None
 
@@ -258,7 +259,7 @@ def validate_piper_voice_artifacts(path_or_dir: Path, voice_id: str | None = Non
 
     try:
         json.loads(sidecar.read_text())
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return False, f"Invalid Piper sidecar metadata {sidecar}: {exc}"
 
     sample_rate = piper_sample_rate_from_sidecar(model_file)
@@ -276,8 +277,23 @@ def _emit_progress(
         return
     try:
         progress_callback(fraction, message)
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.debug("Local Piper progress callback failed", exc_info=True)
+
+
+_ALLOWED_DOWNLOAD_DOMAINS = {"github.com", "huggingface.co"}
+
+
+def _validate_download_url(url: str) -> None:
+    """Reject download URLs that don't use HTTPS or target unexpected domains."""
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise ValueError(f"Download URL must use HTTPS scheme: {url}")
+    hostname = (parsed.hostname or "").lower()
+    if not any(hostname == domain or hostname.endswith("." + domain) for domain in _ALLOWED_DOWNLOAD_DOMAINS):
+        raise ValueError(
+            f"Download URL domain {hostname!r} is not in the allowed list: {_ALLOWED_DOWNLOAD_DOMAINS}"
+        )
 
 
 def _check_cancel(cancel_check: Callable[[], bool] | None) -> None:
@@ -295,6 +311,7 @@ def _download_to_file(
     progress_callback: Callable[[float | None, str], None] | None,
     cancel_check: Callable[[], bool] | None,
 ) -> None:
+    _validate_download_url(url)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temp_path = destination.with_name(f"{destination.name}.part")
 
@@ -323,13 +340,13 @@ def _download_to_file(
     except (urllib.error.URLError, TimeoutError) as exc:
         try:
             temp_path.unlink(missing_ok=True)
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.debug("Failed to clean partial Piper download %s", temp_path, exc_info=True)
         raise RuntimeError(f"Failed to download Local Piper artifact from {url}: {exc}") from exc
     except RuntimeError:
         try:
             temp_path.unlink(missing_ok=True)
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.debug("Failed to clean partial Piper download %s", temp_path, exc_info=True)
         raise
 
@@ -391,7 +408,7 @@ def ensure_piper_voice_downloaded(
             try:
                 model_file.unlink(missing_ok=True)
                 sidecar_file.unlink(missing_ok=True)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.debug("Failed to clean partial Local Piper artifacts", exc_info=True)
         raise
 

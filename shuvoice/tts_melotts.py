@@ -184,7 +184,6 @@ class MeloTTSBackend(TTSBackend):
                     bytes_remaining -= len(chunk)
                     yield chunk
 
-            proc.stdout.close()
             stderr_bytes = proc.stderr.read() if proc.stderr else b""
             proc.wait(timeout=timeout)
 
@@ -198,6 +197,13 @@ class MeloTTSBackend(TTSBackend):
             proc.kill()
             proc.wait()
             raise
+        finally:
+            for handle in (proc.stdin, proc.stdout, proc.stderr):
+                try:
+                    if handle and not handle.closed:
+                        handle.close()
+                except Exception:
+                    pass
 
         if proc.returncode not in (0, None):
             stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
