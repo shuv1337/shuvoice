@@ -90,6 +90,7 @@ CONFIG_SECTION_FIELDS: dict[str, tuple[str, ...]] = {
         "tts_local_device",
         "tts_melotts_device",
         "tts_melotts_venv_path",
+        "tts_kokoro_base_url",
     ),
     "typing": (
         "output_mode",
@@ -135,6 +136,8 @@ DEFAULT_OPENAI_TTS_MODEL_ID = "gpt-4o-mini-tts"
 DEFAULT_OPENAI_TTS_API_KEY_ENV = "OPENAI_API_KEY"
 DEFAULT_MELOTTS_VOICE_ID = "EN-US"
 DEFAULT_MELOTTS_MODEL_ID = "melotts"
+DEFAULT_KOKORO_TTS_VOICE_ID = "af_heart"
+DEFAULT_KOKORO_TTS_MODEL_ID = "kokoro"
 
 
 DEFAULT_TEXT_REPLACEMENTS: dict[str, str] = {
@@ -265,6 +268,9 @@ class Config:
     # MeloTTS (when tts_backend = "melotts")
     tts_melotts_device: str = "auto"  # auto | cpu | cuda
     tts_melotts_venv_path: str | None = None  # path to MeloTTS venv
+
+    # Kokoro (when tts_backend = "kokoro")
+    tts_kokoro_base_url: str = "http://localhost:8880/v1"
 
     # Text injection
     output_mode: str = "final_only"  # final_only | streaming_partial
@@ -434,8 +440,8 @@ class Config:
             raise ValueError("tts_enabled must be true or false")
 
         self.tts_backend = str(self.tts_backend).strip().lower()
-        if self.tts_backend not in {"elevenlabs", "openai", "local", "melotts"}:
-            raise ValueError("tts_backend must be one of: elevenlabs, openai, local, melotts")
+        if self.tts_backend not in {"elevenlabs", "openai", "local", "melotts", "kokoro"}:
+            raise ValueError("tts_backend must be one of: elevenlabs, openai, local, melotts, kokoro")
 
         if self.tts_local_model_path is not None:
             local_model_path = str(self.tts_local_model_path).strip()
@@ -484,6 +490,22 @@ class Config:
                 DEFAULT_OPENAI_TTS_MODEL_ID,
             }:
                 self.tts_model_id = DEFAULT_MELOTTS_MODEL_ID
+        elif self.tts_backend == "kokoro":
+            current_voice_id = str(self.tts_default_voice_id).strip()
+            if current_voice_id in {
+                "",
+                DEFAULT_ELEVENLABS_TTS_VOICE_ID,
+                DEFAULT_OPENAI_TTS_VOICE_ID,
+            }:
+                self.tts_default_voice_id = DEFAULT_KOKORO_TTS_VOICE_ID
+
+            current_model_id = str(self.tts_model_id).strip()
+            if current_model_id in {
+                "",
+                DEFAULT_ELEVENLABS_TTS_MODEL_ID,
+                DEFAULT_OPENAI_TTS_MODEL_ID,
+            }:
+                self.tts_model_id = DEFAULT_KOKORO_TTS_MODEL_ID
 
         self.tts_default_voice_id = str(self.tts_default_voice_id).strip()
         if not self.tts_default_voice_id:

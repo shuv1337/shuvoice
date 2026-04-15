@@ -113,6 +113,11 @@ bottom_margin = 60
 # tts_local_model_path = "~/.local/share/shuvoice/models/piper"   # file or directory also accepted in manual mode
 # tts_local_voice = "en_US-amy-medium"
 # tts_local_device = 3
+# Kokoro (local self-hosted, OpenAI-compatible) — tts_backend = "kokoro"
+# tts_backend = "kokoro"
+# tts_default_voice_id = "af_heart"
+# tts_model_id = "kokoro"
+# tts_kokoro_base_url = "http://localhost:8880/v1"
 
 [typing]
 # final_only | streaming_partial

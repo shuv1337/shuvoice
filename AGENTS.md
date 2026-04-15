@@ -23,6 +23,8 @@
   - [ElevenLabs](#elevenlabs-backend)
   - [OpenAI](#openai-backend)
   - [Local (Piper)](#local-piper)
+  - [MeloTTS](#melotts)
+  - [Kokoro](#kokoro-backend)
 - [Model Locations](#model-locations)
 - [Build Artifacts](#build-artifacts)
 - [System Prerequisites](#system-prerequisites)
@@ -627,6 +629,40 @@ uv venv --python 3.12 ~/.local/share/shuvoice/melotts-venv
 - Non-streaming: entire utterance synthesized before playback
 - ~9 GB venv footprint (mainly PyTorch); models ~200 MB each
 
+### Kokoro Backend
+
+**Status**: ✅ Production-ready (streaming PCM path)  
+**Backend key**: `tts_backend = "kokoro"`  
+**Module**: `shuvoice/tts_kokoro.py`
+
+#### Config
+
+```toml
+[tts]
+tts_enabled = true
+tts_backend = "kokoro"
+tts_default_voice_id = "af_heart"
+tts_model_id = "kokoro"
+tts_output_format = "pcm_24000"
+tts_kokoro_base_url = "http://localhost:8880/v1"
+tts_playback_speed = 1.0
+```
+
+#### Config keys
+
+| Key | Default | Notes |
+|---|---|---|
+| `tts_kokoro_base_url` | `http://localhost:8880/v1` | Base URL for the Kokoro OpenAI-compatible API endpoint. |
+
+#### Notes
+
+- Local self-hosted TTS with an OpenAI-compatible API (no API key required).
+- Uses `{base_url}/audio/speech` for synthesis and `{base_url}/audio/voices` for voice listing.
+- Voice list is cached for 300 seconds to reduce requests to the local service.
+- Speed control via provider-native `speed` request field (0.5×–2.0×).
+- Supports both PCM and MP3 output formats.
+- A dummy `Authorization: Bearer sk-local` header is sent (Kokoro accepts but ignores it).
+
 ---
 
 ## Model Locations
@@ -640,6 +676,7 @@ uv venv --python 3.12 ~/.local/share/shuvoice/melotts-venv
 | OpenAI TTS | `tts_default_voice_id` + `tts_model_id` | Remote API (`api.openai.com/v1/audio/speech`); key in env (`tts_api_key_env`) |
 | Local TTS | `tts_local_model_path` / `tts_local_voice` | Local filesystem path (Piper `.onnx` model file(s)); managed automation target: `~/.local/share/shuvoice/models/piper/` |
 | MeloTTS | `tts_default_voice_id` + `tts_model_id` | Isolated venv (`~/.local/share/shuvoice/melotts-venv/`); models cached in HuggingFace cache via helper subprocess |
+| Kokoro | `tts_default_voice_id` + `tts_model_id` | Local API (`tts_kokoro_base_url`, default `http://localhost:8880/v1`); no API key required |
 
 ---
 

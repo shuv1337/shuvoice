@@ -33,11 +33,18 @@ def _resolve_melotts() -> type[TTSBackend]:
     return MeloTTSBackend
 
 
+def _resolve_kokoro() -> type[TTSBackend]:
+    from .tts_kokoro import KokoroTTSBackend
+
+    return KokoroTTSBackend
+
+
 _TTS_BACKEND_REGISTRY: dict[str, BackendResolver] = {
     "elevenlabs": _resolve_elevenlabs,
     "openai": _resolve_openai,
     "local": _resolve_local,
     "melotts": _resolve_melotts,
+    "kokoro": _resolve_kokoro,
 }
 
 
