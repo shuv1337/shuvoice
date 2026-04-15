@@ -78,14 +78,14 @@ class NemoBackend(ASRBackend):
         errors: list[str] = []
 
         try:
-            pass
+            import torch  # noqa: F401
         except Exception as e:
             errors.append(
                 f"Missing PyTorch dependency: {e}. Install torch (or python-pytorch-cuda on Arch)."
             )
 
         try:
-            pass
+            import nemo.collections.asr  # noqa: F401
         except Exception as e:
             errors.append(
                 f"Missing NeMo ASR dependency: {e}. "

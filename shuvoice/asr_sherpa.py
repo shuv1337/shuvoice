@@ -65,7 +65,7 @@ class SherpaBackend(ASRBackend):
         errors: list[str] = []
 
         try:
-            pass
+            import sherpa_onnx  # noqa: F401
         except Exception as e:
             errors.append(
                 f"Missing sherpa-onnx dependency: {e}. Install with: uv sync --extra asr-sherpa"
@@ -156,7 +156,7 @@ class SherpaBackend(ASRBackend):
     @staticmethod
     def _cuda_provider_available() -> tuple[bool, str]:
         try:
-            pass
+            import sherpa_onnx  # noqa: F401
         except Exception as exc:
             return False, f"failed to import sherpa_onnx ({exc})"
 

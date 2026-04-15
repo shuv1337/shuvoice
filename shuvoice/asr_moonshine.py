@@ -120,7 +120,7 @@ class MoonshineBackend(ASRBackend):
         errors: list[str] = []
 
         try:
-            pass
+            import moonshine_onnx  # noqa: F401
         except Exception as e:
             errors.append(
                 "Missing Moonshine ONNX dependency: "
