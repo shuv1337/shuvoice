@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 import numpy as np
@@ -45,6 +46,7 @@ class NemoBackend(ASRBackend):
         self.model: Any = None
         self._torch: Any = None
         self._nemo_asr: Any = None
+        self._inference_lock = threading.Lock()
 
         self._cache_last_channel = None
         self._cache_last_time = None
@@ -221,7 +223,7 @@ class NemoBackend(ASRBackend):
         if self.model is None:
             raise RuntimeError("ASR model is not loaded. Call load() first.")
 
-        with self._torch.inference_mode():
+        with self._inference_lock, self._torch.inference_mode():
             audio_tensor = self._torch.from_numpy(audio_chunk).unsqueeze(0).to(self.device)
             audio_len = self._torch.tensor([audio_tensor.shape[1]], device=self.device)
 
@@ -263,8 +265,8 @@ class NemoBackend(ASRBackend):
                     return_transcription=True,
                 )
             except Exception as e:
-                # If the cache gets corrupted due to race conditions or bad data,
-                # NeMo will throw cryptic shape errors here. Re-raise cleanly.
+                # If the cache gets corrupted due to bad data, NeMo will throw
+                # cryptic shape errors here. Re-raise cleanly.
                 log.exception("NeMo stream step failed. Model state may be corrupted.")
                 raise e
 

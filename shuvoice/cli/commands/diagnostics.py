@@ -13,17 +13,17 @@ def diagnostics(config: Config, *, json_output: bool = False) -> int:
 
     try:
         payload["status"] = send_control_command("status", config.control_socket)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         payload["status"] = f"ERROR: {exc}"
 
     try:
         payload["metrics"] = send_control_command("metrics", config.control_socket)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         payload["metrics"] = f"ERROR: {exc}"
 
     try:
         payload["debug_status"] = send_control_command("debug_status", config.control_socket)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         payload["debug_status"] = f"ERROR: {exc}"
 
     if json_output:

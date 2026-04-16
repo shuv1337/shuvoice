@@ -34,6 +34,7 @@ class StreamingTyper:
         clipboard_settle_delay_ms: int = 40,
         retry_attempts: int = 2,
         retry_delay_ms: int = 40,
+        subprocess_timeout: float = 5.0,
     ):
         self.last_partial_len = 0
         self.last_partial_text = ""
@@ -42,6 +43,7 @@ class StreamingTyper:
         self.clipboard_settle_delay_s = max(0.0, clipboard_settle_delay_ms / 1000.0)
         self.retry_attempts = max(1, retry_attempts)
         self.retry_delay_s = max(0.0, retry_delay_ms / 1000.0)
+        self.subprocess_timeout = max(1.0, float(subprocess_timeout))
         self._watchers_detected: bool | None = None
         self._watchers_last_checked_monotonic = 0.0
         self._watchers_cache_ttl_s = 30.0
@@ -57,7 +59,7 @@ class StreamingTyper:
 
         for attempt in range(1, attempts + 1):
             try:
-                subprocess.run(args, check=True, timeout=5)
+                subprocess.run(args, check=True, timeout=self.subprocess_timeout)
                 return True
             except (subprocess.SubprocessError, OSError) as e:
                 # Sanitize error message to avoid leaking sensitive text
@@ -102,7 +104,7 @@ class StreamingTyper:
                 check=True,
                 capture_output=True,
                 text=True,
-                timeout=2,
+                timeout=self.subprocess_timeout,
             )
             loaded = json.loads(result.stdout or "{}")
             if isinstance(loaded, dict):
@@ -129,7 +131,7 @@ class StreamingTyper:
                 check=True,
                 capture_output=True,
                 text=True,
-                timeout=2,
+                timeout=self.subprocess_timeout,
             )
         except Exception as e:
             log.debug("Could not resolve X11 window id for pid %s: %s", pid, e)
@@ -267,7 +269,7 @@ class StreamingTyper:
                 ["pgrep", "-a", "-f", "wl-paste --watch|wl-clip-persist|elephant"],
                 capture_output=True,
                 text=True,
-                timeout=2,
+                timeout=self.subprocess_timeout,
             )
             # pgrep returns 0 if matches found, 1 if none found
             self._watchers_detected = result.returncode == 0
@@ -432,7 +434,7 @@ class StreamingTyper:
             result = subprocess.run(
                 ["wl-paste", "--no-newline"],
                 check=True,
-                timeout=3,
+                timeout=self.subprocess_timeout,
                 capture_output=True,
                 text=True,
             )

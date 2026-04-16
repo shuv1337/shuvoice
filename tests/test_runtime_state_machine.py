@@ -14,7 +14,7 @@ def test_on_recording_start_sets_state_and_overlay():
         _asr_thread_alive=True,
         _show_overlay_error=Mock(),
         _asr_lock=threading.Lock(),
-        _asr_disabled=False,
+        _asr_disabled_event=threading.Event(),
         _consecutive_asr_failures=0,
         _disable_asr=Mock(),
         _ASR_MAX_FAILURES=10,
@@ -33,7 +33,7 @@ def test_on_recording_start_sets_state_and_overlay():
 
 def test_recording_status_matrix():
     app = SimpleNamespace(
-        _asr_disabled=False,
+        _asr_disabled_event=threading.Event(),
         _asr_thread_alive=True,
         _recording=threading.Event(),
         _processing=threading.Event(),
@@ -47,9 +47,12 @@ def test_recording_status_matrix():
 
 
 def test_on_recording_stop_sets_processing():
+    processing_done = threading.Event()
+    processing_done.set()
     app = SimpleNamespace(
         _recording=threading.Event(),
         _processing=threading.Event(),
+        _processing_done=processing_done,
         overlay=SimpleNamespace(set_state=Mock()),
         _play_feedback_tone=Mock(),
     )

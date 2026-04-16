@@ -57,11 +57,11 @@ def _running_in_venv() -> bool:
 
 def _detect_cuda_gpu() -> bool:
     try:
-        import torch  # noqa: PLC0415
+        import torch
 
         if torch.cuda.is_available():
             return True
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
     return shutil.which("nvidia-smi") is not None
@@ -69,12 +69,12 @@ def _detect_cuda_gpu() -> bool:
 
 def _detect_cuda_architectures() -> str:
     try:
-        import torch  # noqa: PLC0415
+        import torch
 
         if torch.cuda.is_available():
             major, minor = torch.cuda.get_device_capability(0)
             return f"{major}{minor}"
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
     return "89"

@@ -18,7 +18,7 @@ def list_audio_devices() -> int:
                     f"(in={dev['max_input_channels']}, "
                     f"default_sr={dev['default_samplerate']})"
                 )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"ERROR: Could not list audio devices: {exc}", file=sys.stderr)
         return 1
     return 0

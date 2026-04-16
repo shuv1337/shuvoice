@@ -158,7 +158,7 @@ def local_tts_model_status(config: Config) -> str:
             selected = voice_id or next(iter(installed_piper_voice_stems(model_dir)), None)
             model_file = model_dir / f"{selected}.onnx" if selected else model_dir
         sample_rate = piper_sample_rate_from_sidecar(model_file)
-    except Exception:  # noqa: BLE001
+    except Exception:
         sample_rate = None
 
     if sample_rate is not None:
@@ -312,7 +312,7 @@ def build_melotts_setup_report(config: Config) -> MeloTTSSetupReport:
     venv_present = venv_dir.is_dir()
     python_ok = melotts_venv_valid(venv_dir) if venv_present else False
 
-    from .tts_melotts import MeloTTSBackend  # noqa: PLC0415
+    from .tts_melotts import MeloTTSBackend
 
     missing = tuple(MeloTTSBackend.dependency_errors(venv_path=str(venv_dir)))
 

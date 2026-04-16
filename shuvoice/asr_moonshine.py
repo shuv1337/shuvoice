@@ -259,7 +259,7 @@ class MoonshineBackend(ASRBackend):
             if session is None or not isinstance(session, ort.InferenceSession):
                 continue
             try:
-                model_path = session._model_path  # noqa: SLF001
+                model_path = session._model_path
                 new_session = ort.InferenceSession(
                     model_path,
                     sess_options=sess_opts,
@@ -368,9 +368,9 @@ class MoonshineBackend(ASRBackend):
             max_tokens = int(self.config.moonshine_max_tokens)
             tokens = self._model.generate(audio_2d, max_len=max_tokens)
             text = self._tokenizer.decode_batch(tokens)[0].strip()
-        except Exception:
+        except Exception as exc:
             log.exception("Moonshine inference failed")
-            raise RuntimeError("Moonshine inference failed")
+            raise RuntimeError("Moonshine inference failed") from exc
 
         # --- repetition guard ---
         audio_seconds = self._audio_buffer.size / float(self._sample_rate)

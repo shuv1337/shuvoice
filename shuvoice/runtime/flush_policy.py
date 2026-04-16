@@ -21,7 +21,7 @@ def make_flush_noise(app, n_samples: int, escalation: float = 1.0) -> np.ndarray
 
 
 def flush_streaming_stall(app, state) -> None:
-    if app._asr_disabled:
+    if app._asr_disabled_event.is_set():
         return
 
     native = app.asr.native_chunk_samples
@@ -32,7 +32,7 @@ def flush_streaming_stall(app, state) -> None:
     for _ in range(app._streaming_stall_flush_chunks):
         try:
             text = app._process_chunk_safe(silence)
-        except Exception:  # noqa: BLE001
+        except Exception:
             app._recover_asr_after_failure("ASR stall-guard flush failed")
             break
 
@@ -51,7 +51,7 @@ def flush_streaming_stall(app, state) -> None:
 
 
 def flush_tail_silence(app, state) -> None:
-    if app._asr_disabled:
+    if app._asr_disabled_event.is_set():
         return
 
     native = app.asr.native_chunk_samples
@@ -82,7 +82,7 @@ def flush_tail_silence(app, state) -> None:
 
         try:
             text = app._process_chunk_safe(flush_audio)
-        except Exception:  # noqa: BLE001
+        except Exception:
             app._recover_asr_after_failure("ASR tail flush failed")
             break
 

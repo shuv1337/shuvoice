@@ -33,22 +33,22 @@ def on_recording_start(app) -> None:
             return
 
     with app._asr_lock:
-        if app._asr_disabled:
+        if app._asr_disabled_event.is_set():
             log.warning("ASR disabled; attempting one-shot reset on recording start")
             try:
                 app.asr.reset()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("ASR recovery reset failed; still disabled")
                 app._show_overlay_error("⚠ ASR error — restart ShuVoice")
                 return
-            app._asr_disabled = False
+            app._asr_disabled_event.clear()
             app._consecutive_asr_failures = 0
 
         app.audio.clear()
 
         try:
             app.asr.reset()
-        except Exception:  # noqa: BLE001
+        except Exception:
             app._consecutive_asr_failures += 1
             failures = app._consecutive_asr_failures
             log.exception(
@@ -88,6 +88,7 @@ def on_recording_stop(app) -> None:
 
     log.info("Recording stopped")
     app._recording.clear()
+    app._processing_done.clear()
     app._processing.set()
     app._last_stop_monotonic = time.monotonic()
     metrics = getattr(app, "metrics", None)
@@ -109,7 +110,7 @@ def on_recording_toggle(app) -> None:
 
 
 def recording_status(app) -> str:
-    if app._asr_disabled:
+    if app._asr_disabled_event.is_set():
         return "error:asr_disabled"
     if not app._asr_thread_alive:
         return "error:asr_thread_dead"

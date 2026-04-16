@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import queue
 
@@ -120,17 +121,13 @@ class AudioCapture:
             self.queue.put_nowait(audio)
         except queue.Full:
             self._dropped_chunks += 1
-            try:
+            with contextlib.suppress(queue.Empty):
                 self.queue.get_nowait()
-            except queue.Empty:
-                pass
 
-            try:
+            with contextlib.suppress(queue.Full):
                 self.queue.put_nowait(audio)
-            except queue.Full:
-                pass
 
-            if self._dropped_chunks % 50 == 1:
+            if self._dropped_chunks == 1 or self._dropped_chunks % 50 == 0:
                 log.warning(
                     "Audio queue overflow: dropped %d chunks (queue size=%d)",
                     self._dropped_chunks,
@@ -160,7 +157,7 @@ class AudioCapture:
                 self._resolved_device if self._resolved_device is not None else "default",
                 self.input_gain,
             )
-        except sd.PortAudioError:
+        except sd.PortAudioError as exc:
             log.warning(
                 "Failed at %d Hz, falling back to %d Hz",
                 self.sample_rate,
@@ -170,7 +167,7 @@ class AudioCapture:
                 raise RuntimeError(
                     "fallback_sample_rate must be an integer multiple of sample_rate "
                     f"(got {self.fallback_sample_rate} and {self.sample_rate})"
-                )
+                ) from exc
 
             self._resampling = True
             self._resample_ratio = self.fallback_sample_rate // self.sample_rate

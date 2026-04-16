@@ -80,7 +80,7 @@ def _query_runtime_state(config: Config, service: str) -> tuple[str, str | None,
     try:
         state = _query_control_state(config)
         return state, None, None
-    except Exception as e:  # noqa: BLE001 - surfaced in Waybar tooltip
+    except Exception as e:
         control_error = str(e)
 
     service_state = _service_active_state(service)
@@ -171,7 +171,7 @@ def _prompt_menu_choice(prompt: str, options: list[str]) -> str | None:
 def _toggle_debug_overlay(config: Config, service: str) -> None:
     try:
         from ..cli.commands.config import config_set
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         raise RuntimeError(f"failed to load config writer: {e}") from e
 
     new_value = "false" if config.overlay_debug_mode else "true"
@@ -230,10 +230,10 @@ def _ensure_service_running(service: str):
 def _action_toggle_record(config: Config, service: str):
     try:
         state = _query_control_state(config, timeout=0.5)
-    except Exception:
+    except Exception as exc:
         _ensure_service_running(service)
         if not _wait_for_control_socket(config):
-            raise RuntimeError("control socket not ready after starting service")
+            raise RuntimeError("control socket not ready after starting service") from exc
         send_control_command("start", config.control_socket, timeout=1.0)
         return
 
@@ -252,7 +252,7 @@ def _launch_wizard_detached():
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-    except Exception as e:  # noqa: BLE001 - surfaced in Waybar tooltip
+    except Exception as e:
         raise RuntimeError(f"failed to launch wizard: {e}") from e
 
 

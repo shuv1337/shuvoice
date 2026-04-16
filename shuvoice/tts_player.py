@@ -123,7 +123,7 @@ class TTSPlayer:
 
         try:
             callback(state, dict(info))
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.debug("TTS state callback failed", exc_info=True)
 
     def _current_generation(self) -> int:
@@ -216,13 +216,20 @@ class TTSPlayer:
                         request_playback_speed=request.playback_speed,
                     )
 
+                put_timeout = 0.1
+                put_attempts = 0
+                max_put_attempts = 20
                 while not self._cancel_event.is_set():
                     try:
-                        self._queue.put(chunk, timeout=0.1)
+                        self._queue.put(chunk, timeout=put_timeout)
                         break
                     except Full:
-                        continue
-        except Exception as exc:  # noqa: BLE001
+                        put_attempts += 1
+                        if put_attempts >= max_put_attempts:
+                            log.warning("TTS synthesis queue full after %d attempts; dropping chunk", put_attempts)
+                            break
+                        put_timeout = min(1.0, put_timeout * 2)
+        except Exception as exc:
             if self._cancel_event.is_set() or not self._is_generation_current(generation):
                 pass
             else:
@@ -235,13 +242,20 @@ class TTSPlayer:
                     speed_apply_failure=isinstance(exc, TTSSpeedApplyError),
                 )
         finally:
+            sentinel_timeout = 0.1
+            sentinel_attempts = 0
             while self._is_generation_current(generation):
                 try:
-                    self._queue.put(None, timeout=0.1)
+                    self._queue.put(None, timeout=sentinel_timeout)
                     break
                 except Full:
                     if self._cancel_event.is_set():
                         break
+                    sentinel_attempts += 1
+                    if sentinel_attempts >= 10:
+                        log.warning("TTS synthesis could not enqueue sentinel after %d attempts", sentinel_attempts)
+                        break
+                    sentinel_timeout = min(1.0, sentinel_timeout * 2)
 
     def _ensure_stream(self) -> sd.OutputStream:
         with self._lock:
@@ -271,12 +285,12 @@ class TTSPlayer:
 
         try:
             stream.abort()
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception:
+            log.debug("TTS stream abort failed", exc_info=True)
         try:
             stream.close()
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception:
+            log.debug("TTS stream close failed", exc_info=True)
 
     @staticmethod
     def _chunk_to_samples(raw_chunk: bytes, carry: bytes) -> tuple[np.ndarray, bytes]:
@@ -349,7 +363,7 @@ class TTSPlayer:
                 playback_duration_sec=duration,
                 request_playback_speed=request.playback_speed,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if self._cancel_event.is_set() or not self._is_generation_current(generation):
                 return
             self._clear_active_request(generation)
@@ -410,6 +424,10 @@ class TTSPlayer:
         for worker in (synth_thread, play_thread):
             if worker and worker.is_alive():
                 worker.join(timeout=1.0)
+                if worker.is_alive():
+                    log.warning(
+                        "TTS worker %r did not exit within timeout", worker.name
+                    )
 
         self._close_stream()
 

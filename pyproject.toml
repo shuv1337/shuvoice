@@ -93,7 +93,17 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "I"]
+select = ["E4", "E7", "E9", "F", "I", "B", "SIM", "UP", "RUF"]
+ignore = [
+    "B028",    # stacklevel in warnings.warn
+    "SIM108",  # ternary operator — readability preference
+    "UP007",   # X | Y union syntax — keep Optional for clarity
+    "RUF001",  # ambiguous unicode in strings — intentional UI text
+    "RUF002",  # ambiguous unicode in docstrings — cosmetic
+    "RUF003",  # ambiguous unicode in comments — cosmetic
+    "RUF012",  # mutable class defaults — GTK patterns require this
+    "SIM102",  # collapsible nested if — readability preference
+]
 
 [tool.ruff.lint.per-file-ignores]
 "shuvoice/app.py" = ["E402"]

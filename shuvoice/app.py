@@ -94,6 +94,7 @@ class ShuVoiceApp(Gtk.Application):
             clipboard_settle_delay_ms=config.typing_clipboard_settle_delay_ms,
             retry_attempts=config.typing_retry_attempts,
             retry_delay_ms=config.typing_retry_delay_ms,
+            subprocess_timeout=getattr(config, "typing_subprocess_timeout", 5.0),
         )
         self.metrics = MetricsCollector()
         self._recent_logs = RecentLogBuffer()
@@ -126,7 +127,7 @@ class ShuVoiceApp(Gtk.Application):
                 if backend_errors:
                     for error in backend_errors:
                         log.warning("TTS dependency warning: %s", error)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("Failed to initialize TTS subsystem")
                 self.tts_backend = None
                 self.tts_player = None
@@ -152,14 +153,19 @@ class ShuVoiceApp(Gtk.Application):
 
         self._recording = threading.Event()
         self._processing = threading.Event()
+        self._processing_done = threading.Event()
+        self._processing_done.set()
         self._running = threading.Event()
         self._running.set()
 
         self._asr_lock = threading.Lock()
         self._asr_thread_alive = True
+        self._daemon_threads: list[threading.Thread] = []
 
         self._consecutive_asr_failures = 0
-        self._asr_disabled = False
+        self._asr_disabled_event = threading.Event()
+        self._asr_circuit_open_monotonic: float | None = None
+        self._ASR_CIRCUIT_COOLDOWN_SEC = 30.0
         self._model_load_failed = False
         self._splash_started_monotonic: float | None = None
 
@@ -207,7 +213,9 @@ class ShuVoiceApp(Gtk.Application):
 
         self._splash_started_monotonic = time.monotonic()
         self._splash = SplashOverlay(self)
-        threading.Thread(target=self._load_model_async, name="model-loader", daemon=True).start()
+        t = threading.Thread(target=self._load_model_async, name="model-loader", daemon=True)
+        self._daemon_threads.append(t)
+        t.start()
 
     @staticmethod
     def _remaining_splash_ms(
@@ -325,12 +333,16 @@ class ShuVoiceApp(Gtk.Application):
                 initial_speed=self._tts_playback_speed,
                 speed_capabilities=self._tts_speed_capabilities(),
             )
-            threading.Thread(target=self._load_tts_voices, name="tts-voices", daemon=True).start()
+            t = threading.Thread(target=self._load_tts_voices, name="tts-voices", daemon=True)
+            self._daemon_threads.append(t)
+            t.start()
 
         self.audio.start()
         self.control.start()
 
-        threading.Thread(target=self._asr_worker, name="asr", daemon=True).start()
+        t = threading.Thread(target=self._asr_worker, name="asr", daemon=True)
+        self._daemon_threads.append(t)
+        t.start()
 
         log.info("Ready — use Hyprland bind/bindr with `shuvoice control start|stop`")
         log.info("Control socket: %s", self.control.socket_path)
@@ -348,10 +360,21 @@ class ShuVoiceApp(Gtk.Application):
 
         self.control.stop()
         self.audio.stop()
+
+        for worker in self._daemon_threads:
+            if worker.is_alive():
+                worker.join(timeout=2.0)
+                if worker.is_alive():
+                    log.warning(
+                        "Daemon thread %r did not exit within timeout (alive=%s)",
+                        worker.name,
+                        worker.is_alive(),
+                    )
+
         try:
             logging.getLogger().removeHandler(self._recent_logs)
         except Exception:
-            pass
+            log.debug("Failed to remove log handler during shutdown", exc_info=True)
         Gtk.Application.do_shutdown(self)
 
     def _on_sigint(self):
@@ -369,19 +392,45 @@ class ShuVoiceApp(Gtk.Application):
         self.overlay.set_text(text)
 
     def _disable_asr(self, reason: str):
-        self._asr_disabled = True
+        self._asr_disabled_event.set()
+        self._asr_circuit_open_monotonic = time.monotonic()
         self._recording.clear()
         self._processing.clear()
         log.critical(reason)
-        self._show_overlay_error("⚠ ASR error — restart ShuVoice")
+        self._show_overlay_error("⚠ ASR error — will retry in 30s")
+
+    def _try_asr_circuit_recovery(self) -> bool:
+        """Attempt half-open circuit breaker recovery after cooldown."""
+        if not self._asr_disabled_event.is_set():
+            return False
+        open_at = self._asr_circuit_open_monotonic
+        if open_at is None:
+            return False
+        if time.monotonic() - open_at < self._ASR_CIRCUIT_COOLDOWN_SEC:
+            return False
+
+        log.info("ASR circuit breaker cooldown elapsed; attempting recovery")
+        with self._asr_lock:
+            try:
+                self.asr.reset()
+            except Exception:
+                log.exception("ASR circuit breaker recovery reset failed")
+                self._asr_circuit_open_monotonic = time.monotonic()
+                return False
+
+            self._consecutive_asr_failures = 0
+            self._asr_disabled_event.clear()
+            self._asr_circuit_open_monotonic = None
+            log.info("ASR circuit breaker closed — normal operation resumed")
+            if self.overlay:
+                GLib.idle_add(self.overlay.hide)
+            return True
 
     def _recover_asr_after_failure(self, context: str):
-        if self._asr_disabled:
+        if self._asr_disabled_event.is_set():
             return
 
         with self._asr_lock:
-            if self._asr_disabled:
-                return
             try:
                 self.asr.reset()
                 metrics = getattr(self, "metrics", None)
@@ -409,12 +458,10 @@ class ShuVoiceApp(Gtk.Application):
 
     def _process_chunk_safe(self, audio_data: np.ndarray) -> str:
         """Serialize access to mutable ASR streaming state."""
-        if self._asr_disabled:
+        if self._asr_disabled_event.is_set():
             return ""
 
         with self._asr_lock:
-            if self._asr_disabled:
-                return ""
 
             try:
                 text = self.asr.process_chunk(audio_data)
@@ -441,12 +488,10 @@ class ShuVoiceApp(Gtk.Application):
 
     def _process_utterance_safe(self, audio_data: np.ndarray) -> str:
         """Serialize access to one-shot ASR utterance decoding state."""
-        if self._asr_disabled:
+        if self._asr_disabled_event.is_set():
             return ""
 
         with self._asr_lock:
-            if self._asr_disabled:
-                return ""
 
             try:
                 process_utterance = getattr(self.asr, "process_utterance", None)
@@ -522,7 +567,7 @@ class ShuVoiceApp(Gtk.Application):
                 "overlay_debug_mode": bool(getattr(self.config, "overlay_debug_mode", False)),
                 "recording": self._recording.is_set(),
                 "processing": self._processing.is_set(),
-                "asr_disabled": bool(self._asr_disabled),
+                "asr_disabled": bool(self._asr_disabled_event.is_set()),
                 "asr_thread_alive": bool(self._asr_thread_alive),
                 "model_load_failed": bool(self._model_load_failed),
                 "control_socket": str(self.control.socket_path),
@@ -560,7 +605,7 @@ class ShuVoiceApp(Gtk.Application):
         lines = [
             (
                 f"state rec={int(self._recording.is_set())} proc={int(self._processing.is_set())} "
-                f"asr_disabled={int(self._asr_disabled)} thread_alive={int(self._asr_thread_alive)}"
+                f"asr_disabled={int(self._asr_disabled_event.is_set())} thread_alive={int(self._asr_thread_alive)}"
             ),
             (
                 f"audio q={self.audio.queue.qsize()}/{getattr(self.audio.queue, 'maxsize', 0)} "
@@ -583,10 +628,10 @@ class ShuVoiceApp(Gtk.Application):
 
         if state is not None:
             lines.append(
-                (
+                
                     f"utt buf={state.total} speech_samples={state.speech_samples} peak={state.peak_rms:.4f} "
                     f"gain={state.utterance_gain:.2f} unchanged={state.unchanged_steps}"
-                )
+                
             )
 
         if self._debug_current_transcript:
@@ -678,10 +723,9 @@ class ShuVoiceApp(Gtk.Application):
         if not self._processing.is_set():
             return True
 
-        deadline = time.monotonic() + max(0.0, timeout_sec)
-        while self._processing.is_set() and time.monotonic() < deadline:
-            time.sleep(0.02)
-
+        # Wait for the ASR thread to signal processing is done, rather than
+        # busy-polling with time.sleep(0.02).
+        self._processing_done.wait(timeout=max(0.0, timeout_sec))
         return not self._processing.is_set()
 
     def _tts_speak_selection(self) -> None:
@@ -695,11 +739,15 @@ class ShuVoiceApp(Gtk.Application):
             raise RuntimeError("Timed out waiting for STT processing to finish")
 
         text = capture_selection()
-        text_len = len(text)
-        if text_len > int(self.config.tts_max_chars):
-            raise ValueError(
-                f"Selected text exceeds tts_max_chars ({text_len} > {self.config.tts_max_chars})"
+        max_chars = int(self.config.tts_max_chars)
+        original_len = len(text)
+        if original_len > max_chars:
+            log.warning(
+                "Selected text truncated from %d to %d chars (tts_max_chars limit)",
+                original_len,
+                max_chars,
             )
+            text = text[:max_chars]
 
         assert self.tts_player is not None
 
@@ -715,7 +763,7 @@ class ShuVoiceApp(Gtk.Application):
             self.config.tts_backend,
             self._tts_voice_id,
             getattr(self, "_tts_playback_speed", 1.0),
-            text_len,
+            len(text),
         )
 
         if self.tts_overlay is not None:
@@ -801,8 +849,13 @@ class ShuVoiceApp(Gtk.Application):
 
         try:
             voices = self.tts_backend.list_voices()
-        except Exception as exc:  # noqa: BLE001
-            log.warning("TTS voice list unavailable: %s", type(exc).__name__)
+        except Exception as exc:
+            log.warning("TTS voice list unavailable: %s", type(exc).__name__, exc_info=True)
+            if self.tts_overlay is not None:
+                self.tts_overlay.set_state(
+                    "error",
+                    error_message="Could not load voices — check network/API key",
+                )
             return
 
         if not voices:
@@ -864,7 +917,7 @@ class ShuVoiceApp(Gtk.Application):
             if self.tts_overlay is not None:
                 self.tts_overlay.set_state("error", error_message=str(exc))
             return f"ERROR {exc}"
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if self.tts_overlay is not None:
                 self.tts_overlay.set_state("error", error_message=str(exc))
             return f"ERROR {exc}"
@@ -987,7 +1040,7 @@ class ShuVoiceApp(Gtk.Application):
             metrics.observe_final_commit()
 
     def _decode_offline_utterance(self, state: _UtteranceState):
-        if state.total <= 0 or self._asr_disabled:
+        if state.total <= 0 or self._asr_disabled_event.is_set():
             return
 
         audio_data = state.buffer[0] if len(state.buffer) == 1 else np.concatenate(state.buffer)
@@ -1043,12 +1096,12 @@ class ShuVoiceApp(Gtk.Application):
             self.typer.reset()
             return
 
-        while state.total >= self.asr.native_chunk_samples and not self._asr_disabled:
+        while state.total >= self.asr.native_chunk_samples and not self._asr_disabled_event.is_set():
             has_more = self._transcribe_native_chunk(state, "ASR buffered final chunk failed")
             if not has_more:
                 break
 
-        if state.total > 0 and not self._asr_disabled:
+        if state.total > 0 and not self._asr_disabled_event.is_set():
             audio_data = state.buffer[0] if len(state.buffer) == 1 else np.concatenate(state.buffer)
             padded = np.zeros(self.asr.native_chunk_samples, dtype=np.float32)
             padded[: len(audio_data)] = audio_data
@@ -1090,6 +1143,10 @@ class ShuVoiceApp(Gtk.Application):
         was_recording = False
 
         while self._running.is_set():
+            # Periodically attempt circuit breaker recovery when ASR is disabled.
+            if self._asr_disabled_event.is_set():
+                self._try_asr_circuit_recovery()
+
             chunk = self.audio.get_chunk(timeout=0.05)
             is_recording = self._recording.is_set()
             self._update_debug_overlay(state)
@@ -1103,7 +1160,7 @@ class ShuVoiceApp(Gtk.Application):
                 else:
                     self._update_noise_floor(audio_rms(chunk))
 
-            if is_recording and not self._asr_disabled and not self._is_offline_instant_mode:
+            if is_recording and not self._asr_disabled_event.is_set() and not self._is_offline_instant_mode:
                 self._process_recording_chunks(state)
 
             if was_recording and not is_recording:
@@ -1111,6 +1168,7 @@ class ShuVoiceApp(Gtk.Application):
                     self._handle_recording_stop(state)
                 finally:
                     self._processing.clear()
+                    self._processing_done.set()
 
             self._log_metrics_if_due()
             was_recording = is_recording

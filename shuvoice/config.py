@@ -5,14 +5,20 @@ from __future__ import annotations
 import logging
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from .tts_base import DEFAULT_LOCAL_TTS_MODEL_ID, DEFAULT_LOCAL_TTS_VOICE_ID
 from .tts_speed import TTS_PLAYBACK_SPEED_DEFAULT, validate_tts_playback_speed
 
 log = logging.getLogger(__name__)
+
+# Defense-in-depth: reject config IDs that contain characters outside a safe
+# set.  Subprocess calls already use list-form (no shell=True), but validating
+# early catches mistakes before they reach external processes.
+_SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9_\-\./:@]+$")
 
 CURRENT_CONFIG_VERSION = 1
 """Current config schema version.
@@ -101,6 +107,7 @@ CONFIG_SECTION_FIELDS: dict[str, tuple[str, ...]] = {
         "typing_clipboard_settle_delay_ms",
         "typing_retry_attempts",
         "typing_retry_delay_ms",
+        "typing_subprocess_timeout",
         "auto_capitalize",
         "text_replacements",
     ),
@@ -281,6 +288,7 @@ class Config:
     typing_clipboard_settle_delay_ms: int = 40
     typing_retry_attempts: int = 2
     typing_retry_delay_ms: int = 40
+    typing_subprocess_timeout: float = 5.0
     auto_capitalize: bool = True
     text_replacements: dict[str, str] = field(default_factory=_default_text_replacements)
 
@@ -514,6 +522,14 @@ class Config:
         self.tts_model_id = str(self.tts_model_id).strip()
         if not self.tts_model_id:
             raise ValueError("tts_model_id must not be empty")
+        if not _SAFE_ID_RE.fullmatch(self.tts_model_id):
+            raise ValueError(
+                f"tts_model_id contains invalid characters: {self.tts_model_id!r}"
+            )
+        if not _SAFE_ID_RE.fullmatch(self.tts_default_voice_id):
+            raise ValueError(
+                f"tts_default_voice_id contains invalid characters: {self.tts_default_voice_id!r}"
+            )
 
         self.tts_api_key_env = str(self.tts_api_key_env).strip()
         if not self.tts_api_key_env:
@@ -597,6 +613,9 @@ class Config:
             raise ValueError("typing_retry_attempts must be >= 0")
         if int(self.typing_retry_delay_ms) < 0:
             raise ValueError("typing_retry_delay_ms must be >= 0")
+        if float(self.typing_subprocess_timeout) < 1.0:
+            raise ValueError("typing_subprocess_timeout must be >= 1.0")
+        self.typing_subprocess_timeout = float(self.typing_subprocess_timeout)
 
         # Normalize text_replacements: strip whitespace and validate string types.
         # Built-in brand corrections are always included; user config can add
@@ -650,10 +669,18 @@ class Config:
         Returns:
             The resolved decode mode ("streaming" or "offline_instant") if
             asr_backend is "sherpa", otherwise None.
+
+        The result is cached on first access since the underlying config
+        values don't change after initialization.
         """
+        cached = getattr(self, "_resolved_sherpa_decode_mode", None)
+        if cached is not None:
+            return cached
         if self.asr_backend != "sherpa":
             return None
-        return self._resolve_sherpa_decode_mode()
+        result = self._resolve_sherpa_decode_mode()
+        self._resolved_sherpa_decode_mode = result
+        return result
 
     def _apply_instant_mode_profile(self) -> None:
         """Apply low-latency backend tuning when ``instant_mode`` is enabled."""
@@ -756,7 +783,7 @@ class Config:
         return flat
 
     @classmethod
-    def load(cls) -> "Config":
+    def load(cls) -> Config:
         from .config_io import load_raw, write_atomic
         from .config_migrations import migrate_to_latest
 
@@ -815,7 +842,7 @@ class Config:
                         "Migrated legacy use_clipboard_for_final to typing_final_injection_mode=%s",
                         flat.get("typing_final_injection_mode"),
                     )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.warning("Failed to persist migrated config file", exc_info=True)
 
         return cfg

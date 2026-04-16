@@ -6,6 +6,7 @@ import json
 import logging
 import struct
 import subprocess
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -146,7 +147,25 @@ class MeloTTSBackend(TTSBackend):
         assert proc.stdin is not None
         assert proc.stdout is not None
 
-        stderr_bytes = b""
+        # Drain stderr in a background thread to prevent pipe buffer deadlock.
+        # MeloTTS can emit PyTorch/CUDA progress output that fills the 64KB
+        # OS pipe buffer while we block reading stdout.
+        stderr_chunks: list[bytes] = []
+
+        def _drain_stderr():
+            try:
+                if proc.stderr:
+                    while True:
+                        data = proc.stderr.read(4096)
+                        if not data:
+                            break
+                        stderr_chunks.append(data)
+            except Exception:
+                pass
+
+        stderr_thread = threading.Thread(target=_drain_stderr, name="melotts-stderr", daemon=True)
+        stderr_thread.start()
+
         try:
             # Send the JSON request followed by a newline, then close stdin
             # so the helper knows there are no more requests.
@@ -184,8 +203,7 @@ class MeloTTSBackend(TTSBackend):
                     bytes_remaining -= len(chunk)
                     yield chunk
 
-            proc.stdout.close()
-            stderr_bytes = proc.stderr.read() if proc.stderr else b""
+            stderr_thread.join(timeout=2.0)
             proc.wait(timeout=timeout)
 
         except subprocess.TimeoutExpired as exc:
@@ -198,9 +216,16 @@ class MeloTTSBackend(TTSBackend):
             proc.kill()
             proc.wait()
             raise
+        finally:
+            for handle in (proc.stdin, proc.stdout, proc.stderr):
+                try:
+                    if handle and not handle.closed:
+                        handle.close()
+                except Exception:
+                    pass
 
         if proc.returncode not in (0, None):
-            stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
+            stderr_text = b"".join(stderr_chunks).decode("utf-8", errors="replace").strip()
             if stderr_text:
                 raise RuntimeError(f"MeloTTS synthesis failed: {stderr_text}")
             raise RuntimeError(f"MeloTTS synthesis failed with exit code {proc.returncode}")

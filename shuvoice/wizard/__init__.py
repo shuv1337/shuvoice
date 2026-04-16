@@ -75,14 +75,14 @@ def _display_managed_piper_model_path() -> str:
 
 # Re-export for __main__.py and backward compatibility.
 __all__ = [
+    "LayerShell",
     "WelcomeWizard",
+    "auto_add_hyprland_keybind",
+    "format_hyprland_bind",
+    "format_hyprland_bind_for_keybind",
     "needs_wizard",
     "write_config",
     "write_marker",
-    "format_hyprland_bind",
-    "format_hyprland_bind_for_keybind",
-    "auto_add_hyprland_keybind",
-    "LayerShell",
 ]
 
 
@@ -1425,7 +1425,7 @@ class WelcomeWizard(Gtk.Application):
                     tts_local_model_path=self._effective_tts_local_model_path() or None,
                     tts_local_voice=resolved_local_voice,
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("Wizard fallback to Zipformer streaming profile failed")
             else:
                 self._sherpa_model_name = DEFAULT_SHERPA_MODEL_NAME
@@ -1449,7 +1449,7 @@ class WelcomeWizard(Gtk.Application):
         self._set_cancel_download_visible(False)
         self._set_download_note_visible(False)
         if model_status == "cancelled":
-            self._apply_download_progress(0.0, "Model download cancelled")
+            self._apply_download_progress(0.0, "Download cancelled — go Back to retry")
         else:
             self._apply_download_progress(1.0, "Model setup finished")
 

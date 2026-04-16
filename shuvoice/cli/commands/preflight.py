@@ -6,8 +6,8 @@ import importlib
 import os
 import shutil
 import sys
+from collections.abc import Callable
 from ctypes import CDLL
-from typing import Callable
 
 from ...asr import get_backend_class
 from ...config import Config
@@ -33,7 +33,7 @@ def run_preflight(config: Config) -> bool:
         try:
             detail = fn()
             checks.append((name, True, detail))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             checks.append((name, False, str(exc)))
 
     def get_tts_backend_instance():
