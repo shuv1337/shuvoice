@@ -191,8 +191,27 @@ class KokoroTTSBackend(TTSBackend):
         except json.JSONDecodeError as exc:
             raise RuntimeError("Invalid Kokoro voice list response") from exc
 
+        raw_voices = payload.get("voices", [])
+        if not isinstance(raw_voices, list):
+            raw_voices = []
+
         voices: list[VoiceInfo] = []
-        for raw in payload.get("voices", []):
+        for raw in raw_voices:
+            # Kokoro-FastAPI returns voices as plain strings (e.g. "af_heart").
+            # Some forks/proxies may return dicts with id/name/description fields.
+            # Support both shapes defensively.
+            if isinstance(raw, str):
+                voice_identifier = raw.strip()
+                if not voice_identifier:
+                    continue
+                voices.append(
+                    VoiceInfo(id=voice_identifier, name=voice_identifier, description="")
+                )
+                continue
+
+            if not isinstance(raw, dict):
+                continue
+
             voice_identifier = str(raw.get("id", "")).strip()
             if not voice_identifier:
                 continue

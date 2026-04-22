@@ -189,6 +189,24 @@ def test_list_voices_cache_expires(monkeypatch):
     assert call_count == 2
 
 
+def test_list_voices_accepts_string_list_from_kokoro_fastapi(monkeypatch):
+    """Kokoro-FastAPI returns voices as a list of plain strings."""
+    cfg = Config(tts_backend="kokoro")
+    backend = KokoroTTSBackend(cfg)
+
+    voice_data = {"voices": ["af_heart", "am_onyx", "bf_emma"]}
+
+    def fake_urlopen(request, timeout=0):
+        return _ChunkResponse([json.dumps(voice_data).encode("utf-8")])
+
+    monkeypatch.setattr("shuvoice.tts_kokoro.urllib.request.urlopen", fake_urlopen)
+
+    voices = backend.list_voices()
+    assert [v.id for v in voices] == ["af_heart", "am_onyx", "bf_emma"]
+    assert voices[0].name == "af_heart"
+    assert voices[0].description == ""
+
+
 def test_list_voices_skips_empty_ids(monkeypatch):
     cfg = Config(tts_backend="kokoro")
     backend = KokoroTTSBackend(cfg)
