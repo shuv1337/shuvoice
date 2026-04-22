@@ -18,6 +18,7 @@ def summary_text(
     tts_backend: str = "elevenlabs",
     tts_default_voice_id: str | None = None,
     tts_local_model_path: str | None = None,
+    tts_kokoro_base_url: str | None = None,
 ) -> str:
     return format_summary(
         asr_backend,
@@ -31,4 +32,5 @@ def summary_text(
         tts_backend=tts_backend,
         tts_default_voice_id=tts_default_voice_id,
         tts_local_model_path=tts_local_model_path,
+        tts_kokoro_base_url=tts_kokoro_base_url,
     )

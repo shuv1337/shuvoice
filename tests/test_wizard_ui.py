@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -68,12 +69,32 @@ def test_starting_model_setup_status_text_includes_cuda_hint_for_sherpa():
 def test_wizard_defaults_to_parakeet_instant_profile():
     from shuvoice.wizard import WelcomeWizard
 
-    wizard = WelcomeWizard()
+    with patch("shuvoice.wizard._detect_cuda", return_value=False):
+        wizard = WelcomeWizard()
     assert wizard._sherpa_model_name == "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
     assert wizard._sherpa_enable_parakeet_streaming is False
     assert wizard._sherpa_provider == "cpu"
     assert wizard._tts_backend == "elevenlabs"
     assert wizard._tts_voice_id == "zNsotODqUhvbJ5wMG7Ei"
+
+
+def test_wizard_defaults_sherpa_to_cuda_when_available():
+    from shuvoice.wizard import WelcomeWizard
+
+    with patch("shuvoice.wizard._detect_cuda", return_value=True):
+        wizard = WelcomeWizard()
+
+    assert wizard._sherpa_provider == "cuda"
+
+
+def test_sherpa_cuda_description_mentions_auto_selected_when_cuda_available():
+    from shuvoice.wizard import WelcomeWizard
+
+    with patch("shuvoice.wizard._detect_cuda", return_value=True):
+        wizard = WelcomeWizard()
+        wizard._build_asr_page()
+
+    assert "selected by default" in wizard._sherpa_provider_desc_label.get_text().lower()
 
 
 def test_make_dropdown_section_updates_state_and_description():
@@ -207,6 +228,127 @@ def test_tts_provider_dropdown_updates_voice_entry_for_openai():
     assert wizard._tts_voice_entry.get_text() == "onyx"
 
 
+def test_kokoro_controls_appear_when_kokoro_selected():
+    from shuvoice.wizard import WelcomeWizard
+    from shuvoice.wizard_state import TTS_BACKENDS
+
+    wizard = WelcomeWizard()
+    wizard._build_tts_page()
+
+    kokoro_idx = next(i for i, (bid, _, _) in enumerate(TTS_BACKENDS) if bid == "kokoro")
+    wizard._tts_provider_dropdown.set_selected(kokoro_idx)
+
+    assert wizard._tts_backend == "kokoro"
+    assert wizard._tts_kokoro_base_url_entry.get_visible() is True
+    assert wizard._tts_kokoro_base_url_entry.get_text() == "http://localhost:8880/v1"
+    assert wizard._tts_kokoro_voice_dropdown.get_visible() is True
+    assert wizard._tts_voice_entry.get_visible() is True
+    assert wizard._tts_voice_entry.get_text() == "af_heart"
+    assert wizard._tts_local_setup_mode_dropdown.get_visible() is False
+    assert wizard._tts_melotts_device_dropdown.get_visible() is False
+
+
+def test_kokoro_fetch_populates_voice_dropdown():
+    from shuvoice.wizard import WelcomeWizard
+    from shuvoice.wizard_state import TTS_BACKENDS
+
+    wizard = WelcomeWizard()
+    wizard._build_tts_page()
+    kokoro_idx = next(i for i, (bid, _, _) in enumerate(TTS_BACKENDS) if bid == "kokoro")
+    wizard._tts_provider_dropdown.set_selected(kokoro_idx)
+
+    voices = [
+        SimpleNamespace(id="af_heart", name="Heart", description="Warm default voice"),
+        SimpleNamespace(id="bf_emma", name="Emma", description="Bright and crisp"),
+    ]
+
+    wizard._finish_kokoro_voice_fetch("http://localhost:8880/v1", voices, None)
+
+    assert wizard._tts_kokoro_voice_dropdown.get_sensitive() is True
+    assert wizard._tts_kokoro_voice_dropdown.get_selected() == 0
+    assert wizard._tts_kokoro_voice_desc.get_text() == "Warm default voice"
+
+
+def test_kokoro_dropdown_selection_updates_voice_entry():
+    from shuvoice.wizard import WelcomeWizard
+    from shuvoice.wizard_state import TTS_BACKENDS
+
+    wizard = WelcomeWizard()
+    wizard._build_tts_page()
+    kokoro_idx = next(i for i, (bid, _, _) in enumerate(TTS_BACKENDS) if bid == "kokoro")
+    wizard._tts_provider_dropdown.set_selected(kokoro_idx)
+
+    voices = [
+        SimpleNamespace(id="af_heart", name="Heart", description="Warm default voice"),
+        SimpleNamespace(id="bf_emma", name="Emma", description="Bright and crisp"),
+    ]
+    wizard._finish_kokoro_voice_fetch("http://localhost:8880/v1", voices, None)
+
+    wizard._tts_kokoro_voice_dropdown.set_selected(1)
+
+    assert wizard._tts_voice_id == "bf_emma"
+    assert wizard._tts_voice_entry.get_text() == "bf_emma"
+    assert wizard._tts_kokoro_voice_desc.get_text() == "Bright and crisp"
+
+
+def test_kokoro_preview_button_starts_preview_with_current_voice(monkeypatch):
+    from shuvoice.wizard import WelcomeWizard
+    from shuvoice.wizard_state import TTS_BACKENDS
+
+    class _FakeBackend:
+        def __init__(self, config):
+            self.config = config
+
+        def sample_rate_hz(self):
+            return 24000
+
+    captured = {}
+
+    class _FakePlayer:
+        def __init__(self, backend, **kwargs):
+            captured["backend"] = backend
+            captured["kwargs"] = kwargs
+
+        def speak(self, text, voice_id, model_id):
+            captured["text"] = text
+            captured["voice_id"] = voice_id
+            captured["model_id"] = model_id
+            return False
+
+    monkeypatch.setattr("shuvoice.wizard.get_tts_backend_class", lambda _name: _FakeBackend)
+    monkeypatch.setattr("shuvoice.wizard.TTSPlayer", _FakePlayer)
+
+    wizard = WelcomeWizard()
+    wizard._build_tts_page()
+    kokoro_idx = next(i for i, (bid, _, _) in enumerate(TTS_BACKENDS) if bid == "kokoro")
+    wizard._tts_provider_dropdown.set_selected(kokoro_idx)
+    wizard._tts_voice_entry.set_text("bf_emma")
+
+    WelcomeWizard._on_tts_kokoro_preview_clicked(wizard, None)
+
+    assert captured["voice_id"] == "bf_emma"
+    assert captured["model_id"] == "kokoro"
+    assert "Kokoro voice preview" in captured["text"]
+    assert wizard._tts_kokoro_preview_button.get_label() == "Stop sample"
+
+
+def test_kokoro_preview_idle_state_restores_button_label():
+    from shuvoice.wizard import WelcomeWizard
+    from shuvoice.wizard_state import TTS_BACKENDS
+
+    wizard = WelcomeWizard()
+    wizard._build_tts_page()
+    kokoro_idx = next(i for i, (bid, _, _) in enumerate(TTS_BACKENDS) if bid == "kokoro")
+    wizard._tts_provider_dropdown.set_selected(kokoro_idx)
+    wizard._tts_kokoro_preview_player = object()
+
+    WelcomeWizard._handle_kokoro_preview_state_change(wizard, "idle", {})
+
+    assert wizard._tts_kokoro_preview_player is None
+    assert wizard._tts_kokoro_preview_button.get_label() == "Speak sample"
+    assert wizard._tts_kokoro_preview_status.get_text() == "Sample finished."
+
+
 def test_local_piper_controls_only_appear_on_tts_page_when_local_selected():
     from shuvoice.wizard import WelcomeWizard
 
@@ -237,6 +379,19 @@ def test_local_manual_mode_shows_path_entry():
     assert wizard._tts_local_model_path_entry.get_visible() is True
     assert wizard._tts_voice_entry.get_visible() is True
     assert wizard._tts_local_auto_voice_dropdown.get_visible() is False
+
+
+def test_kokoro_base_url_validation_blocks_invalid_url():
+    from shuvoice.wizard import WelcomeWizard
+    from shuvoice.wizard_state import TTS_BACKENDS
+
+    wizard = WelcomeWizard()
+    wizard._build_tts_page()
+    kokoro_idx = next(i for i, (bid, _, _) in enumerate(TTS_BACKENDS) if bid == "kokoro")
+    wizard._tts_provider_dropdown.set_selected(kokoro_idx)
+    wizard._tts_kokoro_base_url_entry.set_text("not-a-url")
+
+    assert wizard._validate_tts_selection_for_finish() is False
 
 
 def test_do_activate_registers_new_page_sequence():
@@ -590,3 +745,30 @@ def test_on_finish_passes_melotts_settings_to_write_config():
     assert call_kwargs[1]["tts_backend"] == "melotts"
     assert call_kwargs[1]["tts_default_voice_id"] == "EN-BR"
     assert call_kwargs[1]["tts_melotts_device"] == "cuda"
+
+
+def test_on_finish_passes_kokoro_settings_to_write_config():
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard.__new__(WelcomeWizard)
+    wizard._asr_backend = "moonshine"
+    wizard._keybind = "f9"
+    wizard._tts_backend = "kokoro"
+    wizard._tts_voice_id = "bf_emma"
+    wizard._tts_kokoro_base_url = "http://localhost:9999/v1"
+    wizard.completed = False
+    wizard._release_input_and_destroy_window = MagicMock()
+    wizard.quit = MagicMock()
+
+    with (
+        patch("shuvoice.wizard.write_config") as mock_write_config,
+        patch("shuvoice.wizard.maybe_download_model", return_value=("skipped", "noop")),
+        patch("shuvoice.wizard.write_marker"),
+    ):
+        WelcomeWizard._on_finish(wizard, None)
+
+    mock_write_config.assert_called_once()
+    call_kwargs = mock_write_config.call_args
+    assert call_kwargs[1]["tts_backend"] == "kokoro"
+    assert call_kwargs[1]["tts_default_voice_id"] == "bf_emma"
+    assert call_kwargs[1]["tts_kokoro_base_url"] == "http://localhost:9999/v1"

@@ -17,6 +17,7 @@ import logging
 import threading
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import urlparse
 
 import gi
 
@@ -26,7 +27,10 @@ gi.require_version("Gtk4LayerShell", "1.0")
 from gi.repository import GLib, Gtk
 from gi.repository import Gtk4LayerShell as LayerShell
 
+from ..config import DEFAULT_KOKORO_TTS_BASE_URL, Config
 from ..piper_setup import curated_piper_voices, managed_piper_model_dir, recommended_piper_voice
+from ..tts import get_tts_backend_class
+from ..tts_player import TTSPlayer
 from ..wizard_state import (
     ASR_BACKENDS,
     KEYBIND_PRESETS,
@@ -39,6 +43,7 @@ from ..wizard_state import (
     PARAKEET_TDT_V3_INT8_MODEL_NAME,
     TTS_BACKENDS,
     TYPING_TEXT_CASE_MODES,
+    _detect_cuda,
     default_tts_voice_for_backend,
 )
 from .actions import (
@@ -61,6 +66,7 @@ log = logging.getLogger(__name__)
 
 # Wizard UX default: stable Parakeet instant profile.
 DEFAULT_WIZARD_SHERPA_MODEL_NAME = PARAKEET_TDT_V3_INT8_MODEL_NAME
+_KOKORO_PREVIEW_TEXT = "Hello from ShuVoice. This is a Kokoro voice preview."
 
 
 def _display_managed_piper_model_path() -> str:
@@ -96,7 +102,7 @@ class WelcomeWizard(Gtk.Application):
         self._asr_backend = "sherpa"
         self._sherpa_model_name = DEFAULT_WIZARD_SHERPA_MODEL_NAME
         self._sherpa_enable_parakeet_streaming = False
-        self._sherpa_provider = "cpu"
+        self._sherpa_provider = "cuda" if _detect_cuda() else "cpu"
         self._typing_final_injection_mode = DEFAULT_FINAL_INJECTION_MODE
         self._typing_text_case = DEFAULT_TYPING_TEXT_CASE
         self._tts_backend = DEFAULT_TTS_BACKEND
@@ -105,10 +111,18 @@ class WelcomeWizard(Gtk.Application):
             "openai": default_tts_voice_for_backend("openai"),
             "local": default_tts_voice_for_backend("local"),
             "melotts": default_tts_voice_for_backend("melotts"),
+            "kokoro": default_tts_voice_for_backend("kokoro"),
         }
         self._tts_local_model_path = ""
         self._tts_local_setup_mode = "automatic"
         self._tts_melotts_device = "auto"
+        self._tts_kokoro_base_url = DEFAULT_KOKORO_TTS_BASE_URL
+        self._tts_kokoro_voice_options: list[tuple[str, str, str]] = []
+        self._tts_kokoro_loaded_base_url: str | None = None
+        self._tts_kokoro_fetch_in_progress = False
+        self._tts_kokoro_updating_dropdown = False
+        self._tts_kokoro_preview_player: TTSPlayer | None = None
+        self._tts_kokoro_preview_stop_requested = False
         self._tts_local_auto_voice_id = recommended_piper_voice().id
         self._tts_voice_id = self._tts_voice_by_backend[self._tts_backend]
         self._keybind = DEFAULT_KEYBIND_ID
@@ -339,6 +353,13 @@ class WelcomeWizard(Gtk.Application):
             title_margin_top=8,
         )
 
+        cuda_detected = str(getattr(self, "_sherpa_provider", "cpu")).strip().lower() == "cuda"
+        cuda_description = (
+            "Higher throughput when CUDA runtime is available. CUDA was detected on this system, "
+            "so GPU is selected by default. Wizard will attempt CUDA-capable Sherpa runtime install at finish."
+            if cuda_detected
+            else "Higher throughput when CUDA runtime is available. Wizard will attempt CUDA-capable Sherpa runtime install at finish."
+        )
         self._sherpa_provider_options = [
             (
                 "cpu",
@@ -348,7 +369,7 @@ class WelcomeWizard(Gtk.Application):
             (
                 "cuda",
                 "GPU (CUDA)",
-                "Higher throughput when CUDA runtime is available. Wizard will attempt CUDA-capable Sherpa runtime install at finish.",
+                cuda_description,
             ),
         ]
         (
@@ -547,6 +568,60 @@ class WelcomeWizard(Gtk.Application):
         self._tts_local_model_path_help.set_halign(Gtk.Align.START)
         self._tts_local_model_path_help.set_wrap(True)
         page.append(self._tts_local_model_path_help)
+
+        self._tts_kokoro_base_url_entry = Gtk.Entry()
+        self._tts_kokoro_base_url_entry.add_css_class("wizard-entry")
+        self._tts_kokoro_base_url_entry.set_halign(Gtk.Align.FILL)
+        self._tts_kokoro_base_url_entry.set_hexpand(True)
+        self._tts_kokoro_base_url_entry.connect("changed", self._on_tts_kokoro_base_url_changed)
+        page.append(self._tts_kokoro_base_url_entry)
+
+        self._tts_kokoro_base_url_help = Gtk.Label(label="")
+        self._tts_kokoro_base_url_help.add_css_class("wizard-radio-desc")
+        self._tts_kokoro_base_url_help.set_halign(Gtk.Align.START)
+        self._tts_kokoro_base_url_help.set_wrap(True)
+        page.append(self._tts_kokoro_base_url_help)
+
+        self._tts_kokoro_voice_title = Gtk.Label(label="Discovered voices")
+        self._tts_kokoro_voice_title.add_css_class("wizard-subtitle")
+        self._tts_kokoro_voice_title.set_halign(Gtk.Align.START)
+        self._tts_kokoro_voice_title.set_margin_top(8)
+        page.append(self._tts_kokoro_voice_title)
+
+        self._tts_kokoro_refresh_button = self._make_button("Fetch voices")
+        self._tts_kokoro_refresh_button.set_halign(Gtk.Align.START)
+        self._tts_kokoro_refresh_button.connect("clicked", self._on_fetch_kokoro_voices_clicked)
+        page.append(self._tts_kokoro_refresh_button)
+
+        self._tts_kokoro_voice_store = Gtk.StringList.new(["No voices fetched yet"])
+        self._tts_kokoro_voice_dropdown = Gtk.DropDown.new(self._tts_kokoro_voice_store, None)
+        self._tts_kokoro_voice_dropdown.add_css_class("wizard-dropdown")
+        self._tts_kokoro_voice_dropdown.set_halign(Gtk.Align.FILL)
+        self._tts_kokoro_voice_dropdown.set_hexpand(True)
+        self._tts_kokoro_voice_dropdown.set_sensitive(False)
+        self._tts_kokoro_voice_dropdown.connect(
+            "notify::selected", self._on_tts_kokoro_voice_dropdown_changed
+        )
+        page.append(self._tts_kokoro_voice_dropdown)
+
+        self._tts_kokoro_voice_desc = Gtk.Label(
+            label="Fetch the live voice list from your Kokoro instance."
+        )
+        self._tts_kokoro_voice_desc.add_css_class("wizard-radio-desc")
+        self._tts_kokoro_voice_desc.set_halign(Gtk.Align.START)
+        self._tts_kokoro_voice_desc.set_wrap(True)
+        page.append(self._tts_kokoro_voice_desc)
+
+        self._tts_kokoro_preview_button = self._make_button("Speak sample")
+        self._tts_kokoro_preview_button.set_halign(Gtk.Align.START)
+        self._tts_kokoro_preview_button.connect("clicked", self._on_tts_kokoro_preview_clicked)
+        page.append(self._tts_kokoro_preview_button)
+
+        self._tts_kokoro_preview_status = Gtk.Label(label="")
+        self._tts_kokoro_preview_status.add_css_class("wizard-radio-desc")
+        self._tts_kokoro_preview_status.set_halign(Gtk.Align.START)
+        self._tts_kokoro_preview_status.set_wrap(True)
+        page.append(self._tts_kokoro_preview_status)
 
         # MeloTTS-specific controls
         self._tts_melotts_device_options = [
@@ -803,6 +878,9 @@ class WelcomeWizard(Gtk.Application):
                 current_backend
             )
 
+        if current_backend == "kokoro" and backend_id != "kokoro":
+            self._stop_kokoro_preview()
+
         self._tts_backend = backend_id
         self._tts_voice_id = voice_by_backend.get(
             backend_id, default_tts_voice_for_backend(backend_id)
@@ -842,6 +920,288 @@ class WelcomeWizard(Gtk.Application):
         self._tts_local_model_path = entry.get_text().strip()
         self._set_tts_config_error(None)
 
+    def _on_tts_kokoro_base_url_changed(self, entry: Gtk.Entry):
+        self._tts_kokoro_base_url = entry.get_text().strip() or DEFAULT_KOKORO_TTS_BASE_URL
+        self._stop_kokoro_preview()
+        self._tts_kokoro_loaded_base_url = None
+        self._tts_kokoro_voice_options = []
+        self._set_kokoro_voice_dropdown_state(
+            [],
+            status_message="Fetch the live voice list from your Kokoro instance.",
+        )
+        self._set_tts_config_error(None)
+
+    def _on_fetch_kokoro_voices_clicked(self, _button: Gtk.Button) -> None:
+        self._start_kokoro_voice_fetch()
+
+    def _on_tts_kokoro_preview_clicked(self, _button: Gtk.Button) -> None:
+        if getattr(self, "_tts_kokoro_preview_player", None) is not None:
+            self._stop_kokoro_preview(status_message="Stopping sample…")
+            return
+        self._start_kokoro_preview()
+
+    def _on_tts_kokoro_voice_dropdown_changed(self, dropdown: Gtk.DropDown, _pspec) -> None:
+        if getattr(self, "_tts_kokoro_updating_dropdown", False):
+            return
+        if str(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)).strip().lower() != "kokoro":
+            return
+
+        options = getattr(self, "_tts_kokoro_voice_options", [])
+        idx = dropdown.get_selected()
+        if not (0 <= idx < len(options)):
+            return
+
+        voice_id, _label, desc = options[idx]
+        self._tts_voice_id = voice_id
+        voice_by_backend = getattr(self, "_tts_voice_by_backend", None)
+        if isinstance(voice_by_backend, dict):
+            voice_by_backend["kokoro"] = voice_id
+
+        desc_label = getattr(self, "_tts_kokoro_voice_desc", None)
+        if desc_label is not None:
+            desc_label.set_text(desc or "Select a Kokoro voice or enter one manually.")
+
+        entry = getattr(self, "_tts_voice_entry", None)
+        if entry is not None and entry.get_text() != voice_id:
+            entry.set_text(voice_id)
+
+    def _start_kokoro_voice_fetch(self) -> None:
+        if self._tts_kokoro_fetch_in_progress:
+            return
+
+        base_url = (
+            str(getattr(self, "_tts_kokoro_base_url", DEFAULT_KOKORO_TTS_BASE_URL)).strip()
+            or DEFAULT_KOKORO_TTS_BASE_URL
+        )
+        parsed = urlparse(base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            self._set_tts_config_error(
+                "Kokoro base URL must be a valid http(s) URL, for example http://localhost:8880/v1"
+            )
+            return
+
+        self._tts_kokoro_base_url = base_url.rstrip("/")
+        self._tts_kokoro_fetch_in_progress = True
+        refresh_btn = getattr(self, "_tts_kokoro_refresh_button", None)
+        if refresh_btn is not None:
+            refresh_btn.set_sensitive(False)
+            refresh_btn.set_label("Fetching voices…")
+
+        self._set_kokoro_voice_dropdown_state(
+            getattr(self, "_tts_kokoro_voice_options", []),
+            status_message="Contacting Kokoro and loading voice list…",
+            loading=True,
+        )
+
+        threading.Thread(
+            target=self._fetch_kokoro_voices_async,
+            args=(self._tts_kokoro_base_url,),
+            name="wizard-kokoro-voices",
+            daemon=True,
+        ).start()
+
+    def _fetch_kokoro_voices_async(self, base_url: str) -> None:
+        try:
+            cfg = Config(tts_backend="kokoro", tts_kokoro_base_url=base_url)
+            backend_cls = get_tts_backend_class("kokoro")
+            backend = backend_cls(cfg)
+            voices = backend.list_voices()
+        except Exception as exc:
+            GLib.idle_add(self._finish_kokoro_voice_fetch, base_url, None, str(exc))
+            return
+
+        GLib.idle_add(self._finish_kokoro_voice_fetch, base_url, voices, None)
+
+    def _start_kokoro_preview(self) -> None:
+        if not self._validate_tts_selection_for_finish():
+            return
+
+        voice_id = str(getattr(self, "_tts_voice_id", "")).strip() or default_tts_voice_for_backend(
+            "kokoro"
+        )
+        base_url = (
+            str(getattr(self, "_tts_kokoro_base_url", DEFAULT_KOKORO_TTS_BASE_URL)).strip()
+            or DEFAULT_KOKORO_TTS_BASE_URL
+        )
+
+        try:
+            cfg = Config(
+                tts_backend="kokoro",
+                tts_default_voice_id=voice_id,
+                tts_kokoro_base_url=base_url,
+            )
+            backend_cls = get_tts_backend_class("kokoro")
+            backend = backend_cls(cfg)
+            player = TTSPlayer(
+                backend,
+                output_device=cfg.tts_playback_device,
+                sample_rate=backend.sample_rate_hz(),
+                output_format=cfg.tts_output_format,
+                playback_speed=1.0,
+                on_state_change=self._on_kokoro_preview_state_change,
+            )
+            self._tts_kokoro_preview_stop_requested = False
+            self._tts_kokoro_preview_player = player
+            self._set_kokoro_preview_state(
+                active=True,
+                status_message=f"Starting sample for {voice_id}…",
+            )
+            player.speak(_KOKORO_PREVIEW_TEXT, voice_id, cfg.tts_model_id)
+        except Exception as exc:
+            self._tts_kokoro_preview_player = None
+            self._set_kokoro_preview_state(
+                active=False,
+                status_message=f"Sample failed: {exc}",
+            )
+
+    def _stop_kokoro_preview(self, *, status_message: str | None = None) -> None:
+        player = getattr(self, "_tts_kokoro_preview_player", None)
+        if player is None:
+            self._set_kokoro_preview_state(active=False, status_message=status_message)
+            return
+
+        self._tts_kokoro_preview_stop_requested = True
+        self._set_kokoro_preview_state(active=True, status_message=status_message or "Stopping sample…")
+        player.stop()
+
+    def _on_kokoro_preview_state_change(self, state: str, info: dict) -> None:
+        GLib.idle_add(self._handle_kokoro_preview_state_change, state, dict(info))
+
+    def _handle_kokoro_preview_state_change(self, state: str, info: dict) -> bool:
+        if state == "synthesizing":
+            self._set_kokoro_preview_state(active=True, status_message="Generating sample…")
+            return False
+        if state == "playing":
+            self._set_kokoro_preview_state(active=True, status_message="Playing sample…")
+            return False
+        if state == "paused":
+            self._set_kokoro_preview_state(active=True, status_message="Sample paused")
+            return False
+        if state == "error":
+            message = str(info.get("message", "Unknown error")).strip() or "Unknown error"
+            self._tts_kokoro_preview_player = None
+            self._tts_kokoro_preview_stop_requested = False
+            self._set_kokoro_preview_state(active=False, status_message=f"Sample failed: {message}")
+            return False
+        if state == "idle":
+            stop_requested = self._tts_kokoro_preview_stop_requested
+            self._tts_kokoro_preview_player = None
+            self._tts_kokoro_preview_stop_requested = False
+            self._set_kokoro_preview_state(
+                active=False,
+                status_message="Sample stopped." if stop_requested else "Sample finished.",
+            )
+            return False
+        return False
+
+    def _set_kokoro_preview_state(self, *, active: bool, status_message: str | None = None) -> None:
+        button = getattr(self, "_tts_kokoro_preview_button", None)
+        label = getattr(self, "_tts_kokoro_preview_status", None)
+        if button is not None:
+            button.set_label("Stop sample" if active else "Speak sample")
+        if label is not None:
+            label.set_text(status_message or "")
+
+    def _finish_kokoro_voice_fetch(self, base_url: str, voices, error: str | None) -> bool:
+        self._tts_kokoro_fetch_in_progress = False
+
+        refresh_btn = getattr(self, "_tts_kokoro_refresh_button", None)
+        if refresh_btn is not None:
+            refresh_btn.set_sensitive(True)
+            refresh_btn.set_label("Refresh voices" if voices else "Fetch voices")
+
+        if error is not None:
+            self._tts_kokoro_loaded_base_url = None
+            self._tts_kokoro_voice_options = []
+            self._set_kokoro_voice_dropdown_state(
+                [],
+                status_message=f"Could not load voices: {error}",
+            )
+            return False
+
+        options: list[tuple[str, str, str]] = []
+        for voice in voices or []:
+            voice_id = str(getattr(voice, "id", "")).strip()
+            if not voice_id:
+                continue
+            voice_name = str(getattr(voice, "name", "")).strip() or voice_id
+            description = str(getattr(voice, "description", "")).strip()
+            label = f"{voice_name} ({voice_id})" if voice_name != voice_id else voice_id
+            options.append((voice_id, label, description))
+
+        self._tts_kokoro_loaded_base_url = base_url.rstrip("/")
+        self._tts_kokoro_voice_options = options
+        if options:
+            self._set_kokoro_voice_dropdown_state(
+                options,
+                status_message=f"Loaded {len(options)} Kokoro voice(s).",
+            )
+        else:
+            self._set_kokoro_voice_dropdown_state(
+                [],
+                status_message="Kokoro returned no voices. You can still enter a voice ID manually.",
+            )
+        return False
+
+    def _set_kokoro_voice_dropdown_state(
+        self,
+        options: list[tuple[str, str, str]],
+        *,
+        status_message: str | None = None,
+        loading: bool = False,
+    ) -> None:
+        dropdown = getattr(self, "_tts_kokoro_voice_dropdown", None)
+        desc_label = getattr(self, "_tts_kokoro_voice_desc", None)
+        if dropdown is None or desc_label is None:
+            return
+
+        labels = [label for _voice_id, label, _desc in options] or ["No voices fetched yet"]
+        self._tts_kokoro_updating_dropdown = True
+        try:
+            dropdown.set_model(Gtk.StringList.new(labels))
+            current_voice = str(getattr(self, "_tts_voice_id", "")).strip()
+            if options:
+                selected_idx = next(
+                    (
+                        idx
+                        for idx, (voice_id, _label, _desc) in enumerate(options)
+                        if voice_id == current_voice
+                    ),
+                    Gtk.INVALID_LIST_POSITION,
+                )
+                dropdown.set_selected(selected_idx)
+            else:
+                dropdown.set_selected(Gtk.INVALID_LIST_POSITION)
+        finally:
+            self._tts_kokoro_updating_dropdown = False
+
+        dropdown.set_sensitive(bool(options) and not loading)
+
+        current_voice = str(getattr(self, "_tts_voice_id", "")).strip()
+        if options:
+            selected_idx = next(
+                (
+                    idx
+                    for idx, (voice_id, _label, _desc) in enumerate(options)
+                    if voice_id == current_voice
+                ),
+                None,
+            )
+            if selected_idx is None:
+                desc_label.set_text(
+                    status_message
+                    or "Current voice isn't in the fetched list. Select one below or keep your manual voice ID."
+                )
+                return
+            selected_desc = options[selected_idx][2]
+            if selected_desc:
+                desc_label.set_text(selected_desc)
+            else:
+                desc_label.set_text(status_message or "Select a Kokoro voice or enter one manually.")
+            return
+
+        desc_label.set_text(status_message or "Fetch the live voice list from your Kokoro instance.")
+
     def _on_tts_voice_changed(self, entry: Gtk.Entry):
         value = entry.get_text().strip()
         backend_id = str(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)).strip().lower()
@@ -851,6 +1211,37 @@ class WelcomeWizard(Gtk.Application):
         voice_by_backend = getattr(self, "_tts_voice_by_backend", None)
         if isinstance(voice_by_backend, dict):
             voice_by_backend[backend_id] = value
+
+        if backend_id == "kokoro":
+            self._stop_kokoro_preview()
+            options = getattr(self, "_tts_kokoro_voice_options", [])
+            dropdown = getattr(self, "_tts_kokoro_voice_dropdown", None)
+            desc_label = getattr(self, "_tts_kokoro_voice_desc", None)
+            if dropdown is not None and options:
+                selected_idx = next(
+                    (
+                        idx
+                        for idx, (voice_id, _label, _desc) in enumerate(options)
+                        if voice_id == value
+                    ),
+                    Gtk.INVALID_LIST_POSITION,
+                )
+                if dropdown.get_selected() != selected_idx:
+                    self._tts_kokoro_updating_dropdown = True
+                    try:
+                        dropdown.set_selected(selected_idx)
+                    finally:
+                        self._tts_kokoro_updating_dropdown = False
+                if desc_label is not None:
+                    if selected_idx == Gtk.INVALID_LIST_POSITION:
+                        desc_label.set_text(
+                            "Current voice isn't in the fetched list. Select one below or keep your manual voice ID."
+                        )
+                    else:
+                        desc_label.set_text(
+                            options[selected_idx][2] or "Select a Kokoro voice or enter one manually."
+                        )
+
         self._set_tts_config_error(None)
 
     def _set_tts_config_error(self, message: str | None) -> None:
@@ -899,6 +1290,20 @@ class WelcomeWizard(Gtk.Application):
     def _validate_tts_selection_for_finish(self) -> bool:
         self._set_tts_config_error(None)
         backend_id = str(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)).strip().lower()
+        if backend_id == "kokoro":
+            base_url = (
+                str(getattr(self, "_tts_kokoro_base_url", DEFAULT_KOKORO_TTS_BASE_URL)).strip()
+                or DEFAULT_KOKORO_TTS_BASE_URL
+            )
+            parsed = urlparse(base_url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                self._set_tts_config_error(
+                    "Kokoro base URL must be a valid http(s) URL, for example http://localhost:8880/v1"
+                )
+                return False
+            self._tts_kokoro_base_url = base_url.rstrip("/")
+            return True
+
         if backend_id != "local":
             return True
 
@@ -957,7 +1362,28 @@ class WelcomeWizard(Gtk.Application):
         help_label = getattr(self, "_tts_voice_help", None)
         path_entry = getattr(self, "_tts_local_model_path_entry", None)
         path_help = getattr(self, "_tts_local_model_path_help", None)
-        if entry is None or help_label is None or path_entry is None or path_help is None:
+        kokoro_base_url_entry = getattr(self, "_tts_kokoro_base_url_entry", None)
+        kokoro_base_url_help = getattr(self, "_tts_kokoro_base_url_help", None)
+        kokoro_voice_title = getattr(self, "_tts_kokoro_voice_title", None)
+        kokoro_refresh_button = getattr(self, "_tts_kokoro_refresh_button", None)
+        kokoro_voice_dropdown = getattr(self, "_tts_kokoro_voice_dropdown", None)
+        kokoro_voice_desc = getattr(self, "_tts_kokoro_voice_desc", None)
+        kokoro_preview_button = getattr(self, "_tts_kokoro_preview_button", None)
+        kokoro_preview_status = getattr(self, "_tts_kokoro_preview_status", None)
+        if (
+            entry is None
+            or help_label is None
+            or path_entry is None
+            or path_help is None
+            or kokoro_base_url_entry is None
+            or kokoro_base_url_help is None
+            or kokoro_voice_title is None
+            or kokoro_refresh_button is None
+            or kokoro_voice_dropdown is None
+            or kokoro_voice_desc is None
+            or kokoro_preview_button is None
+            or kokoro_preview_status is None
+        ):
             return
 
         backend_id = str(getattr(self, "_tts_backend", DEFAULT_TTS_BACKEND)).strip().lower()
@@ -981,6 +1407,7 @@ class WelcomeWizard(Gtk.Application):
 
         is_local = backend_id == "local"
         is_melotts = backend_id == "melotts"
+        is_kokoro = backend_id == "kokoro"
         auto_mode = self._local_tts_auto_mode_enabled()
 
         setup_mode_widgets = (
@@ -1031,6 +1458,14 @@ class WelcomeWizard(Gtk.Application):
 
         path_entry.set_visible(is_local and not auto_mode)
         path_help.set_visible(is_local and not auto_mode)
+        kokoro_base_url_entry.set_visible(is_kokoro)
+        kokoro_base_url_help.set_visible(is_kokoro)
+        kokoro_voice_title.set_visible(is_kokoro)
+        kokoro_refresh_button.set_visible(is_kokoro)
+        kokoro_voice_dropdown.set_visible(is_kokoro)
+        kokoro_voice_desc.set_visible(is_kokoro)
+        kokoro_preview_button.set_visible(is_kokoro)
+        kokoro_preview_status.set_visible(is_kokoro)
         # Voice entry visible for all backends except local auto mode
         entry.set_visible(not (is_local and auto_mode))
         help_label.set_visible(not (is_local and auto_mode))
@@ -1071,6 +1506,48 @@ class WelcomeWizard(Gtk.Application):
             help_label.set_text("MeloTTS voices: EN-US, EN-BR, EN-INDIA, EN-AU, EN-Newest")
             return
 
+        if is_kokoro:
+            current_base_url = (
+                str(getattr(self, "_tts_kokoro_base_url", DEFAULT_KOKORO_TTS_BASE_URL)).strip()
+                or DEFAULT_KOKORO_TTS_BASE_URL
+            )
+            if kokoro_base_url_entry.get_text() != current_base_url:
+                kokoro_base_url_entry.set_text(current_base_url)
+            kokoro_base_url_entry.set_placeholder_text(DEFAULT_KOKORO_TTS_BASE_URL)
+            kokoro_base_url_help.set_text(
+                "Base URL for your Kokoro OpenAI-compatible API, for example http://localhost:8880/v1"
+            )
+            entry.set_placeholder_text(default_tts_voice_for_backend("kokoro"))
+            help_label.set_text(
+                "Select a discovered Kokoro voice below or enter a manual voice ID."
+            )
+            refresh_label = "Refresh voices" if self._tts_kokoro_voice_options else "Fetch voices"
+            if self._tts_kokoro_fetch_in_progress:
+                refresh_label = "Fetching voices…"
+            kokoro_refresh_button.set_label(refresh_label)
+            kokoro_refresh_button.set_sensitive(not self._tts_kokoro_fetch_in_progress)
+            self._set_kokoro_preview_state(
+                active=getattr(self, "_tts_kokoro_preview_player", None) is not None,
+                status_message=kokoro_preview_status.get_text() or None,
+            )
+            self._set_kokoro_voice_dropdown_state(
+                getattr(self, "_tts_kokoro_voice_options", []),
+                status_message=(
+                    "Fetch the live voice list from your Kokoro instance."
+                    if not self._tts_kokoro_voice_options
+                    else None
+                ),
+                loading=self._tts_kokoro_fetch_in_progress,
+            )
+            if (
+                getattr(self, "_win", None) is not None
+                and not self._tts_kokoro_fetch_in_progress
+                and not self._tts_kokoro_voice_options
+                and str(getattr(self, "_tts_kokoro_loaded_base_url", "")).strip() != current_base_url
+            ):
+                self._start_kokoro_voice_fetch()
+            return
+
         if backend_id == "openai":
             entry.set_placeholder_text("onyx")
             help_label.set_text("Examples: onyx, nova, shimmer, alloy, sage")
@@ -1103,6 +1580,8 @@ class WelcomeWizard(Gtk.Application):
         )
 
     def _release_input_and_destroy_window(self):
+        self._stop_kokoro_preview()
+
         win = self._win
         if win is None:
             return
@@ -1183,6 +1662,11 @@ class WelcomeWizard(Gtk.Application):
         }
         if tts_backend == "melotts":
             write_kwargs["tts_melotts_device"] = getattr(self, "_tts_melotts_device", "auto")
+        if tts_backend == "kokoro":
+            write_kwargs["tts_kokoro_base_url"] = (
+                str(getattr(self, "_tts_kokoro_base_url", DEFAULT_KOKORO_TTS_BASE_URL)).strip()
+                or DEFAULT_KOKORO_TTS_BASE_URL
+            )
         if self._asr_backend == "sherpa":
             write_kwargs["sherpa_enable_parakeet_streaming"] = sherpa_enable_parakeet_streaming
             write_kwargs["sherpa_provider"] = getattr(self, "_sherpa_provider", "cpu")
@@ -1404,27 +1888,39 @@ class WelcomeWizard(Gtk.Application):
                     resolved_tts_voice = self._local_tts_resolved_voice()
                     resolved_local_voice = resolved_tts_voice
 
-                write_config(
-                    "sherpa",
-                    overwrite_existing=True,
-                    sherpa_model_name=DEFAULT_SHERPA_MODEL_NAME,
-                    sherpa_enable_parakeet_streaming=False,
-                    sherpa_provider=getattr(self, "_sherpa_provider", "cpu"),
-                    typing_final_injection_mode=getattr(
+                fallback_write_kwargs: dict[str, object] = {
+                    "overwrite_existing": True,
+                    "sherpa_model_name": DEFAULT_SHERPA_MODEL_NAME,
+                    "sherpa_enable_parakeet_streaming": False,
+                    "sherpa_provider": getattr(self, "_sherpa_provider", "cpu"),
+                    "typing_final_injection_mode": getattr(
                         self,
                         "_typing_final_injection_mode",
                         DEFAULT_FINAL_INJECTION_MODE,
                     ),
-                    typing_text_case=getattr(
+                    "typing_text_case": getattr(
                         self,
                         "_typing_text_case",
                         DEFAULT_TYPING_TEXT_CASE,
                     ),
-                    tts_backend=resolved_tts_backend,
-                    tts_default_voice_id=resolved_tts_voice,
-                    tts_local_model_path=self._effective_tts_local_model_path() or None,
-                    tts_local_voice=resolved_local_voice,
-                )
+                    "tts_backend": resolved_tts_backend,
+                    "tts_default_voice_id": resolved_tts_voice,
+                    "tts_local_model_path": self._effective_tts_local_model_path() or None,
+                    "tts_local_voice": resolved_local_voice,
+                }
+                if str(resolved_tts_backend).strip().lower() == "kokoro":
+                    fallback_write_kwargs["tts_kokoro_base_url"] = (
+                        str(
+                            getattr(
+                                self,
+                                "_tts_kokoro_base_url",
+                                DEFAULT_KOKORO_TTS_BASE_URL,
+                            )
+                        ).strip()
+                        or DEFAULT_KOKORO_TTS_BASE_URL
+                    )
+
+                write_config("sherpa", **fallback_write_kwargs)
             except Exception:
                 log.exception("Wizard fallback to Zipformer streaming profile failed")
             else:
@@ -1605,6 +2101,10 @@ class WelcomeWizard(Gtk.Application):
                 tts_backend=tts_backend,
                 tts_default_voice_id=tts_voice_id,
                 tts_local_model_path=self._effective_tts_local_model_path(),
+                tts_kokoro_base_url=(
+                    str(getattr(self, "_tts_kokoro_base_url", DEFAULT_KOKORO_TTS_BASE_URL)).strip()
+                    or DEFAULT_KOKORO_TTS_BASE_URL
+                ),
             )
         )
 

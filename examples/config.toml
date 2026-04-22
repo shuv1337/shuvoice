@@ -85,7 +85,7 @@ bottom_margin = 60
 [tts]
 # true | false
 # tts_enabled = true
-# elevenlabs | openai | local
+# elevenlabs | openai | local | melotts | kokoro
 # tts_backend = "elevenlabs"
 # ElevenLabs defaults
 # tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"

@@ -55,6 +55,41 @@ def test_run_setup_success_path_with_skips(monkeypatch):
     assert code == 0
 
 
+def test_run_setup_reports_kokoro_base_url(capsys, monkeypatch):
+    report = BackendSetupReport(
+        backend="sherpa",
+        missing_dependencies=(),
+        install_hints=(),
+        model_status="present (/tmp/model)",
+    )
+
+    class _DummyBackend:
+        capabilities = SimpleNamespace(supports_model_download=False)
+
+        @staticmethod
+        def startup_warnings(_cfg, *, apply_fixes: bool = False):
+            return []
+
+        @staticmethod
+        def startup_errors(_cfg):
+            return []
+
+    monkeypatch.setattr(setup_cmd, "build_backend_setup_report", lambda _cfg: report)
+    monkeypatch.setattr(setup_cmd, "get_backend_class", lambda _name: _DummyBackend)
+
+    code = setup_cmd.run_setup(
+        Config(tts_backend="kokoro", tts_kokoro_base_url="http://localhost:9999/v1"),
+        install_missing=False,
+        skip_model_download=True,
+        skip_preflight=True,
+    )
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Kokoro TTS:" in out
+    assert "http://localhost:9999/v1" in out
+
+
 def test_run_setup_attempts_cuda_runtime_repair_when_requested(capsys, monkeypatch):
     report = BackendSetupReport(
         backend="sherpa",
@@ -606,7 +641,7 @@ def test_run_setup_melotts_install_missing_generates_commands(capsys, monkeypatc
     # Track which commands were run
     run_commands: list[list[str]] = []
 
-    def _fake_subprocess_run(cmd, *, check=False):  # noqa: ARG001
+    def _fake_subprocess_run(cmd, *, check=False):
         run_commands.append(cmd)
         # Simulate venv creation: create the python binary so the
         # Path.is_file() check finds it for subsequent pip/unidic commands.
@@ -694,7 +729,7 @@ def test_run_setup_melotts_idempotent_skips_venv_creation(capsys, monkeypatch, t
 
     run_commands: list[list[str]] = []
 
-    def _fake_subprocess_run(cmd, *, check=False):  # noqa: ARG001
+    def _fake_subprocess_run(cmd, *, check=False):
         run_commands.append(cmd)
         return SimpleNamespace(returncode=0)
 

@@ -27,7 +27,7 @@
 
 - **Push-to-talk dictation** — hold a key, speak, release. Text appears in your focused app.
 - **Pluggable ASR backends** — choose between NeMo (highest accuracy), Sherpa-ONNX (fast, CPU-friendly), or Moonshine (lightweight).
-- **Text-to-speech** — highlight text and hear it read aloud via ElevenLabs, OpenAI, local Piper, or MeloTTS.
+- **Text-to-speech** — highlight text and hear it read aloud via ElevenLabs, OpenAI, local Piper, MeloTTS, or a self-hosted Kokoro instance.
 - **Native Wayland overlay** — GTK4 layer-shell overlay with blur, transparency, and live transcription feedback.
 - **Waybar integration** — tray-style status icon with tooltip, state colors, and click actions.
 - **Guided setup wizard** — compact GTK onboarding flow with separate ASR, keybind/typing, and TTS steps plus model setup.
@@ -175,8 +175,9 @@ The wizard now uses a compact 5-step flow:
 2. **Select your ASR backend** — Sherpa-ONNX, NeMo, or Moonshine
 3. **Choose a Sherpa profile + device** (if applicable) — Streaming (Zipformer) or Instant (Parakeet), then CPU or GPU
 4. **Pick your push-to-talk key + final text injection mode** — Right Ctrl, Insert, F9, Super+V, or custom, plus Auto / Clipboard / Direct typing
-5. **Choose your TTS provider + default voice** — ElevenLabs, OpenAI, Local Piper, or MeloTTS
+5. **Choose your TTS provider + default voice** — ElevenLabs, OpenAI, Local Piper, MeloTTS, or Kokoro
    - **For Local Piper** — choose either automatic setup (install Piper + download a curated voice) or an existing local model path
+   - **For Kokoro** — set the base URL for your local OpenAI-compatible Kokoro instance, fetch and pick from the live `/audio/voices` list or type a manual voice ID, then use **Speak sample** to verify playback before finishing
 6. **Review summary + download model files** — with progress indicator and cancel support
 7. **Auto-configure Hyprland keybinds** — adds `bind`/`bindr` lines if the key isn't already used
 
@@ -525,7 +526,7 @@ layerrule = ignorealpha 0.20, tts-overlay
 ```toml
 [tts]
 tts_enabled = true
-tts_backend = "elevenlabs"                      # elevenlabs | openai | local | melotts
+tts_backend = "elevenlabs"                      # elevenlabs | openai | local | melotts | kokoro
 tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"   # ElevenLabs default
 # OpenAI defaults are auto-applied when tts_backend = "openai":
 # tts_default_voice_id = "onyx"
@@ -536,6 +537,10 @@ tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"   # ElevenLabs default
 # tts_model_id = "piper"
 # tts_local_model_path = "~/.local/share/shuvoice/models/piper"   # wizard/setup managed directory
 # tts_local_voice = "en_US-amy-medium"          # optional explicit curated model stem
+# Kokoro defaults are auto-applied when tts_backend = "kokoro":
+# tts_default_voice_id = "af_heart"
+# tts_model_id = "kokoro"
+# tts_kokoro_base_url = "http://localhost:8880/v1"
 tts_model_id = "eleven_flash_v2_5"
 tts_api_key_env = "ELEVENLABS_API_KEY"          # env var name (not the key itself)
 tts_playback_speed = 1.0                         # default synthesis speed (0.5x to 2.0x)
@@ -581,6 +586,20 @@ tts_playback_speed = 1.0
 
 Setup is automated: run `shuvoice setup --install-missing` with `tts_backend = "melotts"`,
 or select MeloTTS in the setup wizard. ShuVoice handles venv creation and model download.
+
+For Kokoro, no install step is required inside ShuVoice itself — point the wizard at your
+OpenAI-compatible Kokoro base URL, choose a voice ID, and keep `tts_backend = "kokoro"`.
+`shuvoice setup` and `shuvoice preflight` will verify connectivity by querying the voice list.
+
+```toml
+[tts]
+tts_enabled = true
+tts_backend = "kokoro"
+tts_default_voice_id = "af_heart"
+tts_model_id = "kokoro"
+tts_kokoro_base_url = "http://localhost:8880/v1"
+tts_playback_speed = 1.0
+```
 
 ### Example Configs
 

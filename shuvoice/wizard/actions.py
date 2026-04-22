@@ -347,6 +347,7 @@ def finish_setup(
     tts_default_voice_id: str | None = None,
     tts_local_model_path: str | None = None,
     tts_local_voice: str | None = None,
+    tts_kokoro_base_url: str | None = None,
     auto_download_model: bool = True,
 ) -> tuple[str, str, str, str]:
     """Persist wizard selections and optionally configure keybind/model download."""
@@ -361,6 +362,7 @@ def finish_setup(
         tts_default_voice_id=tts_default_voice_id,
         tts_local_model_path=tts_local_model_path,
         tts_local_voice=tts_local_voice,
+        tts_kokoro_base_url=tts_kokoro_base_url,
     )
 
     keybind_status = "not_attempted"
@@ -389,6 +391,7 @@ def finish_setup(
             tts_default_voice_id=tts_default_voice_id,
             tts_local_model_path=tts_local_model_path,
             tts_local_voice=tts_local_voice,
+            tts_kokoro_base_url=tts_kokoro_base_url,
         )
         model_message = (
             f"{model_message} Applied fallback profile: Streaming (Zipformer default model)."

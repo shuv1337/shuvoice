@@ -607,6 +607,11 @@ def run_setup(
         if melotts_setup_code != 0:
             return melotts_setup_code
 
+    if config.tts_backend == "kokoro":
+        print("\nKokoro TTS:")
+        print(f"  Base URL: {config.tts_kokoro_base_url}")
+        print("  No local install step required; preflight will verify endpoint connectivity.")
+
     if skip_preflight:
         print("Preflight: skipped (--skip-preflight).")
         print("\nSetup complete.")

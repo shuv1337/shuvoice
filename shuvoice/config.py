@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from .tts_base import DEFAULT_LOCAL_TTS_MODEL_ID, DEFAULT_LOCAL_TTS_VOICE_ID
 from .tts_speed import TTS_PLAYBACK_SPEED_DEFAULT, validate_tts_playback_speed
@@ -145,6 +146,7 @@ DEFAULT_MELOTTS_VOICE_ID = "EN-US"
 DEFAULT_MELOTTS_MODEL_ID = "melotts"
 DEFAULT_KOKORO_TTS_VOICE_ID = "af_heart"
 DEFAULT_KOKORO_TTS_MODEL_ID = "kokoro"
+DEFAULT_KOKORO_TTS_BASE_URL = "http://localhost:8880/v1"
 
 
 DEFAULT_TEXT_REPLACEMENTS: dict[str, str] = {
@@ -277,7 +279,7 @@ class Config:
     tts_melotts_venv_path: str | None = None  # path to MeloTTS venv
 
     # Kokoro (when tts_backend = "kokoro")
-    tts_kokoro_base_url: str = "http://localhost:8880/v1"
+    tts_kokoro_base_url: str = DEFAULT_KOKORO_TTS_BASE_URL
 
     # Text injection
     output_mode: str = "final_only"  # final_only | streaming_partial
@@ -593,6 +595,15 @@ class Config:
         if self.tts_melotts_venv_path is not None:
             melotts_venv = str(self.tts_melotts_venv_path).strip()
             self.tts_melotts_venv_path = melotts_venv or None
+
+        kokoro_base_url = str(getattr(self, "tts_kokoro_base_url", "") or "").strip()
+        if not kokoro_base_url:
+            kokoro_base_url = DEFAULT_KOKORO_TTS_BASE_URL
+        if self.tts_backend == "kokoro":
+            parsed_kokoro_url = urlparse(kokoro_base_url)
+            if parsed_kokoro_url.scheme not in {"http", "https"} or not parsed_kokoro_url.netloc:
+                raise ValueError("tts_kokoro_base_url must be a valid http(s) URL")
+        self.tts_kokoro_base_url = kokoro_base_url.rstrip("/") or DEFAULT_KOKORO_TTS_BASE_URL
 
         # Validate typing configs
         self.typing_final_injection_mode = str(self.typing_final_injection_mode).strip().lower()

@@ -16,14 +16,22 @@ from pathlib import Path
 from .asr import get_backend_class
 from .config import (
     CURRENT_CONFIG_VERSION,
+    DEFAULT_ELEVENLABS_TTS_API_KEY_ENV,
+    DEFAULT_ELEVENLABS_TTS_MODEL_ID,
     DEFAULT_ELEVENLABS_TTS_VOICE_ID,
+    DEFAULT_KOKORO_TTS_BASE_URL,
+    DEFAULT_KOKORO_TTS_MODEL_ID,
+    DEFAULT_KOKORO_TTS_VOICE_ID,
+    DEFAULT_MELOTTS_MODEL_ID,
     DEFAULT_MELOTTS_VOICE_ID,
+    DEFAULT_OPENAI_TTS_API_KEY_ENV,
+    DEFAULT_OPENAI_TTS_MODEL_ID,
     DEFAULT_OPENAI_TTS_VOICE_ID,
     Config,
 )
 from .config_io import load_raw, write_atomic
 from .config_migrations import migrate_to_latest
-from .tts_base import DEFAULT_LOCAL_TTS_VOICE_ID
+from .tts_base import DEFAULT_LOCAL_TTS_MODEL_ID, DEFAULT_LOCAL_TTS_VOICE_ID
 
 log = logging.getLogger(__name__)
 
@@ -164,6 +172,11 @@ TTS_BACKENDS = [
         "MeloTTS",
         "Local TTS using MeloTTS (MIT/MyShell). CPU real-time. 5 English voices.",
     ),
+    (
+        "kokoro",
+        "Kokoro",
+        "Local self-hosted TTS via an OpenAI-compatible API. Set the base URL for your Kokoro instance and choose a voice ID.",
+    ),
 ]
 
 
@@ -175,6 +188,8 @@ def default_tts_voice_for_backend(backend: str) -> str:
         return DEFAULT_LOCAL_TTS_VOICE_ID
     if backend_id == "melotts":
         return DEFAULT_MELOTTS_VOICE_ID
+    if backend_id == "kokoro":
+        return DEFAULT_KOKORO_TTS_VOICE_ID
     return DEFAULT_ELEVENLABS_TTS_VOICE_ID
 
 
@@ -194,6 +209,8 @@ def tts_voice_label(backend: str, voice_id: str) -> str:
     if backend_id == "melotts":
         return _MELOTTS_VOICE_LABELS.get(value, value)
     if backend_id == "elevenlabs" and value == DEFAULT_ELEVENLABS_TTS_VOICE_ID:
+        return f"Default ({value})"
+    if backend_id == "kokoro" and value == DEFAULT_KOKORO_TTS_VOICE_ID:
         return f"Default ({value})"
     if backend_id == "local" and value.lower() == DEFAULT_LOCAL_TTS_VOICE_ID:
         return "Auto (first discovered model)"
@@ -691,6 +708,7 @@ def write_config(
     tts_local_model_path: str | None = None,
     tts_local_voice: str | None = None,
     tts_melotts_device: str | None = None,
+    tts_kokoro_base_url: str | None = None,
 ):
     """Write wizard selections to config.toml.
 
@@ -740,8 +758,8 @@ def write_config(
         raise ValueError(f"typing_text_case must be one of: {allowed}")
 
     tts_backend_value = str(tts_backend).strip().lower()
-    if tts_backend_value not in {"elevenlabs", "openai", "local", "melotts"}:
-        raise ValueError("tts_backend must be one of: elevenlabs, openai, local, melotts")
+    if tts_backend_value not in {"elevenlabs", "openai", "local", "melotts", "kokoro"}:
+        raise ValueError("tts_backend must be one of: elevenlabs, openai, local, melotts, kokoro")
 
     tts_voice_value = str(
         tts_default_voice_id or default_tts_voice_for_backend(tts_backend_value)
@@ -751,6 +769,10 @@ def write_config(
 
     local_model_path_value = str(tts_local_model_path or "").strip() or None
     local_voice_value = str(tts_local_voice or "").strip() or None
+    kokoro_base_url_value = (
+        str(tts_kokoro_base_url or DEFAULT_KOKORO_TTS_BASE_URL).strip()
+        or DEFAULT_KOKORO_TTS_BASE_URL
+    )
 
     if asr_backend == "sherpa":
         explicit_provider = None
@@ -841,6 +863,20 @@ def write_config(
 
     tts_table["tts_backend"] = tts_backend_value
     tts_table["tts_default_voice_id"] = tts_voice_value
+
+    if tts_backend_value == "elevenlabs":
+        tts_table["tts_model_id"] = DEFAULT_ELEVENLABS_TTS_MODEL_ID
+        tts_table["tts_api_key_env"] = DEFAULT_ELEVENLABS_TTS_API_KEY_ENV
+    elif tts_backend_value == "openai":
+        tts_table["tts_model_id"] = DEFAULT_OPENAI_TTS_MODEL_ID
+        tts_table["tts_api_key_env"] = DEFAULT_OPENAI_TTS_API_KEY_ENV
+    elif tts_backend_value == "local":
+        tts_table["tts_model_id"] = DEFAULT_LOCAL_TTS_MODEL_ID
+    elif tts_backend_value == "melotts":
+        tts_table["tts_model_id"] = DEFAULT_MELOTTS_MODEL_ID
+    elif tts_backend_value == "kokoro":
+        tts_table["tts_model_id"] = DEFAULT_KOKORO_TTS_MODEL_ID
+
     if tts_backend_value == "local":
         if local_model_path_value is not None:
             tts_table["tts_local_model_path"] = local_model_path_value
@@ -862,6 +898,11 @@ def write_config(
     else:
         tts_table.pop("tts_melotts_device", None)
         tts_table.pop("tts_melotts_venv_path", None)
+
+    if tts_backend_value == "kokoro":
+        tts_table["tts_kokoro_base_url"] = kokoro_base_url_value.rstrip("/")
+    else:
+        tts_table.pop("tts_kokoro_base_url", None)
 
     migrated["config_version"] = CURRENT_CONFIG_VERSION
 
@@ -885,6 +926,7 @@ def format_summary(
     tts_backend: str = DEFAULT_TTS_BACKEND,
     tts_default_voice_id: str | None = None,
     tts_local_model_path: str | None = None,
+    tts_kokoro_base_url: str | None = None,
 ) -> str:
     """Build a human-readable summary of wizard selections."""
     asr_name = next(
@@ -926,6 +968,12 @@ def format_summary(
     if tts_backend_value == "local":
         local_model_path_value = str(tts_local_model_path or "").strip()
         lines.insert(4, f"TTS model path:   {local_model_path_value or 'Not configured'}")
+    elif tts_backend_value == "kokoro":
+        kokoro_base_url_value = (
+            str(tts_kokoro_base_url or DEFAULT_KOKORO_TTS_BASE_URL).strip()
+            or DEFAULT_KOKORO_TTS_BASE_URL
+        )
+        lines.insert(4, f"TTS base URL:     {kokoro_base_url_value.rstrip('/')}")
 
     if asr_backend == "sherpa":
         chosen_model = (sherpa_model_name or DEFAULT_SHERPA_MODEL_NAME).strip()

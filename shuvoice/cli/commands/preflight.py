@@ -138,6 +138,11 @@ def run_preflight(config: Config) -> bool:
             detail += (
                 f" ({len(backend.list_voices())} voices, sample_rate={int(backend.sample_rate_hz())}Hz)"
             )
+        elif config.tts_backend == "kokoro":
+            voices = backend.list_voices()
+            detail += (
+                f" ({len(voices)} voices, base_url={getattr(config, 'tts_kokoro_base_url', '')})"
+            )
         return detail
 
     def check_asr_stack() -> str:

@@ -216,19 +216,23 @@ def test_write_config_typing_mode_direct_updates_legacy_flag(tmp_path):
 
 
 def test_write_config_rejects_invalid_typing_mode(tmp_path):
-    with patch("shuvoice.wizard_state.Config") as mock_config:
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
         mock_config.config_dir.return_value = tmp_path
-        with patch("shuvoice.wizard_state._detect_cuda", return_value=False):
-            with pytest.raises(ValueError, match="typing_final_injection_mode"):
-                write_config("nemo", typing_final_injection_mode="invalid")
+        with pytest.raises(ValueError, match="typing_final_injection_mode"):
+            write_config("nemo", typing_final_injection_mode="invalid")
 
 
 def test_write_config_rejects_invalid_typing_text_case(tmp_path):
-    with patch("shuvoice.wizard_state.Config") as mock_config:
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
         mock_config.config_dir.return_value = tmp_path
-        with patch("shuvoice.wizard_state._detect_cuda", return_value=False):
-            with pytest.raises(ValueError, match="typing_text_case"):
-                write_config("nemo", typing_text_case="titlecase")
+        with pytest.raises(ValueError, match="typing_text_case"):
+            write_config("nemo", typing_text_case="titlecase")
 
 
 def test_write_config_rejects_invalid_sherpa_provider(tmp_path):
@@ -630,19 +634,25 @@ def test_asr_backends_has_three_entries():
 # -- MeloTTS wizard state (VAL-WIZ-001, VAL-WIZ-002, VAL-WIZ-003) -----------
 
 
-def test_tts_backends_includes_melotts():
-    """TTS_BACKENDS includes a melotts entry with name and description."""
+def test_tts_backends_includes_melotts_and_kokoro():
+    """TTS_BACKENDS includes MeloTTS and Kokoro entries with useful descriptions."""
     ids = [bid for bid, _, _ in TTS_BACKENDS]
     assert "melotts" in ids
+    assert "kokoro" in ids
 
     melotts = next(entry for entry in TTS_BACKENDS if entry[0] == "melotts")
     assert melotts[1] == "MeloTTS"
     assert "MeloTTS" in melotts[2]
 
+    kokoro = next(entry for entry in TTS_BACKENDS if entry[0] == "kokoro")
+    assert kokoro[1] == "Kokoro"
+    assert "OpenAI-compatible" in kokoro[2]
 
-def test_default_tts_voice_for_backend_melotts():
-    """default_tts_voice_for_backend('melotts') returns 'EN-US'."""
+
+def test_default_tts_voice_for_backend_melotts_and_kokoro():
+    """default_tts_voice_for_backend handles both MeloTTS and Kokoro."""
     assert default_tts_voice_for_backend("melotts") == "EN-US"
+    assert default_tts_voice_for_backend("kokoro") == "af_heart"
 
 
 def test_tts_voice_label_melotts_voices():
@@ -657,6 +667,11 @@ def test_tts_voice_label_melotts_voices():
 def test_tts_voice_label_melotts_unknown_returns_raw():
     """tts_voice_label for melotts with unknown voice ID returns the raw value."""
     assert tts_voice_label("melotts", "custom-voice") == "custom-voice"
+
+
+def test_tts_voice_label_kokoro_default_and_custom():
+    assert tts_voice_label("kokoro", "af_heart") == "Default (af_heart)"
+    assert tts_voice_label("kokoro", "bf_emma") == "bf_emma"
 
 
 def test_write_config_persists_melotts_settings(tmp_path):
@@ -676,7 +691,28 @@ def test_write_config_persists_melotts_settings(tmp_path):
     content = (tmp_path / "config.toml").read_text()
     assert 'tts_backend = "melotts"' in content
     assert 'tts_default_voice_id = "EN-BR"' in content
+    assert 'tts_model_id = "melotts"' in content
     assert 'tts_melotts_device = "cuda"' in content
+
+
+def test_write_config_persists_kokoro_settings(tmp_path):
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        write_config(
+            "nemo",
+            tts_backend="kokoro",
+            tts_default_voice_id="bf_emma",
+            tts_kokoro_base_url="http://localhost:9999/v1/",
+        )
+
+    content = (tmp_path / "config.toml").read_text()
+    assert 'tts_backend = "kokoro"' in content
+    assert 'tts_default_voice_id = "bf_emma"' in content
+    assert 'tts_model_id = "kokoro"' in content
+    assert 'tts_kokoro_base_url = "http://localhost:9999/v1"' in content
 
 
 def test_write_config_persists_melotts_default_voice(tmp_path):
@@ -691,6 +727,21 @@ def test_write_config_persists_melotts_default_voice(tmp_path):
     content = (tmp_path / "config.toml").read_text()
     assert 'tts_backend = "melotts"' in content
     assert 'tts_default_voice_id = "EN-US"' in content
+
+
+def test_write_config_persists_kokoro_default_voice_and_url(tmp_path):
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        write_config("nemo", tts_backend="kokoro")
+
+    content = (tmp_path / "config.toml").read_text()
+    assert 'tts_backend = "kokoro"' in content
+    assert 'tts_default_voice_id = "af_heart"' in content
+    assert 'tts_model_id = "kokoro"' in content
+    assert 'tts_kokoro_base_url = "http://localhost:8880/v1"' in content
 
 
 def test_write_config_melotts_round_trip(tmp_path):
@@ -730,8 +781,20 @@ def test_format_summary_shows_melotts_provider_and_voice():
     assert "TTS voice:        British English" in result
 
 
-def test_write_config_rejects_invalid_tts_backend_but_accepts_melotts(tmp_path):
-    """write_config accepts 'melotts' but rejects unknown tts backends."""
+def test_format_summary_shows_kokoro_provider_voice_and_base_url():
+    result = format_summary(
+        "nemo",
+        tts_backend="kokoro",
+        tts_default_voice_id="af_heart",
+        tts_kokoro_base_url="http://localhost:8880/v1",
+    )
+    assert "TTS provider:     Kokoro" in result
+    assert "TTS base URL:     http://localhost:8880/v1" in result
+    assert "TTS voice:        Default (af_heart)" in result
+
+
+def test_write_config_rejects_invalid_tts_backend_but_accepts_melotts_and_kokoro(tmp_path):
+    """write_config accepts supported local TTS backends but rejects unknown ones."""
     with (
         patch("shuvoice.wizard_state.Config") as mock_config,
         patch("shuvoice.wizard_state._detect_cuda", return_value=False),
@@ -740,10 +803,16 @@ def test_write_config_rejects_invalid_tts_backend_but_accepts_melotts(tmp_path):
         with pytest.raises(ValueError, match="tts_backend"):
             write_config("nemo", tts_backend="nonexistent")
 
-    # melotts should not raise
     with (
         patch("shuvoice.wizard_state.Config") as mock_config,
         patch("shuvoice.wizard_state._detect_cuda", return_value=False),
     ):
         mock_config.config_dir.return_value = tmp_path
         write_config("nemo", tts_backend="melotts")
+
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        write_config("nemo", tts_backend="kokoro")
