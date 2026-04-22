@@ -18,6 +18,21 @@ import numpy as np
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk
 
+# GLib.unix_signal_add was split out into a separate GLibUnix-2.0 typelib in
+# newer glib2 releases (>= ~2.88). Older PyGObject wheels (e.g. 3.54.x in our
+# venv) no longer forward the old GLib.unix_signal_add name and raise
+# AttributeError. Prefer the new GLibUnix.signal_add when available, and fall
+# back to the legacy GLib.unix_signal_add otherwise.
+try:
+    gi.require_version("GLibUnix", "2.0")
+    from gi.repository import GLibUnix as _GLibUnix  # type: ignore
+
+    def _unix_signal_add(priority, sig, handler):
+        return _GLibUnix.signal_add(priority, sig, handler)
+except (ValueError, ImportError):
+    def _unix_signal_add(priority, sig, handler):
+        return GLib.unix_signal_add(priority, sig, handler)
+
 from .asr import create_backend
 from .audio import AudioCapture, audio_rms
 from .config import Config
@@ -201,7 +216,7 @@ class ShuVoiceApp(Gtk.Application):
     # -- GTK lifecycle ------------------------------------------------------
 
     def do_activate(self):
-        GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGINT, self._on_sigint)
+        _unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGINT, self._on_sigint)
 
         if getattr(self, "_model_loaded", False):
             # Model was pre-loaded (legacy / test path) — skip splash.

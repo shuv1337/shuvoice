@@ -18,7 +18,12 @@ import numpy as np
 
 from .asr_base import ASRBackend, ASRCapabilities
 from .config import Config
-from .sherpa_cuda import cuda_provider_runtime_status, prepare_cuda_runtime, sherpa_lib_dir
+from .sherpa_cuda import (
+    cuda_provider_runtime_status,
+    prepare_cuda_runtime,
+    prepare_import_runtime,
+    sherpa_lib_dir,
+)
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +72,16 @@ class SherpaBackend(ASRBackend):
         try:
             import sherpa_onnx  # noqa: F401
         except Exception as e:
+            lib_dir = sherpa_lib_dir()
+            if lib_dir is not None and lib_dir.is_dir():
+                repaired, _detail = prepare_import_runtime(lib_dir)
+                if repaired:
+                    try:
+                        import sherpa_onnx  # noqa: F401
+                        return errors
+                    except Exception as repaired_exc:
+                        e = repaired_exc
+
             errors.append(
                 f"Missing sherpa-onnx dependency: {e}. Install with: uv sync --extra asr-sherpa"
             )
@@ -158,7 +173,18 @@ class SherpaBackend(ASRBackend):
         try:
             import sherpa_onnx  # noqa: F401
         except Exception as exc:
-            return False, f"failed to import sherpa_onnx ({exc})"
+            lib_dir = sherpa_lib_dir()
+            if lib_dir is not None and lib_dir.is_dir():
+                repaired, repair_detail = prepare_import_runtime(lib_dir)
+                if repaired:
+                    try:
+                        import sherpa_onnx  # noqa: F401
+                    except Exception as retry_exc:
+                        return False, f"failed to import sherpa_onnx ({retry_exc})"
+                else:
+                    return False, repair_detail
+            else:
+                return False, f"failed to import sherpa_onnx ({exc})"
 
         lib_dir = sherpa_lib_dir()
         if lib_dir is None or not lib_dir.is_dir():
@@ -168,14 +194,10 @@ class SherpaBackend(ASRBackend):
         if status_ok:
             return True, detail
 
-        provider_lib = lib_dir / "libonnxruntime_providers_cuda.so"
-        if provider_lib.exists():
-            repaired, repair_detail = prepare_cuda_runtime(lib_dir)
-            if repaired:
-                return cuda_provider_runtime_status(lib_dir)
-            return False, repair_detail
-
-        return False, detail
+        repaired, repair_detail = prepare_cuda_runtime(lib_dir)
+        if repaired:
+            return cuda_provider_runtime_status(lib_dir)
+        return False, repair_detail or detail
 
     @classmethod
     def _model_archive_url(cls, model_name: str) -> str:

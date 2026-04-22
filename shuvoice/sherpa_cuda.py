@@ -8,6 +8,7 @@ Handles two common CUDA-runtime issues for GPU-enabled sherpa-onnx wheels:
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -21,6 +22,9 @@ REQUIRED_CUDA_LIBS: tuple[str, ...] = (
     "libcufft.so.11",
     "libcurand.so.10",
     "libcudnn.so.9",
+)
+_REQUIRED_IMPORT_RUNTIME_LIBS: tuple[str, ...] = (
+    "libonnxruntime.so",
 )
 _PATCH_RPATH_LIBS: tuple[str, ...] = (
     "libonnxruntime_providers_cuda.so",
@@ -54,9 +58,23 @@ def sherpa_lib_dir() -> Path | None:
     try:
         import sherpa_onnx
     except Exception:
-        return None
+        sherpa_onnx = None
 
-    module_root = _module_root(sherpa_onnx)
+    module_root = _module_root(sherpa_onnx) if sherpa_onnx is not None else None
+    if module_root is None:
+        spec = importlib.util.find_spec("sherpa_onnx")
+        if spec is not None:
+            search_locations = getattr(spec, "submodule_search_locations", None)
+            if search_locations:
+                for location in search_locations:
+                    if location:
+                        module_root = Path(location).resolve()
+                        break
+            if module_root is None:
+                origin = getattr(spec, "origin", None)
+                if origin:
+                    module_root = Path(origin).resolve().parent
+
     if module_root is None:
         return None
 
@@ -68,6 +86,14 @@ def sherpa_lib_dir() -> Path | None:
 
 def _site_packages_root(lib_dir: Path) -> Path:
     return lib_dir.resolve().parent.parent
+
+
+def _onnxruntime_capi_dir(lib_dir: Path) -> Path | None:
+    site_packages = _site_packages_root(lib_dir)
+    capi_dir = site_packages / "onnxruntime" / "capi"
+    if capi_dir.is_dir():
+        return capi_dir
+    return None
 
 
 def _candidate_dirs(lib_dir: Path) -> list[Path]:
@@ -89,11 +115,16 @@ def _candidate_dirs(lib_dir: Path) -> list[Path]:
                 if candidate.is_dir():
                     candidates.append(candidate)
 
+    for root in (Path("/usr/lib"), Path("/usr/lib64"), Path("/usr/local/lib")):
+        for sherpa_path in root.glob("python*/site-packages/sherpa_onnx/lib"):
+            if sherpa_path.is_dir():
+                candidates.append(sherpa_path)
+        if root.is_dir():
+            candidates.append(root)
+
     for candidate in (
         Path("/opt/cuda/lib64"),
         Path("/opt/cuda/targets/x86_64-linux/lib"),
-        Path("/usr/lib"),
-        Path("/usr/lib64"),
     ):
         if candidate.is_dir():
             candidates.append(candidate)
@@ -121,20 +152,21 @@ def _find_exact_lib(lib_dir: Path, soname: str) -> Path | None:
     return None
 
 
-def ensure_cuda_compat_libs(lib_dir: Path | None = None) -> tuple[bool, str]:
-    resolved_lib_dir = lib_dir or sherpa_lib_dir()
-    if resolved_lib_dir is None:
-        return False, "sherpa_onnx lib directory not found"
-
+def _ensure_exact_libs(
+    required_libs: tuple[str, ...],
+    *,
+    lib_dir: Path,
+    label: str,
+) -> tuple[bool, str]:
     linked: list[str] = []
     missing: list[str] = []
-    for soname in REQUIRED_CUDA_LIBS:
-        target = _find_exact_lib(resolved_lib_dir, soname)
+    for soname in required_libs:
+        target = _find_exact_lib(lib_dir, soname)
         if target is None:
             missing.append(soname)
             continue
 
-        destination = resolved_lib_dir / soname
+        destination = lib_dir / soname
         if destination.exists():
             continue
 
@@ -142,10 +174,94 @@ def ensure_cuda_compat_libs(lib_dir: Path | None = None) -> tuple[bool, str]:
         linked.append(soname)
 
     if missing:
-        return False, "missing required CUDA libs: " + ", ".join(missing)
+        return False, f"missing required {label} libs: " + ", ".join(missing)
     if linked:
-        return True, "linked CUDA compat libs: " + ", ".join(linked)
-    return True, "CUDA compat libs already present"
+        return True, f"linked {label} libs: " + ", ".join(linked)
+    return True, f"{label} libs already present"
+
+
+def ensure_import_runtime_libs(lib_dir: Path | None = None) -> tuple[bool, str]:
+    resolved_lib_dir = lib_dir or sherpa_lib_dir()
+    if resolved_lib_dir is None:
+        return False, "sherpa_onnx lib directory not found"
+
+    destination = resolved_lib_dir / "libonnxruntime.so"
+    if destination.exists():
+        return True, "import runtime libs already present"
+
+    capi_dir = _onnxruntime_capi_dir(resolved_lib_dir)
+    if capi_dir is not None:
+        source = capi_dir / "libonnxruntime.so"
+        if not source.exists():
+            try:
+                import onnxruntime  # type: ignore
+
+                versioned_source = capi_dir / f"libonnxruntime.so.{onnxruntime.__version__}"
+                if versioned_source.exists():
+                    source = versioned_source
+            except Exception:
+                pass
+        if not source.exists():
+            versioned = sorted(capi_dir.glob("libonnxruntime.so.*"))
+            if versioned:
+                source = versioned[-1]
+        if source.exists():
+            shutil.copy2(source, destination)
+            return True, "copied import runtime libs from onnxruntime-gpu"
+
+    return _ensure_exact_libs(
+        _REQUIRED_IMPORT_RUNTIME_LIBS,
+        lib_dir=resolved_lib_dir,
+        label="import runtime",
+    )
+
+
+def ensure_onnxruntime_gpu_provider_libs(lib_dir: Path | None = None) -> tuple[bool, str]:
+    resolved_lib_dir = lib_dir or sherpa_lib_dir()
+    if resolved_lib_dir is None:
+        return False, "sherpa_onnx lib directory not found"
+
+    capi_dir = _onnxruntime_capi_dir(resolved_lib_dir)
+    if capi_dir is None:
+        return False, "onnxruntime-gpu capi directory not found"
+
+    copied: list[str] = []
+    for name in (
+        "libonnxruntime_providers_cuda.so",
+        "libonnxruntime_providers_shared.so",
+        "libonnxruntime_providers_tensorrt.so",
+    ):
+        source = capi_dir / name
+        destination = resolved_lib_dir / name
+        if not source.exists() or destination.exists():
+            continue
+        shutil.copy2(source, destination)
+        copied.append(name)
+
+    if copied:
+        return True, "copied ONNX Runtime GPU provider libs: " + ", ".join(copied)
+    return True, "ONNX Runtime GPU provider libs already present"
+
+
+def ensure_cuda_compat_libs(lib_dir: Path | None = None) -> tuple[bool, str]:
+    resolved_lib_dir = lib_dir or sherpa_lib_dir()
+    if resolved_lib_dir is None:
+        return False, "sherpa_onnx lib directory not found"
+
+    compat_ok, compat_detail = _ensure_exact_libs(
+        REQUIRED_CUDA_LIBS,
+        lib_dir=resolved_lib_dir,
+        label="CUDA compat",
+    )
+    if not compat_ok:
+        return False, compat_detail
+
+    lower_alias = resolved_lib_dir / "libcublaslt.so.12"
+    if not lower_alias.exists() and (resolved_lib_dir / "libcublasLt.so.12").exists():
+        lower_alias.symlink_to("libcublasLt.so.12")
+        return True, compat_detail + "; linked CUDA compat alias: libcublaslt.so.12"
+
+    return True, compat_detail
 
 
 def patch_sherpa_rpaths(lib_dir: Path | None = None) -> tuple[bool, str]:
@@ -157,11 +273,20 @@ def patch_sherpa_rpaths(lib_dir: Path | None = None) -> tuple[bool, str]:
     if patchelf is None:
         return False, "patchelf not available"
 
-    patched: list[str] = []
+    paths: list[Path] = []
+    seen: set[Path] = set()
     for name in _PATCH_RPATH_LIBS:
         path = resolved_lib_dir / name
-        if not path.exists():
-            continue
+        if path.exists() and path not in seen:
+            paths.append(path)
+            seen.add(path)
+    for path in sorted(resolved_lib_dir.glob("_sherpa_onnx*.so")):
+        if path not in seen:
+            paths.append(path)
+            seen.add(path)
+
+    patched: list[str] = []
+    for path in paths:
         proc = subprocess.run(
             [patchelf, "--set-rpath", "$ORIGIN", str(path)],
             check=False,
@@ -170,8 +295,8 @@ def patch_sherpa_rpaths(lib_dir: Path | None = None) -> tuple[bool, str]:
         )
         if proc.returncode != 0:
             detail = (proc.stderr or proc.stdout).strip() or f"exit {proc.returncode}"
-            return False, f"failed to patch {name}: {detail}"
-        patched.append(name)
+            return False, f"failed to patch {path.name}: {detail}"
+        patched.append(path.name)
 
     if not patched:
         return False, "no sherpa runtime libraries needed RPATH patching"
@@ -211,22 +336,43 @@ def cuda_provider_runtime_status(lib_dir: Path | None = None) -> tuple[bool, str
     return True, f"found CUDA provider libraries under {resolved_lib_dir}"
 
 
+def prepare_import_runtime(lib_dir: Path | None = None) -> tuple[bool, str]:
+    resolved_lib_dir = lib_dir or sherpa_lib_dir()
+    if resolved_lib_dir is None:
+        return False, "sherpa_onnx lib directory not found"
+
+    runtime_ok, runtime_detail = ensure_import_runtime_libs(resolved_lib_dir)
+    if not runtime_ok:
+        return False, runtime_detail
+
+    patch_ok, patch_detail = patch_sherpa_rpaths(resolved_lib_dir)
+    if patch_ok:
+        return True, f"{runtime_detail}; {patch_detail}"
+    return True, runtime_detail
+
+
 def prepare_cuda_runtime(lib_dir: Path | None = None) -> tuple[bool, str]:
     resolved_lib_dir = lib_dir or sherpa_lib_dir()
     if resolved_lib_dir is None:
         return False, "sherpa_onnx lib directory not found"
 
+    runtime_ok, runtime_detail = prepare_import_runtime(resolved_lib_dir)
+    if not runtime_ok:
+        return False, runtime_detail
+
+    provider_ok, provider_detail = ensure_onnxruntime_gpu_provider_libs(resolved_lib_dir)
+    if not provider_ok:
+        return False, f"{runtime_detail}; {provider_detail}"
+
     compat_ok, compat_detail = ensure_cuda_compat_libs(resolved_lib_dir)
     if not compat_ok:
-        return False, compat_detail
+        return False, f"{runtime_detail}; {provider_detail}; {compat_detail}"
 
     patch_ok, patch_detail = patch_sherpa_rpaths(resolved_lib_dir)
     status_ok, status_detail = cuda_provider_runtime_status(resolved_lib_dir)
-    if status_ok:
-        if patch_ok:
-            return True, f"{compat_detail}; {patch_detail}; {status_detail}"
-        return True, f"{compat_detail}; {status_detail}"
-
+    details = f"{runtime_detail}; {provider_detail}; {compat_detail}"
     if patch_ok:
-        return False, f"{compat_detail}; {patch_detail}; {status_detail}"
-    return False, f"{compat_detail}; {status_detail}"
+        details += f"; {patch_detail}"
+    if status_ok:
+        return True, f"{details}; {status_detail}"
+    return False, f"{details}; {status_detail}"

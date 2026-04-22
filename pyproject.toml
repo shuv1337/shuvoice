@@ -35,7 +35,17 @@ asr-nemo = [
     "nemo-toolkit[asr]>=2.6.0",
 ]
 asr-sherpa = [
-    "sherpa-onnx",
+    # In this Linux/x86_64 Python 3.12 repo/venv workflow, plain PyPI Sherpa
+    # wheels can drift to builds that fail at import time or drop GPU provider
+    # support. Pin to the known-good CUDA wheel here so uv sync preserves
+    # CUDAExecutionProvider, then fall back to normal index resolution on other
+    # platforms/interpreters.
+    "sherpa-onnx @ https://huggingface.co/csukuangfj2/sherpa-onnx-wheels/resolve/main/cuda/1.12.25/sherpa_onnx-1.12.25+cuda12.cudnn9-cp312-cp312-linux_x86_64.whl ; python_version == '3.12' and sys_platform == 'linux' and platform_machine == 'x86_64'",
+    # The CUDA wheel above omits the ONNX Runtime core library in this env; we
+    # source that from onnxruntime-gpu and copy it into sherpa_onnx/lib during
+    # runtime repair so CUDAExecutionProvider becomes usable after uv sync.
+    "onnxruntime-gpu==1.23.2 ; python_version == '3.12' and sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sherpa-onnx ; python_version != '3.12' or sys_platform != 'linux' or platform_machine != 'x86_64'",
 ]
 asr-moonshine = [
     "useful-moonshine-onnx",
@@ -66,6 +76,9 @@ shuvoice-waybar = "shuvoice.waybar:main"
 [project.urls]
 Homepage = "https://github.com/shuv1337/shuvoice"
 Repository = "https://github.com/shuv1337/shuvoice"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["shuvoice"]
