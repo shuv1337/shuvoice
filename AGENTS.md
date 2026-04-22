@@ -112,6 +112,22 @@ Environment=PYTHONUNBUFFERED=1
 WantedBy=graphical-session.target
 ```
 
+### Wizard → service auto-restart
+
+`shuvoice wizard` runs as a separate process from the long-running
+`shuvoice.service`. After the wizard finishes successfully, the CLI
+automatically restarts `shuvoice.service` if it is active, so config
+changes (TTS voice, ASR backend, keybinds, etc.) take effect without a
+manual restart.
+
+- Implemented in `shuvoice/cli/commands/wizard.py::maybe_restart_running_service`.
+- Called from `shuvoice/cli/commands/run.py::run_wizard_command` only when
+  the wizard reports `completed = True`.
+- No-op when the service is not active or `systemctl --user` is unavailable
+  (keeps standalone/headless usage clean).
+- On restart failure, prints an actionable warning with the manual
+  `systemctl --user restart shuvoice.service` command.
+
 ---
 
 ## Runtime Configuration
@@ -662,6 +678,8 @@ tts_playback_speed = 1.0
 - Speed control via provider-native `speed` request field (0.5×–2.0×).
 - Supports both PCM and MP3 output formats.
 - A dummy `Authorization: Bearer sk-local` header is sent (Kokoro accepts but ignores it).
+- Wizard support is first-class: the TTS step exposes Kokoro backend selection, editable base URL, live voice-list fetching from `/audio/voices` with manual voice-ID fallback, and a `Speak sample` preview button for playback verification before finishing.
+- `shuvoice setup` does not install Kokoro, but now prints the configured base URL and relies on `shuvoice preflight` to verify endpoint connectivity via the voice-list API.
 
 ---
 

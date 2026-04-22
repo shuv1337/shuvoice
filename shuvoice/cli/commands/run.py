@@ -13,7 +13,7 @@ from ...setup_helpers import (
     format_missing_dependency_report,
 )
 from ..parser import apply_cli_overrides
-from .wizard import run_welcome_wizard
+from .wizard import maybe_restart_running_service, run_welcome_wizard
 
 
 def _check_backend_dependencies(config: Config) -> bool:
@@ -116,5 +116,11 @@ def run_app(args) -> int:
 
 
 def run_wizard_command() -> int:
-    run_welcome_wizard(force_reconfigure=True)
+    completed = run_welcome_wizard(force_reconfigure=True)
+    if completed:
+        # The wizard is a separate process from the running `shuvoice.service`;
+        # config changes are not picked up until the service is restarted.
+        # Do this automatically so users don't silently keep the old TTS voice,
+        # ASR backend, or other selections after finishing the wizard.
+        maybe_restart_running_service()
     return 0

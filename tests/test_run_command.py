@@ -4,6 +4,7 @@ from argparse import Namespace
 from types import SimpleNamespace
 
 from shuvoice.cli.commands import run as run_cmd
+from shuvoice.cli.commands import wizard as wizard_cmd
 from shuvoice.cli.parser import create_parser
 from shuvoice.config import Config
 from shuvoice.setup_helpers import DEPENDENCY_EXIT_CODE, BackendSetupReport
@@ -81,3 +82,31 @@ def test_run_app_returns_dependency_exit_code_when_config_validation_fails(monke
     monkeypatch.setattr(run_cmd.Config, "load", classmethod(lambda cls: BadConfig()))
 
     assert run_cmd.run_app(args) == DEPENDENCY_EXIT_CODE
+
+
+def test_run_wizard_command_restarts_running_service(monkeypatch):
+    monkeypatch.setattr(run_cmd, "run_welcome_wizard", lambda *, force_reconfigure: True)
+
+    restart_calls: list[str] = []
+    monkeypatch.setattr(
+        run_cmd,
+        "maybe_restart_running_service",
+        lambda *args, **kwargs: restart_calls.append("called") or "restarted",
+    )
+
+    assert run_cmd.run_wizard_command() == 0
+    assert restart_calls == ["called"]
+
+
+def test_run_wizard_command_skips_restart_when_wizard_incomplete(monkeypatch):
+    monkeypatch.setattr(run_cmd, "run_welcome_wizard", lambda *, force_reconfigure: False)
+
+    restart_calls: list[str] = []
+    monkeypatch.setattr(
+        run_cmd,
+        "maybe_restart_running_service",
+        lambda *args, **kwargs: restart_calls.append("called") or "restarted",
+    )
+
+    assert run_cmd.run_wizard_command() == 0
+    assert restart_calls == []

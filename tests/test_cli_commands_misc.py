@@ -388,3 +388,82 @@ def test_run_welcome_wizard_success(monkeypatch):
     monkeypatch.setitem(sys.modules, "shuvoice.wizard", fake_module)
 
     assert wizard_cmd.run_welcome_wizard(force_reconfigure=True) is True
+
+
+def test_maybe_restart_running_service_restarts_when_active(monkeypatch, capsys):
+    calls: list[tuple[str, str]] = []
+
+    from shuvoice.waybar import systemd as waybar_systemd
+
+    monkeypatch.setattr(waybar_systemd, "service_active_state", lambda svc: "active")
+    monkeypatch.setattr(
+        waybar_systemd,
+        "service_action",
+        lambda svc, action: calls.append((svc, action)),
+    )
+
+    result = wizard_cmd.maybe_restart_running_service("fake.service")
+
+    assert result == "restarted"
+    assert calls == [("fake.service", "restart")]
+    assert "Restarted fake.service" in capsys.readouterr().out
+
+
+def test_maybe_restart_running_service_noop_when_inactive(monkeypatch, capsys):
+    calls: list[tuple[str, str]] = []
+
+    from shuvoice.waybar import systemd as waybar_systemd
+
+    monkeypatch.setattr(waybar_systemd, "service_active_state", lambda svc: "inactive")
+    monkeypatch.setattr(
+        waybar_systemd,
+        "service_action",
+        lambda svc, action: calls.append((svc, action)),
+    )
+
+    result = wizard_cmd.maybe_restart_running_service("fake.service")
+
+    assert result == "not_active"
+    assert calls == []
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_maybe_restart_running_service_unavailable_when_unknown(monkeypatch, capsys):
+    from shuvoice.waybar import systemd as waybar_systemd
+
+    monkeypatch.setattr(waybar_systemd, "service_active_state", lambda svc: "unknown")
+    called = []
+    monkeypatch.setattr(
+        waybar_systemd,
+        "service_action",
+        lambda svc, action: called.append((svc, action)),
+    )
+
+    result = wizard_cmd.maybe_restart_running_service("fake.service")
+
+    assert result == "unavailable"
+    assert called == []
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_maybe_restart_running_service_warns_on_restart_failure(monkeypatch, capsys):
+    from shuvoice.waybar import systemd as waybar_systemd
+
+    monkeypatch.setattr(waybar_systemd, "service_active_state", lambda svc: "active")
+
+    def boom(_svc, _action):
+        raise RuntimeError("restart blew up")
+
+    monkeypatch.setattr(waybar_systemd, "service_action", boom)
+
+    result = wizard_cmd.maybe_restart_running_service("fake.service")
+
+    assert result == "failed"
+    err = capsys.readouterr().err
+    assert "failed to restart fake.service" in err
+    assert "restart blew up" in err
+    assert "systemctl --user restart fake.service" in err
