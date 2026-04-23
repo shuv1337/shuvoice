@@ -31,6 +31,7 @@ from ..config import DEFAULT_KOKORO_TTS_BASE_URL, Config
 from ..piper_setup import curated_piper_voices, managed_piper_model_dir, recommended_piper_voice
 from ..tts import get_tts_backend_class
 from ..tts_player import TTSPlayer
+from ..tts_speed import normalize_tts_playback_speed
 from ..wizard_state import (
     ASR_BACKENDS,
     KEYBIND_PRESETS,
@@ -38,13 +39,16 @@ from ..wizard_state import (
     DEFAULT_KEYBIND_ID,
     DEFAULT_SHERPA_MODEL_NAME,
     DEFAULT_TTS_BACKEND,
+    DEFAULT_TTS_PLAYBACK_SPEED,
     DEFAULT_TYPING_TEXT_CASE,
     FINAL_INJECTION_MODES,
     PARAKEET_TDT_V3_INT8_MODEL_NAME,
     TTS_BACKENDS,
+    TTS_PLAYBACK_SPEED_PRESETS,
     TYPING_TEXT_CASE_MODES,
     _detect_cuda,
     default_tts_voice_for_backend,
+    tts_playback_speed_preset_id,
 )
 from .actions import (
     maybe_download_model,
@@ -123,6 +127,7 @@ class WelcomeWizard(Gtk.Application):
         self._tts_kokoro_updating_dropdown = False
         self._tts_kokoro_preview_player: TTSPlayer | None = None
         self._tts_kokoro_preview_stop_requested = False
+        self._tts_playback_speed = float(DEFAULT_TTS_PLAYBACK_SPEED)
         self._tts_local_auto_voice_id = recommended_piper_voice().id
         self._tts_voice_id = self._tts_voice_by_backend[self._tts_backend]
         self._keybind = DEFAULT_KEYBIND_ID
@@ -663,6 +668,20 @@ class WelcomeWizard(Gtk.Application):
         self._tts_voice_help.set_wrap(True)
         page.append(self._tts_voice_help)
 
+        self._tts_playback_speed_options = list(TTS_PLAYBACK_SPEED_PRESETS)
+        (
+            self._tts_playback_speed_title,
+            self._tts_playback_speed_dropdown,
+            self._tts_playback_speed_desc,
+        ) = self._make_dropdown_section(
+            page,
+            "Default playback speed",
+            self._tts_playback_speed_options,
+            tts_playback_speed_preset_id(self._tts_playback_speed),
+            self._set_tts_playback_speed_selection,
+            title_margin_top=8,
+        )
+
         self._tts_config_error_label = Gtk.Label(label="")
         self._tts_config_error_label.add_css_class("wizard-radio-desc")
         self._tts_config_error_label.set_halign(Gtk.Align.START)
@@ -897,6 +916,13 @@ class WelcomeWizard(Gtk.Application):
         self._tts_melotts_device = device
         self._set_tts_config_error(None)
 
+    def _set_tts_playback_speed_selection(self, preset_id: str) -> None:
+        try:
+            self._tts_playback_speed = normalize_tts_playback_speed(preset_id)
+        except ValueError:
+            self._tts_playback_speed = float(DEFAULT_TTS_PLAYBACK_SPEED)
+        self._set_tts_config_error(None)
+
     def _set_tts_local_setup_mode_selection(self, mode: str) -> None:
         self._tts_local_setup_mode = mode
         self._set_tts_config_error(None)
@@ -1025,10 +1051,12 @@ class WelcomeWizard(Gtk.Application):
         )
 
         try:
+            preview_speed = float(getattr(self, "_tts_playback_speed", DEFAULT_TTS_PLAYBACK_SPEED))
             cfg = Config(
                 tts_backend="kokoro",
                 tts_default_voice_id=voice_id,
                 tts_kokoro_base_url=base_url,
+                tts_playback_speed=preview_speed,
             )
             backend_cls = get_tts_backend_class("kokoro")
             backend = backend_cls(cfg)
@@ -1037,7 +1065,7 @@ class WelcomeWizard(Gtk.Application):
                 output_device=cfg.tts_playback_device,
                 sample_rate=backend.sample_rate_hz(),
                 output_format=cfg.tts_output_format,
-                playback_speed=1.0,
+                playback_speed=preview_speed,
                 on_state_change=self._on_kokoro_preview_state_change,
             )
             self._tts_kokoro_preview_stop_requested = False
@@ -1061,7 +1089,9 @@ class WelcomeWizard(Gtk.Application):
             return
 
         self._tts_kokoro_preview_stop_requested = True
-        self._set_kokoro_preview_state(active=True, status_message=status_message or "Stopping sample…")
+        self._set_kokoro_preview_state(
+            active=True, status_message=status_message or "Stopping sample…"
+        )
         player.stop()
 
     def _on_kokoro_preview_state_change(self, state: str, info: dict) -> None:
@@ -1197,10 +1227,14 @@ class WelcomeWizard(Gtk.Application):
             if selected_desc:
                 desc_label.set_text(selected_desc)
             else:
-                desc_label.set_text(status_message or "Select a Kokoro voice or enter one manually.")
+                desc_label.set_text(
+                    status_message or "Select a Kokoro voice or enter one manually."
+                )
             return
 
-        desc_label.set_text(status_message or "Fetch the live voice list from your Kokoro instance.")
+        desc_label.set_text(
+            status_message or "Fetch the live voice list from your Kokoro instance."
+        )
 
     def _on_tts_voice_changed(self, entry: Gtk.Entry):
         value = entry.get_text().strip()
@@ -1239,7 +1273,8 @@ class WelcomeWizard(Gtk.Application):
                         )
                     else:
                         desc_label.set_text(
-                            options[selected_idx][2] or "Select a Kokoro voice or enter one manually."
+                            options[selected_idx][2]
+                            or "Select a Kokoro voice or enter one manually."
                         )
 
         self._set_tts_config_error(None)
@@ -1446,6 +1481,14 @@ class WelcomeWizard(Gtk.Application):
             )
 
         self._set_dropdown_selected(
+            getattr(self, "_tts_playback_speed_dropdown", None),
+            getattr(self, "_tts_playback_speed_options", []),
+            tts_playback_speed_preset_id(
+                getattr(self, "_tts_playback_speed", DEFAULT_TTS_PLAYBACK_SPEED)
+            ),
+        )
+
+        self._set_dropdown_selected(
             getattr(self, "_tts_local_setup_mode_dropdown", None),
             getattr(self, "_tts_local_setup_options", []),
             str(getattr(self, "_tts_local_setup_mode", "automatic")).strip().lower() or "automatic",
@@ -1543,7 +1586,8 @@ class WelcomeWizard(Gtk.Application):
                 getattr(self, "_win", None) is not None
                 and not self._tts_kokoro_fetch_in_progress
                 and not self._tts_kokoro_voice_options
-                and str(getattr(self, "_tts_kokoro_loaded_base_url", "")).strip() != current_base_url
+                and str(getattr(self, "_tts_kokoro_loaded_base_url", "")).strip()
+                != current_base_url
             ):
                 self._start_kokoro_voice_fetch()
             return
@@ -1642,6 +1686,10 @@ class WelcomeWizard(Gtk.Application):
             tts_voice_id = self._local_tts_resolved_voice()
             tts_local_voice = tts_voice_id
 
+        playback_speed_value = float(
+            getattr(self, "_tts_playback_speed", DEFAULT_TTS_PLAYBACK_SPEED)
+        )
+
         write_kwargs: dict[str, object] = {
             "overwrite_existing": getattr(self, "_force_reconfigure", False),
             "sherpa_model_name": sherpa_model_name,
@@ -1659,6 +1707,7 @@ class WelcomeWizard(Gtk.Application):
             "tts_default_voice_id": tts_voice_id,
             "tts_local_model_path": tts_local_model_path,
             "tts_local_voice": tts_local_voice,
+            "tts_playback_speed": playback_speed_value,
         }
         if tts_backend == "melotts":
             write_kwargs["tts_melotts_device"] = getattr(self, "_tts_melotts_device", "auto")
@@ -1907,6 +1956,9 @@ class WelcomeWizard(Gtk.Application):
                     "tts_default_voice_id": resolved_tts_voice,
                     "tts_local_model_path": self._effective_tts_local_model_path() or None,
                     "tts_local_voice": resolved_local_voice,
+                    "tts_playback_speed": float(
+                        getattr(self, "_tts_playback_speed", DEFAULT_TTS_PLAYBACK_SPEED)
+                    ),
                 }
                 if str(resolved_tts_backend).strip().lower() == "kokoro":
                     fallback_write_kwargs["tts_kokoro_base_url"] = (
@@ -2104,6 +2156,9 @@ class WelcomeWizard(Gtk.Application):
                 tts_kokoro_base_url=(
                     str(getattr(self, "_tts_kokoro_base_url", DEFAULT_KOKORO_TTS_BASE_URL)).strip()
                     or DEFAULT_KOKORO_TTS_BASE_URL
+                ),
+                tts_playback_speed=float(
+                    getattr(self, "_tts_playback_speed", DEFAULT_TTS_PLAYBACK_SPEED)
                 ),
             )
         )

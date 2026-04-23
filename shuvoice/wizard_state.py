@@ -32,6 +32,11 @@ from .config import (
 from .config_io import load_raw, write_atomic
 from .config_migrations import migrate_to_latest
 from .tts_base import DEFAULT_LOCAL_TTS_MODEL_ID, DEFAULT_LOCAL_TTS_VOICE_ID
+from .tts_speed import (
+    TTS_PLAYBACK_SPEED_DEFAULT,
+    format_tts_playback_speed,
+    validate_tts_playback_speed,
+)
 
 log = logging.getLogger(__name__)
 
@@ -133,6 +138,70 @@ TTS_KEYBIND_PRESETS = [
 ]
 DEFAULT_TTS_KEYBIND_ID = "super_ctrl_s"
 DEFAULT_TTS_BACKEND = "elevenlabs"
+
+# Default playback-speed presets shown in the wizard.
+# (id, display_label, description)
+TTS_PLAYBACK_SPEED_PRESETS: list[tuple[str, str, str]] = [
+    (
+        "0.75",
+        f"{format_tts_playback_speed(0.75)} (slower)",
+        "Slower synthesis for clearer pronunciation or dictation.",
+    ),
+    (
+        "1.0",
+        f"{format_tts_playback_speed(1.0)} (default)",
+        "Natural speed \u2014 matches each provider\u2019s baseline pace.",
+    ),
+    (
+        "1.25",
+        f"{format_tts_playback_speed(1.25)} (brisk)",
+        "Slightly faster. Good for skimming or familiar content.",
+    ),
+    (
+        "1.5",
+        f"{format_tts_playback_speed(1.5)} (fast)",
+        "Noticeably faster. Comfortable for power users.",
+    ),
+    (
+        "1.75",
+        f"{format_tts_playback_speed(1.75)} (very fast)",
+        "Very fast playback. Helpful for long read-alouds.",
+    ),
+    (
+        "2.0",
+        f"{format_tts_playback_speed(2.0)} (max)",
+        "Maximum supported playback speed.",
+    ),
+]
+DEFAULT_TTS_PLAYBACK_SPEED = TTS_PLAYBACK_SPEED_DEFAULT
+
+
+def tts_playback_speed_preset_id(speed: float | int | str) -> str:
+    """Return the preset id whose value is closest to ``speed``.
+
+    Used to map an already-validated speed back onto a wizard dropdown
+    option. Falls back to the default preset when no preset is within
+    half a step of the provided value.
+    """
+    try:
+        value = float(speed)
+    except (TypeError, ValueError):
+        value = DEFAULT_TTS_PLAYBACK_SPEED
+
+    best_id = "1.0"
+    best_diff = float("inf")
+    for preset_id, _label, _desc in TTS_PLAYBACK_SPEED_PRESETS:
+        try:
+            preset_value = float(preset_id)
+        except ValueError:
+            continue
+        diff = abs(preset_value - value)
+        if diff < best_diff:
+            best_diff = diff
+            best_id = preset_id
+    return best_id
+
+
 _OPENAI_TTS_VOICE_LABELS: dict[str, str] = {
     "alloy": "Alloy",
     "ash": "Ash",
@@ -709,6 +778,7 @@ def write_config(
     tts_local_voice: str | None = None,
     tts_melotts_device: str | None = None,
     tts_kokoro_base_url: str | None = None,
+    tts_playback_speed: float | int | str | None = None,
 ):
     """Write wizard selections to config.toml.
 
@@ -773,6 +843,14 @@ def write_config(
         str(tts_kokoro_base_url or DEFAULT_KOKORO_TTS_BASE_URL).strip()
         or DEFAULT_KOKORO_TTS_BASE_URL
     )
+
+    if tts_playback_speed is None:
+        playback_speed_value = DEFAULT_TTS_PLAYBACK_SPEED
+    else:
+        try:
+            playback_speed_value = validate_tts_playback_speed(tts_playback_speed)
+        except ValueError as exc:
+            raise ValueError(f"Invalid tts_playback_speed: {exc}") from exc
 
     if asr_backend == "sherpa":
         explicit_provider = None
@@ -863,6 +941,7 @@ def write_config(
 
     tts_table["tts_backend"] = tts_backend_value
     tts_table["tts_default_voice_id"] = tts_voice_value
+    tts_table["tts_playback_speed"] = playback_speed_value
 
     if tts_backend_value == "elevenlabs":
         tts_table["tts_model_id"] = DEFAULT_ELEVENLABS_TTS_MODEL_ID
@@ -927,6 +1006,7 @@ def format_summary(
     tts_default_voice_id: str | None = None,
     tts_local_model_path: str | None = None,
     tts_kokoro_base_url: str | None = None,
+    tts_playback_speed: float | int | str | None = None,
 ) -> str:
     """Build a human-readable summary of wizard selections."""
     asr_name = next(
@@ -956,24 +1036,35 @@ def format_summary(
         tts_default_voice_id or default_tts_voice_for_backend(tts_backend_value)
     ).strip()
 
+    try:
+        playback_speed_value = (
+            validate_tts_playback_speed(tts_playback_speed)
+            if tts_playback_speed is not None
+            else DEFAULT_TTS_PLAYBACK_SPEED
+        )
+    except ValueError:
+        playback_speed_value = DEFAULT_TTS_PLAYBACK_SPEED
+    playback_speed_label = format_tts_playback_speed(playback_speed_value)
+
     lines = [
         f"ASR backend:      {asr_name}",
         f"Final injection:  {injection_label}",
         f"Text case:        {text_case_label}",
         f"TTS provider:     {tts_backend_label(tts_backend_value)}",
         f"TTS voice:        {tts_voice_label(tts_backend_value, tts_voice_value)}",
+        f"TTS speed:        {playback_speed_label}",
         f"Push-to-talk:     {keybind_label}",
     ]
 
     if tts_backend_value == "local":
         local_model_path_value = str(tts_local_model_path or "").strip()
-        lines.insert(4, f"TTS model path:   {local_model_path_value or 'Not configured'}")
+        lines.insert(5, f"TTS model path:   {local_model_path_value or 'Not configured'}")
     elif tts_backend_value == "kokoro":
         kokoro_base_url_value = (
             str(tts_kokoro_base_url or DEFAULT_KOKORO_TTS_BASE_URL).strip()
             or DEFAULT_KOKORO_TTS_BASE_URL
         )
-        lines.insert(4, f"TTS base URL:     {kokoro_base_url_value.rstrip('/')}")
+        lines.insert(5, f"TTS base URL:     {kokoro_base_url_value.rstrip('/')}")
 
     if asr_backend == "sherpa":
         chosen_model = (sherpa_model_name or DEFAULT_SHERPA_MODEL_NAME).strip()

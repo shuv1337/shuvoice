@@ -816,3 +816,122 @@ def test_write_config_rejects_invalid_tts_backend_but_accepts_melotts_and_kokoro
     ):
         mock_config.config_dir.return_value = tmp_path
         write_config("nemo", tts_backend="kokoro")
+
+
+# -- TTS playback speed wizard behavior ---------------------------------------
+
+
+def test_write_config_persists_default_playback_speed(tmp_path):
+    """write_config writes tts_playback_speed = 1.0 by default."""
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        write_config("nemo")
+
+    content = (tmp_path / "config.toml").read_text()
+    assert "tts_playback_speed = 1.0" in content
+
+
+def test_write_config_persists_explicit_playback_speed(tmp_path):
+    """write_config persists an explicit tts_playback_speed value."""
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        write_config("nemo", tts_backend="kokoro", tts_playback_speed=1.25)
+
+    content = (tmp_path / "config.toml").read_text()
+    assert 'tts_backend = "kokoro"' in content
+    assert "tts_playback_speed = 1.25" in content
+
+
+def test_write_config_rejects_out_of_range_playback_speed(tmp_path):
+    """write_config rejects tts_playback_speed outside 0.5–2.0."""
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        with pytest.raises(ValueError, match="tts_playback_speed"):
+            write_config("nemo", tts_playback_speed=3.0)
+
+
+def test_write_config_rejects_non_numeric_playback_speed(tmp_path):
+    """write_config rejects a non-numeric tts_playback_speed."""
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = tmp_path
+        with pytest.raises(ValueError, match="tts_playback_speed"):
+            write_config("nemo", tts_playback_speed="not-a-number")
+
+
+def test_write_config_playback_speed_round_trip(tmp_path):
+    """Wizard-written tts_playback_speed round-trips through Config.load()."""
+    from shuvoice.config import Config as RealConfig
+
+    config_dir = tmp_path / "shuvoice"
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    with (
+        patch("shuvoice.wizard_state.Config") as mock_config,
+        patch("shuvoice.wizard_state._detect_cuda", return_value=False),
+    ):
+        mock_config.config_dir.return_value = config_dir
+        write_config(
+            "nemo",
+            tts_backend="kokoro",
+            tts_default_voice_id="af_heart",
+            tts_kokoro_base_url="http://localhost:8880/v1",
+            tts_playback_speed=1.5,
+        )
+
+    config_file = config_dir / "config.toml"
+    with patch.object(RealConfig, "config_path", return_value=config_file):
+        cfg = RealConfig.load()
+
+    assert cfg.tts_backend == "kokoro"
+    assert cfg.tts_playback_speed == 1.5
+
+
+def test_format_summary_includes_default_playback_speed():
+    """format_summary always shows a TTS speed line, defaulting to 1.0×."""
+    result = format_summary("nemo")
+    assert "TTS speed:" in result
+    assert "1.0×" in result
+
+
+def test_format_summary_reflects_explicit_playback_speed():
+    result = format_summary(
+        "nemo",
+        tts_backend="kokoro",
+        tts_default_voice_id="af_heart",
+        tts_kokoro_base_url="http://localhost:8880/v1",
+        tts_playback_speed=1.75,
+    )
+    assert "TTS speed:        1.75×" in result
+
+
+def test_tts_playback_speed_presets_cover_supported_range():
+    """Wizard presets include the default 1.0× and stay within the valid 0.5–2.0 range."""
+    from shuvoice.wizard_state import (
+        TTS_PLAYBACK_SPEED_PRESETS,
+        tts_playback_speed_preset_id,
+    )
+
+    preset_values = [float(pid) for pid, _label, _desc in TTS_PLAYBACK_SPEED_PRESETS]
+
+    assert 1.0 in preset_values
+    assert all(0.5 <= value <= 2.0 for value in preset_values)
+    assert preset_values == sorted(preset_values)
+
+    # Closest-preset mapping for arbitrary values
+    assert tts_playback_speed_preset_id(1.0) == "1.0"
+    assert tts_playback_speed_preset_id(1.27) == "1.25"
+    assert tts_playback_speed_preset_id(1.9) == "2.0"
+    # Non-numeric / garbage input falls back to default preset
+    assert tts_playback_speed_preset_id("garbage") == "1.0"

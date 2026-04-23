@@ -469,6 +469,7 @@ def test_on_finish_writes_config_releases_window_and_quits():
         tts_default_voice_id="zNsotODqUhvbJ5wMG7Ei",
         tts_local_model_path=None,
         tts_local_voice=None,
+        tts_playback_speed=1.0,
     )
     maybe_download.assert_called_once_with(
         "moonshine",
@@ -517,6 +518,7 @@ def test_on_finish_passes_parakeet_streaming_profile_to_write_config():
         tts_default_voice_id="onyx",
         tts_local_model_path=None,
         tts_local_voice=None,
+        tts_playback_speed=1.0,
     )
 
 
@@ -553,6 +555,7 @@ def test_on_finish_passes_local_tts_settings_to_write_config():
         tts_default_voice_id="amy",
         tts_local_model_path="/tmp/piper-models",
         tts_local_voice="amy",
+        tts_playback_speed=1.0,
     )
 
 
@@ -633,6 +636,7 @@ def test_complete_finish_applies_zipformer_fallback_for_incompatible_parakeet_st
         tts_default_voice_id="zNsotODqUhvbJ5wMG7Ei",
         tts_local_model_path=None,
         tts_local_voice=None,
+        tts_playback_speed=1.0,
     )
     write_marker.assert_called_once()
     assert wizard._sherpa_model_name == "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
@@ -772,3 +776,90 @@ def test_on_finish_passes_kokoro_settings_to_write_config():
     assert call_kwargs[1]["tts_backend"] == "kokoro"
     assert call_kwargs[1]["tts_default_voice_id"] == "bf_emma"
     assert call_kwargs[1]["tts_kokoro_base_url"] == "http://localhost:9999/v1"
+
+
+def test_on_finish_passes_tts_playback_speed_to_write_config():
+    """_on_finish forwards the wizard-selected tts_playback_speed to write_config."""
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard.__new__(WelcomeWizard)
+    wizard._asr_backend = "moonshine"
+    wizard._keybind = "f9"
+    wizard._tts_backend = "kokoro"
+    wizard._tts_voice_id = "bf_emma"
+    wizard._tts_kokoro_base_url = "http://localhost:8880/v1"
+    wizard._tts_playback_speed = 1.5
+    wizard.completed = False
+    wizard._release_input_and_destroy_window = MagicMock()
+    wizard.quit = MagicMock()
+
+    with (
+        patch("shuvoice.wizard.write_config") as mock_write_config,
+        patch("shuvoice.wizard.maybe_download_model", return_value=("skipped", "noop")),
+        patch("shuvoice.wizard.write_marker"),
+    ):
+        WelcomeWizard._on_finish(wizard, None)
+
+    mock_write_config.assert_called_once()
+    call_kwargs = mock_write_config.call_args
+    assert call_kwargs[1]["tts_playback_speed"] == 1.5
+
+
+def test_on_finish_uses_default_playback_speed_when_not_set():
+    """_on_finish defaults to 1.0x when the wizard has never updated its speed."""
+    from shuvoice.wizard import WelcomeWizard
+    from shuvoice.wizard_state import DEFAULT_TTS_PLAYBACK_SPEED
+
+    wizard = WelcomeWizard.__new__(WelcomeWizard)
+    wizard._asr_backend = "moonshine"
+    wizard._keybind = "f9"
+    wizard._tts_backend = "elevenlabs"
+    wizard._tts_voice_id = "zNsotODqUhvbJ5wMG7Ei"
+    # Intentionally do NOT set _tts_playback_speed to exercise getattr default
+    wizard.completed = False
+    wizard._release_input_and_destroy_window = MagicMock()
+    wizard.quit = MagicMock()
+
+    with (
+        patch("shuvoice.wizard.write_config") as mock_write_config,
+        patch("shuvoice.wizard.maybe_download_model", return_value=("skipped", "noop")),
+        patch("shuvoice.wizard.write_marker"),
+    ):
+        WelcomeWizard._on_finish(wizard, None)
+
+    mock_write_config.assert_called_once()
+    call_kwargs = mock_write_config.call_args
+    assert call_kwargs[1]["tts_playback_speed"] == float(DEFAULT_TTS_PLAYBACK_SPEED)
+
+
+def test_build_tts_page_has_playback_speed_dropdown_populated():
+    """The TTS page exposes a playback-speed dropdown initialized to the default preset."""
+    from shuvoice.wizard import WelcomeWizard
+
+    wizard = WelcomeWizard()
+    wizard._build_tts_page()
+
+    assert wizard._tts_playback_speed_dropdown is not None
+    # Default preset id is "1.0"; matching index in TTS_PLAYBACK_SPEED_PRESETS.
+    from shuvoice.wizard_state import TTS_PLAYBACK_SPEED_PRESETS
+
+    default_idx = next(
+        i for i, (pid, _label, _desc) in enumerate(TTS_PLAYBACK_SPEED_PRESETS) if pid == "1.0"
+    )
+    assert wizard._tts_playback_speed_dropdown.get_selected() == default_idx
+
+
+def test_playback_speed_dropdown_updates_wizard_state():
+    """Selecting a different preset updates the wizard's stored playback speed."""
+    from shuvoice.wizard import WelcomeWizard
+    from shuvoice.wizard_state import TTS_PLAYBACK_SPEED_PRESETS
+
+    wizard = WelcomeWizard()
+    wizard._build_tts_page()
+
+    target_idx = next(
+        i for i, (pid, _label, _desc) in enumerate(TTS_PLAYBACK_SPEED_PRESETS) if pid == "1.25"
+    )
+    wizard._tts_playback_speed_dropdown.set_selected(target_idx)
+
+    assert wizard._tts_playback_speed == 1.25

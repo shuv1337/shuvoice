@@ -73,7 +73,6 @@ def maybe_setup_local_tts(
     return result.status, result.message
 
 
-
 def maybe_download_model(
     asr_backend: str,
     *,
@@ -348,6 +347,7 @@ def finish_setup(
     tts_local_model_path: str | None = None,
     tts_local_voice: str | None = None,
     tts_kokoro_base_url: str | None = None,
+    tts_playback_speed: float | int | str | None = None,
     auto_download_model: bool = True,
 ) -> tuple[str, str, str, str]:
     """Persist wizard selections and optionally configure keybind/model download."""
@@ -363,6 +363,7 @@ def finish_setup(
         tts_local_model_path=tts_local_model_path,
         tts_local_voice=tts_local_voice,
         tts_kokoro_base_url=tts_kokoro_base_url,
+        tts_playback_speed=tts_playback_speed,
     )
 
     keybind_status = "not_attempted"
@@ -392,6 +393,7 @@ def finish_setup(
             tts_local_model_path=tts_local_model_path,
             tts_local_voice=tts_local_voice,
             tts_kokoro_base_url=tts_kokoro_base_url,
+            tts_playback_speed=tts_playback_speed,
         )
         model_message = (
             f"{model_message} Applied fallback profile: Streaming (Zipformer default model)."

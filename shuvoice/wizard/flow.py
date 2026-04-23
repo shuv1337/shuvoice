@@ -19,6 +19,7 @@ def summary_text(
     tts_default_voice_id: str | None = None,
     tts_local_model_path: str | None = None,
     tts_kokoro_base_url: str | None = None,
+    tts_playback_speed: float | int | str | None = None,
 ) -> str:
     return format_summary(
         asr_backend,
@@ -33,4 +34,5 @@ def summary_text(
         tts_default_voice_id=tts_default_voice_id,
         tts_local_model_path=tts_local_model_path,
         tts_kokoro_base_url=tts_kokoro_base_url,
+        tts_playback_speed=tts_playback_speed,
     )
