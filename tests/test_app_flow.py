@@ -729,3 +729,138 @@ def test_handle_tts_status_command_reports_player_state():
     )
 
     assert ShuVoiceApp._handle_tts_command(app, "tts_status") == "OK playing"
+
+
+# -- ASR error handling: CUDA OOM auto-fallback + transient overlay toast ---
+
+
+def test_handle_asr_runtime_error_applies_cpu_fallback_on_cuda_oom():
+    asr = SimpleNamespace(
+        try_fallback_to_cpu=Mock(return_value=(True, "Switched to CPU")),
+    )
+    app = SimpleNamespace(
+        asr=asr,
+        _flash_overlay_error=Mock(),
+    )
+
+    exc = RuntimeError("CUBLAS failure 3: CUBLAS_STATUS_ALLOC_FAILED")
+    handled = ShuVoiceApp._handle_asr_runtime_error(app, exc, is_utterance=True)
+
+    assert handled is True
+    asr.try_fallback_to_cpu.assert_called_once_with()
+    app._flash_overlay_error.assert_called_once()
+    toast_text = app._flash_overlay_error.call_args.args[0]
+    assert "CPU" in toast_text
+
+
+def test_handle_asr_runtime_error_skips_fallback_on_non_cuda_error():
+    asr = SimpleNamespace(
+        try_fallback_to_cpu=Mock(),
+    )
+    app = SimpleNamespace(
+        asr=asr,
+        _flash_overlay_error=Mock(),
+    )
+
+    handled = ShuVoiceApp._handle_asr_runtime_error(
+        app, ValueError("bad shape"), is_utterance=False
+    )
+
+    assert handled is False
+    asr.try_fallback_to_cpu.assert_not_called()
+    app._flash_overlay_error.assert_not_called()
+
+
+def test_handle_asr_runtime_error_reports_failed_fallback():
+    asr = SimpleNamespace(
+        try_fallback_to_cpu=Mock(return_value=(False, "already on CPU")),
+    )
+    app = SimpleNamespace(
+        asr=asr,
+        _flash_overlay_error=Mock(),
+    )
+
+    exc = RuntimeError("CUDNN_STATUS_INTERNAL_ERROR ; cudnnCreate(...)")
+    handled = ShuVoiceApp._handle_asr_runtime_error(app, exc, is_utterance=True)
+
+    # Fallback did not succeed, so caller should take the normal failure path.
+    assert handled is False
+    app._flash_overlay_error.assert_not_called()
+
+
+def test_handle_asr_runtime_error_is_safe_when_backend_has_no_fallback():
+    # Backend without try_fallback_to_cpu (e.g. nemo/moonshine) must not crash.
+    asr = SimpleNamespace()
+    app = SimpleNamespace(asr=asr, _flash_overlay_error=Mock())
+
+    exc = RuntimeError("CUBLAS_STATUS_ALLOC_FAILED")
+    handled = ShuVoiceApp._handle_asr_runtime_error(app, exc, is_utterance=True)
+
+    assert handled is False
+
+
+def test_process_utterance_safe_flashes_overlay_on_non_recoverable_error():
+    asr = SimpleNamespace(process_utterance=Mock(side_effect=RuntimeError("boom")))
+    app = SimpleNamespace(
+        _asr_lock=threading.Lock(),
+        _asr_disabled_event=threading.Event(),
+        _consecutive_asr_failures=0,
+        _ASR_MAX_FAILURES=10,
+        _disable_asr=Mock(),
+        _flash_overlay_error=Mock(),
+        _handle_asr_runtime_error=lambda exc, *, is_utterance: False,
+        asr=asr,
+    )
+
+    with pytest.raises(RuntimeError):
+        ShuVoiceApp._process_utterance_safe(app, np.zeros(16000, dtype=np.float32))
+
+    assert app._consecutive_asr_failures == 1
+    app._flash_overlay_error.assert_called_once()
+    assert "1/10" in app._flash_overlay_error.call_args.args[0]
+    app._disable_asr.assert_not_called()
+
+
+def test_process_utterance_safe_does_not_flash_when_error_was_recovered():
+    asr = SimpleNamespace(
+        process_utterance=Mock(side_effect=RuntimeError("CUBLAS_STATUS_ALLOC_FAILED"))
+    )
+    app = SimpleNamespace(
+        _asr_lock=threading.Lock(),
+        _asr_disabled_event=threading.Event(),
+        _consecutive_asr_failures=0,
+        _ASR_MAX_FAILURES=10,
+        _disable_asr=Mock(),
+        _flash_overlay_error=Mock(),
+        _handle_asr_runtime_error=lambda exc, *, is_utterance: True,
+        asr=asr,
+    )
+
+    with pytest.raises(RuntimeError):
+        ShuVoiceApp._process_utterance_safe(app, np.zeros(16000, dtype=np.float32))
+
+    # Recovered: failure counter must not advance and no generic toast is shown.
+    assert app._consecutive_asr_failures == 0
+    app._flash_overlay_error.assert_not_called()
+    app._disable_asr.assert_not_called()
+
+
+def test_process_utterance_safe_triggers_disable_after_max_failures():
+    asr = SimpleNamespace(process_utterance=Mock(side_effect=RuntimeError("boom")))
+    app = SimpleNamespace(
+        _asr_lock=threading.Lock(),
+        _asr_disabled_event=threading.Event(),
+        _consecutive_asr_failures=9,  # next failure hits threshold
+        _ASR_MAX_FAILURES=10,
+        _disable_asr=Mock(),
+        _flash_overlay_error=Mock(),
+        _handle_asr_runtime_error=lambda exc, *, is_utterance: False,
+        asr=asr,
+    )
+
+    with pytest.raises(RuntimeError):
+        ShuVoiceApp._process_utterance_safe(app, np.zeros(16000, dtype=np.float32))
+
+    assert app._consecutive_asr_failures == 10
+    app._disable_asr.assert_called_once()
+    app._flash_overlay_error.assert_not_called()

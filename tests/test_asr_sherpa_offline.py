@@ -478,3 +478,151 @@ class TestSherpaOnlineRecognizerInit:
 
         with pytest.raises(RuntimeError, match="window_size"):
             backend._load_online_recognizer()
+
+
+# -- CUDA OOM detection + CPU fallback ---------------------------------------
+
+
+class TestLooksLikeCudaOomError:
+    def test_detects_cublas_alloc_failed(self):
+        from shuvoice.asr_sherpa import looks_like_cuda_oom_error
+
+        exc = RuntimeError(
+            "cuda_call.cc:129 ... CUBLAS failure 3: CUBLAS_STATUS_ALLOC_FAILED ; "
+            "expr=cublasCreate(&cublas_handle_);"
+        )
+        assert looks_like_cuda_oom_error(exc) is True
+
+    def test_detects_cudnn_internal_error(self):
+        from shuvoice.asr_sherpa import looks_like_cuda_oom_error
+
+        exc = RuntimeError(
+            "CUDNN failure 4000: CUDNN_STATUS_INTERNAL_ERROR ; expr=cudnnCreate(&cudnn_handle_);"
+        )
+        assert looks_like_cuda_oom_error(exc) is True
+
+    def test_detects_plain_out_of_memory(self):
+        from shuvoice.asr_sherpa import looks_like_cuda_oom_error
+
+        assert looks_like_cuda_oom_error(RuntimeError("CUDA error: out of memory")) is True
+
+    def test_does_not_false_positive_on_unrelated_errors(self):
+        from shuvoice.asr_sherpa import looks_like_cuda_oom_error
+
+        assert looks_like_cuda_oom_error(RuntimeError("tokens.txt not found")) is False
+        assert looks_like_cuda_oom_error(ValueError("bad shape")) is False
+
+
+class TestTryFallbackToCpu:
+    def test_fallback_noop_when_already_cpu(self, tmp_path: Path):
+        model_dir = _make_model_dir(tmp_path)
+        cfg = Config(
+            asr_backend="sherpa",
+            sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+            sherpa_model_dir=str(model_dir),
+            sherpa_decode_mode="offline_instant",
+            sherpa_provider="cpu",
+        )
+        backend = create_backend("sherpa", cfg)
+
+        ok, detail = backend.try_fallback_to_cpu()
+
+        assert ok is False
+        assert "cpu" in detail.lower()
+        assert backend.cpu_fallback_applied is False
+
+    def test_fallback_switches_provider_and_reloads_offline_recognizer(
+        self, tmp_path: Path, monkeypatch
+    ):
+        model_dir = _make_model_dir(tmp_path)
+        cfg = Config(
+            asr_backend="sherpa",
+            sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+            sherpa_model_dir=str(model_dir),
+            sherpa_decode_mode="offline_instant",
+            sherpa_provider="cuda",
+        )
+        backend = create_backend("sherpa", cfg)
+        backend._model_files = {
+            "tokens": model_dir / "tokens.txt",
+            "encoder": model_dir / "encoder.onnx",
+            "decoder": model_dir / "decoder.onnx",
+            "joiner": model_dir / "joiner.onnx",
+        }
+
+        reload_calls: list[str] = []
+
+        def fake_load_offline(self):
+            reload_calls.append(self.config.sherpa_provider)
+            self._offline_recognizer = MagicMock()
+
+        monkeypatch.setattr(type(backend), "_load_offline_recognizer", fake_load_offline)
+
+        ok, detail = backend.try_fallback_to_cpu()
+
+        assert ok is True
+        assert backend.config.sherpa_provider == "cpu"
+        assert backend.cpu_fallback_applied is True
+        assert reload_calls == ["cpu"]
+        assert "cpu" in detail.lower()
+
+    def test_fallback_is_idempotent(self, tmp_path: Path, monkeypatch):
+        model_dir = _make_model_dir(tmp_path)
+        cfg = Config(
+            asr_backend="sherpa",
+            sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+            sherpa_model_dir=str(model_dir),
+            sherpa_decode_mode="offline_instant",
+            sherpa_provider="cuda",
+        )
+        backend = create_backend("sherpa", cfg)
+        backend._model_files = {
+            "tokens": model_dir / "tokens.txt",
+            "encoder": model_dir / "encoder.onnx",
+            "decoder": model_dir / "decoder.onnx",
+            "joiner": model_dir / "joiner.onnx",
+        }
+
+        monkeypatch.setattr(
+            type(backend),
+            "_load_offline_recognizer",
+            lambda self: setattr(self, "_offline_recognizer", MagicMock()),
+        )
+
+        first_ok, _ = backend.try_fallback_to_cpu()
+        second_ok, second_detail = backend.try_fallback_to_cpu()
+
+        assert first_ok is True
+        assert second_ok is False
+        assert "already" in second_detail.lower()
+
+    def test_fallback_reload_failure_leaves_flag_unset(self, tmp_path: Path, monkeypatch):
+        model_dir = _make_model_dir(tmp_path)
+        cfg = Config(
+            asr_backend="sherpa",
+            sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+            sherpa_model_dir=str(model_dir),
+            sherpa_decode_mode="offline_instant",
+            sherpa_provider="cuda",
+        )
+        backend = create_backend("sherpa", cfg)
+        backend._model_files = {
+            "tokens": model_dir / "tokens.txt",
+            "encoder": model_dir / "encoder.onnx",
+            "decoder": model_dir / "decoder.onnx",
+            "joiner": model_dir / "joiner.onnx",
+        }
+
+        def failing_load(self):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(type(backend), "_load_offline_recognizer", failing_load)
+
+        ok, detail = backend.try_fallback_to_cpu()
+
+        assert ok is False
+        assert backend.cpu_fallback_applied is False
+        # Provider was flipped before the reload attempt; that's fine — a later
+        # retry will still see the CUDA-was-requested->CPU transition.
+        assert backend.config.sherpa_provider == "cpu"
+        assert "reload failed" in detail.lower()

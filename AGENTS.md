@@ -128,6 +128,27 @@ manual restart.
 - On restart failure, prints an actionable warning with the manual
   `systemctl --user restart shuvoice.service` command.
 
+### Wizard TTS defaults (provider / voice / speed)
+
+The wizard TTS page persists the following defaults to `[tts]` in `config.toml`:
+
+- `tts_backend` (ElevenLabs, OpenAI, Local Piper, MeloTTS, Kokoro)
+- `tts_default_voice_id` (provider-specific voice)
+- `tts_playback_speed` (default synthesis speed, 0.5×–2.0×)
+
+The default playback speed is exposed as a dropdown on the TTS page with
+presets: 0.75×, 1.0× (default), 1.25×, 1.5×, 1.75×, 2.0×. The selection is
+also applied to the Kokoro “Speak sample” preview so you can audition the
+exact speed you picked before finishing the wizard. All backends respect
+`tts_playback_speed` at runtime — OpenAI and Kokoro use provider-native
+`speed`, ElevenLabs/Local/MeloTTS use the player's resampling path.
+
+- Presets and mapping helpers live in
+  `shuvoice/wizard_state.py::TTS_PLAYBACK_SPEED_PRESETS` and
+  `tts_playback_speed_preset_id`.
+- Validation/normalization reuses `shuvoice/tts_speed.py::validate_tts_playback_speed`
+  (0.5×–2.0×, rejects non-finite / non-numeric values).
+
 ---
 
 ## Runtime Configuration
@@ -910,10 +931,31 @@ uv run shuvoice wizard
 | — | Upstream Sherpa source builds may silently fall back to CPU if they pick preinstalled CPU ONNX Runtime or if the upstream ONNX Runtime GPU download URL is unavailable (observed: hardcoded `hf-mirror.com` path returning 404 in v1.12.39 manual build). | Ongoing / upstream fragility |
 | — | `glib2` 2.88 split `GLib.unix_signal_add` into `GLibUnix.signal_add`; older venv `PyGObject` builds (observed: `3.54.x`) may crash in GTK activation with `AttributeError: 'gi.repository.GLib' object has no attribute 'unix_signal_add'`. `shuvoice/app.py` now uses a compatibility shim that prefers `GLibUnix.signal_add` and falls back to the legacy name. | Mitigated in app |
 | — | Parakeet streaming is behind explicit safety gate (`sherpa_enable_parakeet_streaming = true`) and requires online-compatible encoder metadata (`window_size`); incompatible models are blocked pre-start with actionable errors | By design |
+| — | Sherpa CUDA can fail at decode time (not load time) when the GPU is full elsewhere (symptoms: `CUBLAS_STATUS_ALLOC_FAILED` / `CUDNN_STATUS_INTERNAL_ERROR`). Overlay used to stay blank and nothing was pasted. `shuvoice/app.py::_handle_asr_runtime_error` + `shuvoice/asr_sherpa.py::SherpaBackend.try_fallback_to_cpu` now detect CUDA-OOM-family errors and auto-swap the recognizer to CPU for the rest of the session, showing a transient overlay toast. All other ASR errors also flash a user-visible toast with the failure count (`N/10`). | Mitigated in app |
 
 ---
 
 ## Maintaining This File
+
+### ASR runtime-error UX (transient overlay + CUDA fallback)
+
+ASR errors surface to the user via the STT overlay, not just logs.
+
+- Per-call failures (`_process_chunk_safe`, `_process_utterance_safe`) call
+  `_flash_overlay_error("⚠ ASR error (N/10) — see logs")`, which pins the
+  overlay in the `error` state for ~5s and then auto-hides so subsequent
+  utterances render normally.
+- CUDA-OOM-family errors (`CUBLAS_STATUS_ALLOC_FAILED`,
+  `CUDNN_STATUS_INTERNAL_ERROR`, `CUDA error: out of memory`) are classified
+  by `shuvoice/asr_sherpa.py::looks_like_cuda_oom_error` and trigger
+  `SherpaBackend.try_fallback_to_cpu()` — a one-shot session-wide swap that
+  flips `sherpa_provider` to CPU and reloads the recognizer. The overlay
+  shows `⚠ GPU busy — switched ASR to CPU for this session` and the failure
+  does NOT advance the circuit breaker.
+- The circuit breaker remains intact for persistent non-OOM failures
+  (10 in a row disables ASR and shows `⚠ ASR error — will retry in 30s`).
+- Backends without `try_fallback_to_cpu()` (NeMo, Moonshine) are untouched
+  by this path.
 
 ### When to update AGENTS.md
 

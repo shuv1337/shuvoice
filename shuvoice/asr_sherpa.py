@@ -28,6 +28,32 @@ from .sherpa_cuda import (
 log = logging.getLogger(__name__)
 
 
+# Substrings identifying CUDA/cuBLAS/cuDNN allocation / workspace failures that
+# typically mean the GPU is out of memory (rather than a genuine logic bug).
+# Matched case-insensitively against str(exc). Kept in one place so app.py and
+# the backend stay in sync.
+_CUDA_OOM_ERROR_MARKERS: tuple[str, ...] = (
+    "cublas_status_alloc_failed",
+    "cublascreate",
+    "cudnn_status_internal_error",
+    "cudnn_status_alloc_failed",
+    "cudnncreate",
+    "cuda error: out of memory",
+    "cuda out of memory",
+    "out of memory",  # onnxruntime sometimes stringifies generic CUDA alloc failures this way
+)
+
+
+def looks_like_cuda_oom_error(exc: BaseException) -> bool:
+    """Heuristic: does ``exc`` look like a CUDA/cuBLAS/cuDNN out-of-memory error.
+
+    Used by both the Sherpa backend itself and by the app's circuit breaker to
+    decide whether to auto-fall back to CPU.
+    """
+    text = str(exc).lower()
+    return any(marker in text for marker in _CUDA_OOM_ERROR_MARKERS)
+
+
 class SherpaBackend(ASRBackend):
     """Sherpa ONNX transducer backend with streaming and offline modes."""
 
@@ -49,6 +75,50 @@ class SherpaBackend(ASRBackend):
         self._offline_recognizer: Any = None  # OfflineRecognizer for offline mode
         self._stream: Any = None
         self._model_files: dict[str, Path] | None = None
+        self._cpu_fallback_applied = False
+
+    @property
+    def cpu_fallback_applied(self) -> bool:
+        """True when this session auto-fell back to CPU after a CUDA failure."""
+        return self._cpu_fallback_applied
+
+    def try_fallback_to_cpu(self) -> tuple[bool, str]:
+        """Swap the runtime to CPU after a CUDA failure and reload the recognizer.
+
+        Returns ``(ok, detail)`` where ``ok`` is ``True`` when the backend is now
+        running on CPU. Idempotent: if already on CPU or a previous fallback
+        already succeeded, returns ``(False, reason)`` so the caller can stop
+        attempting.
+        """
+        if self._cpu_fallback_applied:
+            return False, "CPU fallback already applied earlier this session"
+
+        provider = str(getattr(self.config, "sherpa_provider", "cpu")).strip().lower()
+        if provider != "cuda":
+            return False, f"sherpa_provider is already '{provider}'; no fallback to apply"
+
+        log.warning("Falling back Sherpa runtime from CUDA to CPU after repeated GPU errors")
+        self.config.sherpa_provider = "cpu"
+
+        # Drop previous recognizer/stream so garbage collection can release any
+        # GPU memory we still hold.
+        self._recognizer = None
+        self._offline_recognizer = None
+        self._stream = None
+
+        try:
+            if self._is_offline_mode:
+                self._load_offline_recognizer()
+            else:
+                self._load_online_recognizer()
+                self._stream = self._recognizer.create_stream()
+        except Exception as exc:
+            log.exception("Sherpa CPU fallback failed to reload recognizer")
+            return False, f"CPU fallback reload failed: {exc}"
+
+        self._cpu_fallback_applied = True
+        log.info("Sherpa runtime now running on CPU (CUDA fallback applied)")
+        return True, "Sherpa runtime switched to CPU after CUDA failure"
 
     @property
     def native_chunk_samples(self) -> int:
@@ -78,6 +148,7 @@ class SherpaBackend(ASRBackend):
                 if repaired:
                     try:
                         import sherpa_onnx  # noqa: F401
+
                         return errors
                     except Exception as repaired_exc:
                         e = repaired_exc

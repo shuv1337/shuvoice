@@ -30,10 +30,13 @@ try:
     def _unix_signal_add(priority, sig, handler):
         return _GLibUnix.signal_add(priority, sig, handler)
 except (ValueError, ImportError):
+
     def _unix_signal_add(priority, sig, handler):
         return GLib.unix_signal_add(priority, sig, handler)
 
+
 from .asr import create_backend
+from .asr_sherpa import looks_like_cuda_oom_error
 from .audio import AudioCapture, audio_rms
 from .config import Config
 from .control import ControlServer
@@ -406,6 +409,70 @@ class ShuVoiceApp(Gtk.Application):
         self.overlay.set_state("error")
         self.overlay.set_text(text)
 
+    # Timeout source id for the transient overlay error toast.
+    _ERROR_TOAST_SECONDS = 5
+
+    def _flash_overlay_error(self, text: str):
+        """Show an ASR error toast for a few seconds, then clear the overlay.
+
+        Unlike ``_show_overlay_error``, this does not keep the overlay pinned in
+        the error state — it schedules an auto-hide so subsequent utterances can
+        render normally.
+        """
+        if not self.overlay:
+            return
+        self._show_overlay_error(text)
+
+        token = object()
+        self._overlay_error_toast_token = token
+
+        def _auto_hide() -> bool:
+            if getattr(self, "_overlay_error_toast_token", None) is not token:
+                # A newer toast (or normal recording start) superseded this one.
+                return GLib.SOURCE_REMOVE
+            if not self.overlay:
+                return GLib.SOURCE_REMOVE
+            if self._asr_disabled_event.is_set():
+                # Circuit breaker is holding the overlay; leave it alone.
+                return GLib.SOURCE_REMOVE
+            if self._recording.is_set():
+                # User is already holding PTT again — let the normal flow repaint.
+                return GLib.SOURCE_REMOVE
+            self.overlay.hide()
+            self._overlay_error_toast_token = None
+            return GLib.SOURCE_REMOVE
+
+        GLib.timeout_add_seconds(self._ERROR_TOAST_SECONDS, _auto_hide)
+
+    def _handle_asr_runtime_error(self, exc: BaseException, *, is_utterance: bool) -> bool:
+        """Best-effort recovery for per-call ASR failures.
+
+        Returns True when the error was handled (e.g. auto-fallback to CPU
+        succeeded). The caller should then treat the call as a non-fatal,
+        non-counting failure. Returns False when the normal circuit-breaker
+        path should be used.
+        """
+        asr = getattr(self, "asr", None)
+        if asr is None:
+            return False
+
+        # CUDA out-of-memory: auto-fall back to CPU once per session.
+        try_fallback = getattr(asr, "try_fallback_to_cpu", None)
+        if callable(try_fallback) and looks_like_cuda_oom_error(exc):
+            ok, detail = try_fallback()
+            log.warning(
+                "Sherpa CUDA %s failed (%s); CPU fallback %s",
+                "utterance" if is_utterance else "chunk",
+                exc,
+                "applied" if ok else f"skipped: {detail}",
+            )
+            if ok:
+                self._flash_overlay_error("⚠ GPU busy — switched ASR to CPU for this session")
+                return True
+            # Couldn't fall back (already on CPU, reload failed, etc.). Fall through.
+
+        return False
+
     def _disable_asr(self, reason: str):
         self._asr_disabled_event.set()
         self._asr_circuit_open_monotonic = time.monotonic()
@@ -477,10 +544,13 @@ class ShuVoiceApp(Gtk.Application):
             return ""
 
         with self._asr_lock:
-
             try:
                 text = self.asr.process_chunk(audio_data)
-            except Exception:
+            except Exception as exc:
+                if self._handle_asr_runtime_error(exc, is_utterance=False):
+                    # Recovered (e.g. CPU fallback applied). Do not advance the
+                    # circuit breaker; the caller will retry on the next chunk.
+                    raise
                 self._consecutive_asr_failures += 1
                 failures = self._consecutive_asr_failures
                 if failures >= self._ASR_MAX_FAILURES:
@@ -496,6 +566,9 @@ class ShuVoiceApp(Gtk.Application):
                         failures,
                         self._ASR_MAX_FAILURES,
                     )
+                    self._flash_overlay_error(
+                        f"⚠ ASR error ({failures}/{self._ASR_MAX_FAILURES}) — see logs"
+                    )
                 raise
 
             self._consecutive_asr_failures = 0
@@ -507,13 +580,16 @@ class ShuVoiceApp(Gtk.Application):
             return ""
 
         with self._asr_lock:
-
             try:
                 process_utterance = getattr(self.asr, "process_utterance", None)
                 if not callable(process_utterance):
                     raise RuntimeError("ASR backend does not implement process_utterance()")
                 text = process_utterance(audio_data)
-            except Exception:
+            except Exception as exc:
+                if self._handle_asr_runtime_error(exc, is_utterance=True):
+                    # Recovered (e.g. CPU fallback applied). Do not advance the
+                    # circuit breaker; the user will retry on next PTT press.
+                    raise
                 self._consecutive_asr_failures += 1
                 failures = self._consecutive_asr_failures
                 if failures >= self._ASR_MAX_FAILURES:
@@ -528,6 +604,9 @@ class ShuVoiceApp(Gtk.Application):
                         "ASR utterance decode failed (%d/%d)",
                         failures,
                         self._ASR_MAX_FAILURES,
+                    )
+                    self._flash_overlay_error(
+                        f"⚠ ASR error ({failures}/{self._ASR_MAX_FAILURES}) — see logs"
                     )
                 raise
 
@@ -643,10 +722,8 @@ class ShuVoiceApp(Gtk.Application):
 
         if state is not None:
             lines.append(
-                
-                    f"utt buf={state.total} speech_samples={state.speech_samples} peak={state.peak_rms:.4f} "
-                    f"gain={state.utterance_gain:.2f} unchanged={state.unchanged_steps}"
-                
+                f"utt buf={state.total} speech_samples={state.speech_samples} peak={state.peak_rms:.4f} "
+                f"gain={state.utterance_gain:.2f} unchanged={state.unchanged_steps}"
             )
 
         if self._debug_current_transcript:
@@ -700,7 +777,10 @@ class ShuVoiceApp(Gtk.Application):
                 metrics.observe_tts_speed_unsupported()
             if tts_overlay is not None:
                 tts_overlay.set_speed(previous)
-            log.info("TTS speed change ignored: backend=%s does not support native speed control", self.config.tts_backend)
+            log.info(
+                "TTS speed change ignored: backend=%s does not support native speed control",
+                self.config.tts_backend,
+            )
             return previous
 
         self._tts_playback_speed = normalized
@@ -1111,7 +1191,9 @@ class ShuVoiceApp(Gtk.Application):
             self.typer.reset()
             return
 
-        while state.total >= self.asr.native_chunk_samples and not self._asr_disabled_event.is_set():
+        while (
+            state.total >= self.asr.native_chunk_samples and not self._asr_disabled_event.is_set()
+        ):
             has_more = self._transcribe_native_chunk(state, "ASR buffered final chunk failed")
             if not has_more:
                 break
@@ -1175,7 +1257,11 @@ class ShuVoiceApp(Gtk.Application):
                 else:
                     self._update_noise_floor(audio_rms(chunk))
 
-            if is_recording and not self._asr_disabled_event.is_set() and not self._is_offline_instant_mode:
+            if (
+                is_recording
+                and not self._asr_disabled_event.is_set()
+                and not self._is_offline_instant_mode
+            ):
                 self._process_recording_chunks(state)
 
             if was_recording and not is_recording:
