@@ -9,7 +9,7 @@ from shuvoice.tts_player import TTSPlayer
 
 
 class _FakeOutputStream:
-    instances: list["_FakeOutputStream"] = []
+    instances: list[_FakeOutputStream] = []
 
     def __init__(self, **kwargs):
         self.kwargs = dict(kwargs)

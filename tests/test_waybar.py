@@ -139,9 +139,9 @@ def test_perform_action_service_restart_raises_when_control_socket_never_returns
     with (
         patch("shuvoice.waybar._service_action") as service_action,
         patch("shuvoice.waybar._wait_for_control_socket", return_value=False),
+        pytest.raises(RuntimeError, match="control socket not ready after restarting service"),
     ):
-        with pytest.raises(RuntimeError, match="control socket not ready after restarting service"):
-            _perform_action("service-restart", Config(), "shuvoice.service")
+        _perform_action("service-restart", Config(), "shuvoice.service")
 
     service_action.assert_called_once_with("shuvoice.service", "restart")
 

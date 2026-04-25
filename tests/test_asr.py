@@ -345,5 +345,5 @@ def test_moonshine_load_requires_local_artifacts_when_model_dir_is_set(tmp_path:
     cfg = Config(asr_backend="moonshine", moonshine_model_dir=str(tmp_path))
     backend = create_backend("moonshine", cfg)
 
-    with pytest.raises(ValueError, match="encoder_model.onnx"):
+    with pytest.raises(ValueError, match=r"encoder_model\.onnx"):
         backend.load()

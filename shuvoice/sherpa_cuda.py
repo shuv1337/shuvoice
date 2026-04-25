@@ -31,6 +31,11 @@ _PATCH_RPATH_LIBS: tuple[str, ...] = (
     "libonnxruntime_providers_shared.so",
     "libonnxruntime.so",
 )
+_ONNXRUNTIME_GPU_PROVIDER_LIBS: tuple[str, ...] = (
+    "libonnxruntime_providers_cuda.so",
+    "libonnxruntime_providers_shared.so",
+    "libonnxruntime_providers_tensorrt.so",
+)
 
 
 def _module_root(module: Any) -> Path | None:
@@ -223,14 +228,15 @@ def ensure_onnxruntime_gpu_provider_libs(lib_dir: Path | None = None) -> tuple[b
 
     capi_dir = _onnxruntime_capi_dir(resolved_lib_dir)
     if capi_dir is None:
+        required_present = all(
+            (resolved_lib_dir / name).exists() for name in _PATCH_RPATH_LIBS[:2]
+        )
+        if required_present:
+            return True, "ONNX Runtime GPU provider libs already present"
         return False, "onnxruntime-gpu capi directory not found"
 
     copied: list[str] = []
-    for name in (
-        "libonnxruntime_providers_cuda.so",
-        "libonnxruntime_providers_shared.so",
-        "libonnxruntime_providers_tensorrt.so",
-    ):
+    for name in _ONNXRUNTIME_GPU_PROVIDER_LIBS:
         source = capi_dir / name
         destination = resolved_lib_dir / name
         if not source.exists() or destination.exists():

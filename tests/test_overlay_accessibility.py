@@ -18,7 +18,7 @@ def test_caption_overlay_do_set_text_updates_accessible_property():
     except ValueError:
         pytest.skip("Gtk4LayerShell not available")
 
-    from gi.repository import Gtk, GLib
+    from gi.repository import GLib, Gtk
 
     from shuvoice.overlay import CaptionOverlay
 

@@ -7,6 +7,7 @@ import math
 import subprocess
 import threading
 from collections.abc import Iterator
+from contextlib import suppress
 from pathlib import Path
 
 from .piper_setup import find_piper_binary, piper_sample_rate_from_sidecar
@@ -259,11 +260,13 @@ class LocalTTSBackend(TTSBackend):
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             proc.kill()
-            proc.wait()
+            with suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=1.0)
             raise RuntimeError("Local TTS synthesis timed out") from exc
         except Exception:
             proc.kill()
-            proc.wait()
+            with suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=1.0)
             raise
         finally:
             for handle in (proc.stdin, proc.stdout, proc.stderr):

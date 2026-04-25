@@ -4,7 +4,6 @@ from argparse import Namespace
 from types import SimpleNamespace
 
 from shuvoice.cli.commands import run as run_cmd
-from shuvoice.cli.commands import wizard as wizard_cmd
 from shuvoice.cli.parser import create_parser
 from shuvoice.config import Config
 from shuvoice.setup_helpers import DEPENDENCY_EXIT_CODE, BackendSetupReport

@@ -218,7 +218,7 @@ def resample_linear(audio: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarr
         return audio
 
     src_len = len(audio)
-    dst_len = max(1, int(round(src_len * dst_rate / src_rate)))
+    dst_len = max(1, round(src_len * dst_rate / src_rate))
 
     src_idx = np.arange(src_len, dtype=np.float64)
     dst_idx = np.linspace(0, src_len - 1, num=dst_len, dtype=np.float64)

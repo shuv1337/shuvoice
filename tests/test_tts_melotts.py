@@ -540,7 +540,7 @@ def test_synthesize_stream_truncated_header_raises(monkeypatch, tmp_path: Path):
         model_id="melotts",
         playback_speed=1.0,
     )
-    with pytest.raises(RuntimeError, match="(?i)incomplete|truncated|unexpected"):
+    with pytest.raises(RuntimeError, match=r"(?i)incomplete|truncated|unexpected"):
         list(backend.synthesize_stream(request))
 
 

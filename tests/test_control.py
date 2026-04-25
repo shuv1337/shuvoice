@@ -104,7 +104,7 @@ def test_resolve_control_socket_path_rejects_outside_allowed_roots():
 
 
 def test_resolve_control_socket_path_requires_sock_suffix(tmp_path: Path):
-    with pytest.raises(ValueError, match=".sock"):
+    with pytest.raises(ValueError, match=r"\.sock"):
         resolve_control_socket_path(str(tmp_path / "control.socket"))
 
 
@@ -160,11 +160,11 @@ def test_ensure_secure_directory_rejects_unsafe_ownership(tmp_path: Path):
     # Since _ensure_secure_directory calls path.stat(), and path is an instance of Path,
     # we can patch the stat method on the Path class or specifically for the instance if we could intercept it.
     # Patching Path.stat is safer than os.stat as it avoids global side effects and path resolution issues.
-    with patch("pathlib.Path.stat", return_value=fake_stat):
-        # The test should fail effectively demonstrating the vulnerability
-        # We expect RuntimeError with message "not owned by current user"
-        with pytest.raises(RuntimeError, match="not owned by current user"):
-            _ensure_secure_directory(unsafe_dir)
+    with (
+        patch("pathlib.Path.stat", return_value=fake_stat),
+        pytest.raises(RuntimeError, match="not owned by current user"),
+    ):
+        _ensure_secure_directory(unsafe_dir)
 
 
 def test_control_server_metrics_command(tmp_path: Path):
