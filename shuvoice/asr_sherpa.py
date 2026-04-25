@@ -41,6 +41,14 @@ _CUDA_OOM_ERROR_MARKERS: tuple[str, ...] = (
     "cuda error: out of memory",
     "cuda out of memory",
     "out of memory",  # onnxruntime sometimes stringifies generic CUDA alloc failures this way
+    # ONNX Runtime's BFCArena failure path (CUDA EP) emits messages like:
+    #   "bfc_arena.cc:359 ... AllocateRawInternal ... Failed to allocate memory
+    #    for requested buffer of size N"
+    # which may be wrapped by a "MemcpyFromHost" / "MemcpyToHost" node error.
+    # Match the allocation-specific text rather than the generic memcpy node
+    # names to avoid treating unrelated copy failures as OOM.
+    "failed to allocate memory",
+    "bfc_arena",
 )
 
 
@@ -140,8 +148,8 @@ class SherpaBackend(ASRBackend):
         errors: list[str] = []
 
         try:
-            import sherpa_onnx  # noqa: F401
-        except Exception as e:
+            import sherpa_onnx
+        except Exception:
             lib_dir = sherpa_lib_dir()
             if lib_dir is not None and lib_dir.is_dir():
                 repaired, _detail = prepare_import_runtime(lib_dir)
@@ -242,7 +250,7 @@ class SherpaBackend(ASRBackend):
     @staticmethod
     def _cuda_provider_available() -> tuple[bool, str]:
         try:
-            import sherpa_onnx  # noqa: F401
+            import sherpa_onnx
         except Exception as exc:
             lib_dir = sherpa_lib_dir()
             if lib_dir is not None and lib_dir.is_dir():
@@ -885,9 +893,30 @@ class SherpaBackend(ASRBackend):
         if waveform.ndim != 1:
             waveform = waveform.reshape(-1)
 
+        # Hard cap utterance length: the offline transducer allocates
+        # encoder/joiner activation buffers that scale with audio duration,
+        # so a stuck push-to-talk that captures, say, 15 minutes of audio can
+        # request many GiB of GPU/CPU memory and blow up the process.
+        # When over the cap, keep only the trailing window so the most recent
+        # speech still gets transcribed.
+        sample_rate = int(self.config.sample_rate)
+        max_seconds = float(
+            getattr(self.config, "sherpa_offline_max_utterance_sec", 0.0) or 0.0
+        )
+        if max_seconds > 0 and waveform.size > sample_rate * max_seconds:
+            max_samples = max(1, int(sample_rate * max_seconds))
+            log.warning(
+                "Sherpa offline utterance too long (%.1fs > %.1fs cap); "
+                "truncating to last %.1fs to avoid memory blow-up.",
+                waveform.size / sample_rate,
+                max_seconds,
+                max_seconds,
+            )
+            waveform = waveform[-max_samples:]
+
         # Create a stream for this utterance
         stream = self._offline_recognizer.create_stream()
-        stream.accept_waveform(int(self.config.sample_rate), waveform)
+        stream.accept_waveform(sample_rate, waveform)
 
         # Decode the complete utterance
         self._offline_recognizer.decode_stream(stream)

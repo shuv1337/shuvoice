@@ -61,6 +61,7 @@ CONFIG_SECTION_FIELDS: dict[str, tuple[str, ...]] = {
         "sherpa_provider",
         "sherpa_num_threads",
         "sherpa_chunk_ms",
+        "sherpa_offline_max_utterance_sec",
         "moonshine_model_name",
         "moonshine_model_dir",
         "moonshine_model_precision",
@@ -235,6 +236,12 @@ class Config:
     sherpa_provider: str = "cpu"  # cpu | cuda
     sherpa_num_threads: int = 2
     sherpa_chunk_ms: int = 100
+    # Hard cap on per-utterance audio length passed to the offline_instant
+    # decoder.  When exceeded the audio is truncated to the last N seconds.
+    # This prevents stuck push-to-talk and runaway sessions from triggering
+    # CUDA / CPU OOMs (offline transducers allocate activation buffers that
+    # grow with audio length).  Set to 0 to disable.
+    sherpa_offline_max_utterance_sec: float = 60.0
 
     # Moonshine ONNX (when asr_backend = "moonshine")
     moonshine_model_name: str = "moonshine/tiny"
@@ -355,6 +362,10 @@ class Config:
 
         if int(self.sherpa_num_threads) < 1:
             raise ValueError("sherpa_num_threads must be >= 1")
+
+        if float(self.sherpa_offline_max_utterance_sec) < 0:
+            raise ValueError("sherpa_offline_max_utterance_sec must be >= 0")
+        self.sherpa_offline_max_utterance_sec = float(self.sherpa_offline_max_utterance_sec)
 
         if int(self.moonshine_chunk_ms) <= 0:
             raise ValueError("moonshine_chunk_ms must be > 0")

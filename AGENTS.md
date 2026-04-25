@@ -335,6 +335,7 @@ sherpa_chunk_ms = 100
 | `sherpa_provider` | `cpu` | `cpu` or `cuda` |
 | `sherpa_num_threads` | `2` | CPU threads |
 | `sherpa_chunk_ms` | `100` | Streaming chunk duration (ignored in `offline_instant` mode) |
+| `sherpa_offline_max_utterance_sec` | `60.0` | Hard cap on per-utterance audio length passed to the offline_instant decoder. Audio over the cap is truncated to the trailing window (most recent N seconds) before decode. Prevents stuck PTT / runaway sessions from triggering CUDA or CPU OOMs. Set to `0` to disable. |
 
 Parakeet TDT v3 note (Sherpa runtime):
 
@@ -932,6 +933,7 @@ uv run shuvoice wizard
 | — | `glib2` 2.88 split `GLib.unix_signal_add` into `GLibUnix.signal_add`; older venv `PyGObject` builds (observed: `3.54.x`) may crash in GTK activation with `AttributeError: 'gi.repository.GLib' object has no attribute 'unix_signal_add'`. `shuvoice/app.py` now uses a compatibility shim that prefers `GLibUnix.signal_add` and falls back to the legacy name. | Mitigated in app |
 | — | Parakeet streaming is behind explicit safety gate (`sherpa_enable_parakeet_streaming = true`) and requires online-compatible encoder metadata (`window_size`); incompatible models are blocked pre-start with actionable errors | By design |
 | — | Sherpa CUDA can fail at decode time (not load time) when the GPU is full elsewhere (symptoms: `CUBLAS_STATUS_ALLOC_FAILED` / `CUDNN_STATUS_INTERNAL_ERROR`). Overlay used to stay blank and nothing was pasted. `shuvoice/app.py::_handle_asr_runtime_error` + `shuvoice/asr_sherpa.py::SherpaBackend.try_fallback_to_cpu` now detect CUDA-OOM-family errors and auto-swap the recognizer to CPU for the rest of the session, showing a transient overlay toast. All other ASR errors also flash a user-visible toast with the failure count (`N/10`). | Mitigated in app |
+| — | A stuck push-to-talk (or any runaway recording) would cause the Sherpa offline_instant decoder to allocate activation buffers proportional to audio length — a 15-minute capture asked ORT for ~28 GiB on a 16 GB GPU. The error stringified as `"Failed to allocate memory for requested buffer"` / `"bfc_arena.cc"` wrapped by a `"MemcpyFromHost node"` error, which the original CUDA-OOM marker list did not match, so the auto CPU fallback never triggered. `_CUDA_OOM_ERROR_MARKERS` (`shuvoice/asr_sherpa.py`) now also includes allocation-specific ORT markers (`failed to allocate memory`, `bfc_arena`), and `process_utterance()` enforces `sherpa_offline_max_utterance_sec` (default `60.0s`) by truncating to the trailing window. | Mitigated in app |
 
 ---
 
@@ -956,6 +958,37 @@ ASR errors surface to the user via the STT overlay, not just logs.
   (10 in a row disables ASR and shows `⚠ ASR error — will retry in 30s`).
 - Backends without `try_fallback_to_cpu()` (NeMo, Moonshine) are untouched
   by this path.
+
+### Optimal Sherpa configuration for memory-constrained hosts
+
+When the host's GPU is heavily contended (e.g. running an llama-server, image
+generation, or other ML workloads alongside ShuVoice), prefer **CPU** for the
+Sherpa Parakeet path even if a GPU is available:
+
+```toml
+[asr]
+asr_backend = "sherpa"
+sherpa_provider = "cpu"
+sherpa_num_threads = 4               # 2-4 is plenty for offline_instant; PTT bursts only
+sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+instant_mode = true
+sherpa_decode_mode = "offline_instant"
+sherpa_offline_max_utterance_sec = 60.0
+```
+
+Why CPU is the better default in this profile:
+
+- The `parakeet-tdt-0.6b-v3-int8` model is published as int8 specifically for
+  CPU; RTF on a modern desktop CPU is well under realtime.
+- ShuVoice is idle 99% of the time; PTT release is a short CPU burst, not a
+  steady load — it shares the box gracefully with other workloads.
+- GPU contention with other ML services (llama-server, etc.) routinely leads
+  to ORT BFCArena allocation failures on the GPU EP that don't happen on CPU.
+- CPU eliminates the CUDA dependency-management surface (compat libs, RUNPATH
+  patching, ORT GPU/CUDA version skew) entirely for this code path.
+
+GPU is still useful for the `nvidia/nemotron-speech-streaming-en-0.6b` NeMo
+backend, where streaming throughput matters more.
 
 ### When to update AGENTS.md
 

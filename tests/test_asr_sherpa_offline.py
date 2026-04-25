@@ -140,7 +140,7 @@ class TestSherpaProcessChunk:
 
         audio = np.zeros(1600, dtype=np.float32)
 
-        with pytest.raises(RuntimeError, match="process_chunk.*not supported in offline"):
+        with pytest.raises(RuntimeError, match=r"process_chunk.*not supported in offline"):
             backend.process_chunk(audio)
 
 
@@ -162,7 +162,7 @@ class TestSherpaProcessUtterance:
 
         audio = np.zeros(16000, dtype=np.float32)
 
-        with pytest.raises(RuntimeError, match="process_utterance.*only supported in offline"):
+        with pytest.raises(RuntimeError, match=r"process_utterance.*only supported in offline"):
             backend.process_utterance(audio)
 
     def test_process_utterance_raises_when_not_loaded(self, tmp_path: Path):
@@ -626,3 +626,145 @@ class TestTryFallbackToCpu:
         # retry will still see the CUDA-was-requested->CPU transition.
         assert backend.config.sherpa_provider == "cpu"
         assert "reload failed" in detail.lower()
+
+
+# -- Regression: ORT BFCArena / MemcpyFromHost OOM detection ---------------
+#
+# The 2026-04-25 production failure on shuvdev (RTX 5080, 28 GiB allocation
+# request from a stuck push-to-talk) surfaced as:
+#   "Non-zero status code returned while running MemcpyFromHost node.
+#    Name:'Memcpy_token_530' Status Message: bfc_arena.cc:359 ...
+#    AllocateRawInternal ... Failed to allocate memory for requested
+#    buffer of size 30817320960"
+# None of the original markers matched, so the per-call fallback never fired.
+# These tests pin the broadened markers in place while avoiding false positives
+# on generic memcpy failures that are not allocation failures.
+
+
+class TestLooksLikeCudaOomErrorBfcArena:
+    def test_detects_ort_failed_to_allocate_memory(self):
+        from shuvoice.asr_sherpa import looks_like_cuda_oom_error
+
+        exc = RuntimeError(
+            "Non-zero status code returned while running MemcpyFromHost node. "
+            "Name:'Memcpy_token_530' Status Message: "
+            "/onnxruntime_src/onnxruntime/core/framework/bfc_arena.cc:359 "
+            "void* onnxruntime::BFCArena::AllocateRawInternal(size_t, bool, "
+            "onnxruntime::Stream*) Failed to allocate memory for requested "
+            "buffer of size 30817320960"
+        )
+        assert looks_like_cuda_oom_error(exc) is True
+
+    def test_detects_bfc_arena_substring(self):
+        from shuvoice.asr_sherpa import looks_like_cuda_oom_error
+
+        assert looks_like_cuda_oom_error(
+            RuntimeError("bfc_arena.cc:359 ... AllocateRawInternal ...")
+        ) is True
+
+    def test_detects_failed_to_allocate_memory_substring(self):
+        from shuvoice.asr_sherpa import looks_like_cuda_oom_error
+
+        assert looks_like_cuda_oom_error(
+            RuntimeError("Failed to allocate memory for requested buffer of size 123")
+        ) is True
+
+    def test_does_not_treat_generic_memcpy_node_as_oom(self):
+        from shuvoice.asr_sherpa import looks_like_cuda_oom_error
+
+        assert looks_like_cuda_oom_error(
+            RuntimeError("running MemcpyFromHost node. Name:'Memcpy_token_530'")
+        ) is False
+        assert looks_like_cuda_oom_error(
+            RuntimeError("running MemcpyToHost node. Name:'Memcpy_out'")
+        ) is False
+
+
+# -- Regression: utterance length cap in offline_instant mode ---------------
+#
+# A stuck PTT (or runaway recording) can push 10+ minutes of audio into the
+# offline transducer.  Encoder/joiner activations grow with audio length, so
+# this can request many GiB of GPU/CPU memory.  process_utterance() now
+# enforces ``sherpa_offline_max_utterance_sec`` by truncating to the
+# trailing window before decode.
+
+
+class TestSherpaOfflineMaxUtteranceCap:
+    def _make_loaded_backend(self, tmp_path: Path, **cfg_overrides):
+        model_dir = _make_model_dir(tmp_path)
+        cfg_kwargs = dict(
+            asr_backend="sherpa",
+            sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+            sherpa_model_dir=str(model_dir),
+            sherpa_decode_mode="offline_instant",
+        )
+        cfg_kwargs.update(cfg_overrides)
+        cfg = Config(**cfg_kwargs)
+        backend = create_backend("sherpa", cfg)
+
+        mock_result = types.SimpleNamespace(text="ok")
+        mock_stream = MagicMock()
+        mock_stream.result = mock_result
+
+        mock_recognizer = MagicMock()
+        mock_recognizer.create_stream.return_value = mock_stream
+        backend._offline_recognizer = mock_recognizer
+        return backend, mock_stream, mock_recognizer
+
+    def test_truncates_audio_above_cap_to_trailing_window(self, tmp_path: Path, caplog):
+        # Cap = 5s @ 16 kHz, audio = 12s
+        backend, mock_stream, _ = self._make_loaded_backend(
+            tmp_path, sherpa_offline_max_utterance_sec=5.0
+        )
+        sample_rate = backend.config.sample_rate
+        audio = np.arange(12 * sample_rate, dtype=np.float32)
+
+        with caplog.at_level("WARNING", logger="shuvoice.asr_sherpa"):
+            backend.process_utterance(audio)
+
+        # accept_waveform should have been called with only the trailing 5s.
+        call_args = mock_stream.accept_waveform.call_args
+        passed_sample_rate, passed_waveform = call_args.args
+        assert passed_sample_rate == sample_rate
+        assert passed_waveform.shape == (5 * sample_rate,)
+        # Trailing window: last sample of 12s audio is 12*sr-1 (np.arange).
+        assert int(passed_waveform[-1]) == 12 * sample_rate - 1
+        assert int(passed_waveform[0]) == 7 * sample_rate
+        # Warning was emitted explaining the truncation.
+        assert any(
+            "too long" in record.message.lower() and "truncating" in record.message.lower()
+            for record in caplog.records
+        )
+
+    def test_does_not_truncate_audio_within_cap(self, tmp_path: Path):
+        backend, mock_stream, _ = self._make_loaded_backend(
+            tmp_path, sherpa_offline_max_utterance_sec=60.0
+        )
+        sample_rate = backend.config.sample_rate
+        audio = np.arange(3 * sample_rate, dtype=np.float32)
+
+        backend.process_utterance(audio)
+
+        passed_waveform = mock_stream.accept_waveform.call_args.args[1]
+        assert passed_waveform.shape == (3 * sample_rate,)
+        # Identical to input.
+        assert int(passed_waveform[0]) == 0
+        assert int(passed_waveform[-1]) == 3 * sample_rate - 1
+
+    def test_zero_cap_disables_truncation(self, tmp_path: Path):
+        backend, mock_stream, _ = self._make_loaded_backend(
+            tmp_path, sherpa_offline_max_utterance_sec=0.0
+        )
+        sample_rate = backend.config.sample_rate
+        # 200s — well past any reasonable PTT — must pass through untouched.
+        audio = np.arange(200 * sample_rate, dtype=np.float32)
+
+        backend.process_utterance(audio)
+
+        passed_waveform = mock_stream.accept_waveform.call_args.args[1]
+        assert passed_waveform.shape == (200 * sample_rate,)
+
+    def test_default_cap_is_60_seconds(self, tmp_path: Path):
+        """Lock the default in place; lowering it is a behavior change."""
+        backend, _, _ = self._make_loaded_backend(tmp_path)
+        assert backend.config.sherpa_offline_max_utterance_sec == 60.0
