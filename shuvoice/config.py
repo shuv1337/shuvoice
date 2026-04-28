@@ -40,6 +40,7 @@ CONFIG_SECTION_FIELDS: dict[str, tuple[str, ...]] = {
         "audio_device",
         "input_gain",
         "audio_queue_max_size",
+        "recording_preroll_ms",
         "silence_rms_threshold",
         "silence_rms_multiplier",
         "min_speech_ms",
@@ -211,6 +212,7 @@ class Config:
     audio_device: str | int | None = None  # sounddevice device name/index
     input_gain: float = 1.0  # multiply PCM before ASR (eg. 1.5)
     audio_queue_max_size: int = 200
+    recording_preroll_ms: int = 200  # audio retained around PTT start to catch short prompts
     silence_rms_threshold: float = 0.008  # absolute floor for speech RMS gating
     silence_rms_multiplier: float = 1.8  # dynamic threshold = noise_floor * multiplier
     min_speech_ms: int = 80  # minimum above-threshold speech before committing text
@@ -393,6 +395,9 @@ class Config:
 
         if int(self.audio_queue_max_size) < 1:
             raise ValueError("audio_queue_max_size must be >= 1")
+        if int(self.recording_preroll_ms) < 0:
+            raise ValueError("recording_preroll_ms must be >= 0")
+        self.recording_preroll_ms = int(self.recording_preroll_ms)
         if float(self.auto_gain_target_peak) <= 0:
             raise ValueError("auto_gain_target_peak must be > 0")
         if float(self.auto_gain_max) < 1:

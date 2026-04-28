@@ -203,6 +203,7 @@ Applied only for backends that do **not** request raw audio.
 | `auto_gain_target_peak` | `0.15` | Target RMS peak for utterance gain |
 | `auto_gain_max` | `10.0` | Upper cap for utterance gain |
 | `auto_gain_settle_chunks` | `2` | Speech chunks required before gain updates |
+| `recording_preroll_ms` | `200` | Audio retained around push-to-talk start so very short prompts do not lose their first syllable during control/ASR reset latency |
 
 ### Typing text replacements
 

@@ -18,6 +18,7 @@ def test_load_defaults_when_config_missing(monkeypatch, tmp_path: Path):
     assert cfg.typing_text_case == "default"
     assert cfg.typing_clipboard_settle_delay_ms == 40
     assert cfg.audio_queue_max_size == 200
+    assert cfg.recording_preroll_ms == 200
     assert cfg.auto_gain_target_peak == 0.15
     assert cfg.auto_gain_max == 10.0
     assert cfg.auto_gain_settle_chunks == 2
@@ -70,6 +71,7 @@ def test_load_flattens_sections_and_ignores_unknown(monkeypatch, tmp_path: Path)
 chunk_ms = 80
 sample_rate = 16000
 audio_queue_max_size = 55
+recording_preroll_ms = 180
 silence_rms_threshold = 0.007
 silence_rms_multiplier = 2.2
 min_speech_ms = 90
@@ -153,6 +155,7 @@ foo = "bar"
 
     assert cfg.chunk_ms == 80
     assert cfg.audio_queue_max_size == 55
+    assert cfg.recording_preroll_ms == 180
     assert cfg.silence_rms_threshold == 0.007
     assert cfg.silence_rms_multiplier == 2.2
     assert cfg.min_speech_ms == 90

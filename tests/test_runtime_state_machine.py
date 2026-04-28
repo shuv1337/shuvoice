@@ -22,12 +22,15 @@ def test_on_recording_start_sets_state_and_overlay():
         asr=SimpleNamespace(reset=Mock()),
         overlay=SimpleNamespace(show=Mock(), set_state=Mock(), set_text=Mock()),
         _play_feedback_tone=Mock(),
+        _capture_recording_preroll=Mock(),
     )
 
     on_recording_start(app)
 
     assert app._recording.is_set()
     assert not app._processing.is_set()
+    assert app._capture_recording_preroll.call_count == 2
+    app.audio.clear.assert_not_called()
     app.overlay.show.assert_called_once()
 
 

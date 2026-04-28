@@ -48,6 +48,18 @@ def begin_utterance(app, state) -> None:
         app._noise_floor_rms * app._speech_rms_multiplier,
     )
     state.reset(rms_threshold=threshold)
+    take_preroll = getattr(app, "_take_recording_preroll", None)
+    if callable(take_preroll):
+        preroll_chunks = take_preroll()
+        for preroll_chunk in preroll_chunks:
+            append_recording_chunk(app, state, preroll_chunk)
+        if preroll_chunks:
+            log.debug(
+                "Prepended %d preroll chunk(s) at recording start (%d samples buffered)",
+                len(preroll_chunks),
+                state.total,
+            )
+
     log.debug(
         "Recording energy threshold: %.4f (noise_floor=%.4f, floor=%.4f, x%.2f)",
         threshold,

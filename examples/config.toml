@@ -12,6 +12,8 @@ fallback_sample_rate = 48000
 input_gain = 1.0
 # Max queued chunks before dropping oldest (bounded queue for lower latency)
 audio_queue_max_size = 200
+# Audio retained around push-to-talk start to catch very short prompts
+recording_preroll_ms = 200
 # Absolute RMS floor used to suppress silence hallucinations on empty presses
 silence_rms_threshold = 0.008
 # Dynamic speech threshold multiplier based on ambient noise floor

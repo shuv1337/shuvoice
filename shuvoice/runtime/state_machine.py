@@ -44,7 +44,11 @@ def on_recording_start(app) -> None:
             app._asr_disabled_event.clear()
             app._consecutive_asr_failures = 0
 
-        app.audio.clear()
+        capture_preroll = getattr(app, "_capture_recording_preroll", None)
+        if callable(capture_preroll):
+            capture_preroll()
+        else:
+            app.audio.clear()
 
         try:
             app.asr.reset()
@@ -62,7 +66,10 @@ def on_recording_start(app) -> None:
                 app._show_overlay_error("⚠ ASR error — restart ShuVoice")
             return
 
-        app.audio.clear()
+        if callable(capture_preroll):
+            capture_preroll()
+        else:
+            app.audio.clear()
 
     app._processing.clear()
     app._recording.set()

@@ -126,6 +126,8 @@ class ShuVoiceApp(Gtk.Application):
         self._tts_last_preview_text = ""
         self._debug_current_transcript = ""
         self._debug_last_final_transcript = ""
+        self._recording_preroll_lock = threading.Lock()
+        self._recording_preroll_chunks: list[np.ndarray] = []
 
         if config.tts_enabled:
             try:
@@ -626,6 +628,37 @@ class ShuVoiceApp(Gtk.Application):
             volume=self.config.feedback_volume,
             sample_rate=self.config.sample_rate,
         )
+
+    def _capture_recording_preroll(self) -> None:
+        chunks = self.audio.drain_pending_chunks()
+        max_samples = self.config.sample_rate * max(0, int(self.config.recording_preroll_ms)) // 1000
+        with self._recording_preroll_lock:
+            chunks = [*self._recording_preroll_chunks, *chunks]
+
+        if max_samples <= 0 or not chunks:
+            preroll: list[np.ndarray] = []
+        else:
+            preroll = []
+            remaining = max_samples
+            for chunk in reversed(chunks):
+                if remaining <= 0:
+                    break
+                if len(chunk) <= remaining:
+                    preroll.append(chunk)
+                    remaining -= len(chunk)
+                else:
+                    preroll.append(chunk[-remaining:])
+                    remaining = 0
+            preroll.reverse()
+
+        with self._recording_preroll_lock:
+            self._recording_preroll_chunks = preroll
+
+    def _take_recording_preroll(self) -> list[np.ndarray]:
+        with self._recording_preroll_lock:
+            chunks = self._recording_preroll_chunks
+            self._recording_preroll_chunks = []
+        return chunks
 
     def _on_recording_start(self):
         tts_player = getattr(self, "tts_player", None)
