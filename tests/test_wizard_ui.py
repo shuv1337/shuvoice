@@ -74,27 +74,30 @@ def test_wizard_defaults_to_parakeet_instant_profile():
     assert wizard._sherpa_model_name == "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
     assert wizard._sherpa_enable_parakeet_streaming is False
     assert wizard._sherpa_provider == "cpu"
-    assert wizard._tts_backend == "elevenlabs"
-    assert wizard._tts_voice_id == "zNsotODqUhvbJ5wMG7Ei"
+    assert wizard._tts_backend == "kokoro"
+    assert wizard._tts_voice_id == "af_heart"
+    assert wizard._tts_playback_speed == 1.25
 
 
-def test_wizard_defaults_sherpa_to_cuda_when_available():
+def test_wizard_defaults_sherpa_to_cpu_when_cuda_available():
     from shuvoice.wizard import WelcomeWizard
 
     with patch("shuvoice.wizard._detect_cuda", return_value=True):
         wizard = WelcomeWizard()
 
-    assert wizard._sherpa_provider == "cuda"
+    assert wizard._sherpa_provider == "cpu"
 
 
-def test_sherpa_cuda_description_mentions_auto_selected_when_cuda_available():
+def test_sherpa_cuda_description_mentions_cpu_default_when_cuda_available():
     from shuvoice.wizard import WelcomeWizard
 
     with patch("shuvoice.wizard._detect_cuda", return_value=True):
         wizard = WelcomeWizard()
         wizard._build_asr_page()
 
-    assert "selected by default" in wizard._sherpa_provider_desc_label.get_text().lower()
+    desc = wizard._sherpa_provider_desc_label.get_text().lower()
+    assert "default for parakeet instant mode" in desc
+    assert "best compatibility" in desc
 
 
 def test_make_dropdown_section_updates_state_and_description():
@@ -205,7 +208,7 @@ def test_text_case_dropdown_updates_state():
     assert wizard._typing_text_case == "lowercase"
 
 
-def test_tts_page_includes_provider_dropdown_and_voice_entry():
+def test_tts_page_includes_provider_dropdown_and_default_kokoro_voice_entry():
     from shuvoice.wizard import WelcomeWizard
 
     wizard = WelcomeWizard()
@@ -214,7 +217,7 @@ def test_tts_page_includes_provider_dropdown_and_voice_entry():
     assert hasattr(wizard, "_tts_provider_dropdown")
     assert isinstance(wizard._tts_provider_dropdown, Gtk.DropDown)
     assert hasattr(wizard, "_tts_voice_entry")
-    assert wizard._tts_voice_entry.get_text() == "zNsotODqUhvbJ5wMG7Ei"
+    assert wizard._tts_voice_entry.get_text() == "af_heart"
 
 
 def test_tts_provider_dropdown_updates_voice_entry_for_openai():
@@ -462,18 +465,19 @@ def test_on_finish_writes_config_releases_window_and_quits():
     write_config.assert_called_once_with(
         "moonshine",
         overwrite_existing=False,
-        sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
         typing_final_injection_mode="auto",
         typing_text_case="default",
-        tts_backend="elevenlabs",
-        tts_default_voice_id="zNsotODqUhvbJ5wMG7Ei",
+        tts_backend="kokoro",
+        tts_default_voice_id="af_heart",
         tts_local_model_path=None,
         tts_local_voice=None,
-        tts_playback_speed=1.0,
+        tts_playback_speed=1.25,
+        tts_kokoro_base_url="http://localhost:8880/v1",
     )
     maybe_download.assert_called_once_with(
         "moonshine",
-        sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
         progress_callback=None,
         cancel_requested=None,
         auto_install_missing=True,
@@ -518,7 +522,7 @@ def test_on_finish_passes_parakeet_streaming_profile_to_write_config():
         tts_default_voice_id="onyx",
         tts_local_model_path=None,
         tts_local_voice=None,
-        tts_playback_speed=1.0,
+        tts_playback_speed=1.25,
     )
 
 
@@ -548,14 +552,14 @@ def test_on_finish_passes_local_tts_settings_to_write_config():
     write_config.assert_called_once_with(
         "moonshine",
         overwrite_existing=False,
-        sherpa_model_name="sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
+        sherpa_model_name="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
         typing_final_injection_mode="auto",
         typing_text_case="default",
         tts_backend="local",
         tts_default_voice_id="amy",
         tts_local_model_path="/tmp/piper-models",
         tts_local_voice="amy",
-        tts_playback_speed=1.0,
+        tts_playback_speed=1.25,
     )
 
 
@@ -632,11 +636,12 @@ def test_complete_finish_applies_zipformer_fallback_for_incompatible_parakeet_st
         sherpa_provider="cuda",
         typing_final_injection_mode="auto",
         typing_text_case="default",
-        tts_backend="elevenlabs",
-        tts_default_voice_id="zNsotODqUhvbJ5wMG7Ei",
+        tts_backend="kokoro",
+        tts_default_voice_id="af_heart",
         tts_local_model_path=None,
         tts_local_voice=None,
-        tts_playback_speed=1.0,
+        tts_playback_speed=1.25,
+        tts_kokoro_base_url="http://localhost:8880/v1",
     )
     write_marker.assert_called_once()
     assert wizard._sherpa_model_name == "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
@@ -806,7 +811,7 @@ def test_on_finish_passes_tts_playback_speed_to_write_config():
 
 
 def test_on_finish_uses_default_playback_speed_when_not_set():
-    """_on_finish defaults to 1.0x when the wizard has never updated its speed."""
+    """_on_finish defaults to the wizard default when speed was never updated."""
     from shuvoice.wizard import WelcomeWizard
     from shuvoice.wizard_state import DEFAULT_TTS_PLAYBACK_SPEED
 
@@ -840,11 +845,11 @@ def test_build_tts_page_has_playback_speed_dropdown_populated():
     wizard._build_tts_page()
 
     assert wizard._tts_playback_speed_dropdown is not None
-    # Default preset id is "1.0"; matching index in TTS_PLAYBACK_SPEED_PRESETS.
+    # Default preset id is "1.25"; matching index in TTS_PLAYBACK_SPEED_PRESETS.
     from shuvoice.wizard_state import TTS_PLAYBACK_SPEED_PRESETS
 
     default_idx = next(
-        i for i, (pid, _label, _desc) in enumerate(TTS_PLAYBACK_SPEED_PRESETS) if pid == "1.0"
+        i for i, (pid, _label, _desc) in enumerate(TTS_PLAYBACK_SPEED_PRESETS) if pid == "1.25"
     )
     assert wizard._tts_playback_speed_dropdown.get_selected() == default_idx
 
@@ -858,8 +863,8 @@ def test_playback_speed_dropdown_updates_wizard_state():
     wizard._build_tts_page()
 
     target_idx = next(
-        i for i, (pid, _label, _desc) in enumerate(TTS_PLAYBACK_SPEED_PRESETS) if pid == "1.25"
+        i for i, (pid, _label, _desc) in enumerate(TTS_PLAYBACK_SPEED_PRESETS) if pid == "1.5"
     )
     wizard._tts_playback_speed_dropdown.set_selected(target_idx)
 
-    assert wizard._tts_playback_speed == 1.25
+    assert wizard._tts_playback_speed == 1.5

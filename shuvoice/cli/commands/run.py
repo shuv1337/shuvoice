@@ -118,9 +118,8 @@ def run_app(args) -> int:
 def run_wizard_command() -> int:
     completed = run_welcome_wizard(force_reconfigure=True)
     if completed:
-        # The wizard is a separate process from the running `shuvoice.service`;
-        # config changes are not picked up until the service is restarted.
-        # Do this automatically so users don't silently keep the old TTS voice,
-        # ASR backend, or other selections after finishing the wizard.
+        # The wizard can run as a separate process from `shuvoice.service`.
+        # Start it on first-run setup, or restart it when already active, so
+        # users immediately get the selected ASR/TTS/keybind settings.
         maybe_restart_running_service()
     return 0

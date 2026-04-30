@@ -33,7 +33,6 @@ from .config_io import load_raw, write_atomic
 from .config_migrations import migrate_to_latest
 from .tts_base import DEFAULT_LOCAL_TTS_MODEL_ID, DEFAULT_LOCAL_TTS_VOICE_ID
 from .tts_speed import (
-    TTS_PLAYBACK_SPEED_DEFAULT,
     format_tts_playback_speed,
     validate_tts_playback_speed,
 )
@@ -63,6 +62,7 @@ ASR_BACKENDS = [
 
 DEFAULT_SHERPA_MODEL_NAME = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
 PARAKEET_TDT_V3_INT8_MODEL_NAME = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+DEFAULT_WIZARD_SHERPA_MODEL_NAME = PARAKEET_TDT_V3_INT8_MODEL_NAME
 DEFAULT_KEYBIND_ID = "right_ctrl"
 
 # Final text-injection presets for wizard configuration.
@@ -137,7 +137,7 @@ TTS_KEYBIND_PRESETS = [
     ),
 ]
 DEFAULT_TTS_KEYBIND_ID = "super_ctrl_s"
-DEFAULT_TTS_BACKEND = "elevenlabs"
+DEFAULT_TTS_BACKEND = "kokoro"
 
 # Default playback-speed presets shown in the wizard.
 # (id, display_label, description)
@@ -149,13 +149,13 @@ TTS_PLAYBACK_SPEED_PRESETS: list[tuple[str, str, str]] = [
     ),
     (
         "1.0",
-        f"{format_tts_playback_speed(1.0)} (default)",
-        "Natural speed \u2014 matches each provider\u2019s baseline pace.",
+        f"{format_tts_playback_speed(1.0)} (baseline)",
+        "Natural provider baseline pace.",
     ),
     (
         "1.25",
-        f"{format_tts_playback_speed(1.25)} (brisk)",
-        "Slightly faster. Good for skimming or familiar content.",
+        f"{format_tts_playback_speed(1.25)} (default)",
+        "Slightly faster default. Good for skimming or familiar content.",
     ),
     (
         "1.5",
@@ -173,7 +173,7 @@ TTS_PLAYBACK_SPEED_PRESETS: list[tuple[str, str, str]] = [
         "Maximum supported playback speed.",
     ),
 ]
-DEFAULT_TTS_PLAYBACK_SPEED = TTS_PLAYBACK_SPEED_DEFAULT
+DEFAULT_TTS_PLAYBACK_SPEED = 1.25
 
 
 def tts_playback_speed_preset_id(speed: float | int | str) -> str:
@@ -188,7 +188,7 @@ def tts_playback_speed_preset_id(speed: float | int | str) -> str:
     except (TypeError, ValueError):
         value = DEFAULT_TTS_PLAYBACK_SPEED
 
-    best_id = "1.0"
+    best_id = str(DEFAULT_TTS_PLAYBACK_SPEED)
     best_diff = float("inf")
     for preset_id, _label, _desc in TTS_PLAYBACK_SPEED_PRESETS:
         try:
@@ -814,8 +814,8 @@ def write_config(
     Provider selection:
     - If ``sherpa_provider`` is explicitly set, that value is written as-is
       (``cpu`` or ``cuda``).
-    - Otherwise, Sherpa defaults to CUDA only when the installed sherpa-onnx
-      runtime already exposes CUDAExecutionProvider; falls back to CPU.
+    - Otherwise, Sherpa defaults to CPU for the Parakeet instant wizard profile;
+      users can explicitly choose CUDA in the wizard when desired.
     """
     injection_mode = str(typing_final_injection_mode).strip().lower()
     if injection_mode not in _FINAL_INJECTION_MODE_SET:
@@ -867,13 +867,7 @@ def write_config(
                     "expose CUDAExecutionProvider; setup will attempt runtime install."
                 )
         else:
-            sherpa_cuda_available = _detect_sherpa_cuda_provider()
-            provider = "cuda" if sherpa_cuda_available else "cpu"
-            if not sherpa_cuda_available and _detect_cuda():
-                log.info(
-                    "Sherpa runtime CUDAExecutionProvider not detected; defaulting to "
-                    "sherpa_provider='cpu'"
-                )
+            provider = "cpu"
     else:
         provider = "cuda" if _detect_cuda() else "cpu"
 
@@ -915,7 +909,7 @@ def write_config(
     typing_table["use_clipboard_for_final"] = injection_mode != "direct"
 
     if asr_backend == "sherpa":
-        chosen_model = (sherpa_model_name or DEFAULT_SHERPA_MODEL_NAME).strip()
+        chosen_model = (sherpa_model_name or DEFAULT_WIZARD_SHERPA_MODEL_NAME).strip()
         is_parakeet = _is_parakeet_sherpa_model_name(chosen_model)
         enable_parakeet_streaming = bool(sherpa_enable_parakeet_streaming and is_parakeet)
 
@@ -1067,7 +1061,7 @@ def format_summary(
         lines.insert(5, f"TTS base URL:     {kokoro_base_url_value.rstrip('/')}")
 
     if asr_backend == "sherpa":
-        chosen_model = (sherpa_model_name or DEFAULT_SHERPA_MODEL_NAME).strip()
+        chosen_model = (sherpa_model_name or DEFAULT_WIZARD_SHERPA_MODEL_NAME).strip()
         is_parakeet = _is_parakeet_sherpa_model_name(chosen_model)
         parakeet_streaming = bool(sherpa_enable_parakeet_streaming and is_parakeet)
 

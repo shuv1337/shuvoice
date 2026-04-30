@@ -65,8 +65,8 @@ def test_write_marker_creates_file(tmp_path):
         assert (tmp_path / ".wizard-done").read_text() == "done\n"
 
 
-def test_write_config_creates_toml_with_cuda(tmp_path):
-    """write_config writes config.toml with CUDA provider when Sherpa CUDA is available."""
+def test_write_config_creates_toml_with_wizard_defaults(tmp_path):
+    """write_config writes wizard defaults: Parakeet instant profile on CPU."""
     with (
         patch("shuvoice.wizard_state.Config") as mock_config,
         patch("shuvoice.wizard_state._detect_sherpa_cuda_provider", return_value=True),
@@ -79,21 +79,21 @@ def test_write_config_creates_toml_with_cuda(tmp_path):
 
         content = config_file.read_text()
         assert 'asr_backend = "sherpa"' in content
-        assert f'sherpa_model_name = "{DEFAULT_SHERPA_MODEL_NAME}"' in content
-        assert 'sherpa_provider = "cuda"' in content
-        assert 'sherpa_decode_mode = "auto"' in content
-        assert "instant_mode = false" in content
+        assert f'sherpa_model_name = "{PARAKEET_TDT_V3_INT8_MODEL_NAME}"' in content
+        assert 'sherpa_provider = "cpu"' in content
+        assert 'sherpa_decode_mode = "offline_instant"' in content
+        assert "instant_mode = true" in content
         assert "sherpa_enable_parakeet_streaming = false" in content
         assert 'output_mode = "final_only"' in content
         assert f'typing_final_injection_mode = "{DEFAULT_FINAL_INJECTION_MODE}"' in content
         assert 'typing_text_case = "default"' in content
-        assert 'tts_backend = "elevenlabs"' in content
-        assert 'tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"' in content
+        assert 'tts_backend = "kokoro"' in content
+        assert 'tts_default_voice_id = "af_heart"' in content
         assert "use_clipboard_for_final = true" in content
 
 
 def test_write_config_creates_toml_without_cuda(tmp_path):
-    """write_config writes config.toml with CPU provider when Sherpa CUDA is unavailable."""
+    """write_config keeps the CPU Parakeet default when CUDA is detected but not selected."""
     with (
         patch("shuvoice.wizard_state.Config") as mock_config,
         patch("shuvoice.wizard_state._detect_sherpa_cuda_provider", return_value=False),
@@ -105,16 +105,16 @@ def test_write_config_creates_toml_without_cuda(tmp_path):
         config_file = tmp_path / "config.toml"
         content = config_file.read_text()
         assert 'asr_backend = "sherpa"' in content
-        assert f'sherpa_model_name = "{DEFAULT_SHERPA_MODEL_NAME}"' in content
+        assert f'sherpa_model_name = "{PARAKEET_TDT_V3_INT8_MODEL_NAME}"' in content
         assert 'sherpa_provider = "cpu"' in content
-        assert 'sherpa_decode_mode = "auto"' in content
-        assert "instant_mode = false" in content
+        assert 'sherpa_decode_mode = "offline_instant"' in content
+        assert "instant_mode = true" in content
         assert "sherpa_enable_parakeet_streaming = false" in content
         assert 'output_mode = "final_only"' in content
         assert f'typing_final_injection_mode = "{DEFAULT_FINAL_INJECTION_MODE}"' in content
         assert 'typing_text_case = "default"' in content
-        assert 'tts_backend = "elevenlabs"' in content
-        assert 'tts_default_voice_id = "zNsotODqUhvbJ5wMG7Ei"' in content
+        assert 'tts_backend = "kokoro"' in content
+        assert 'tts_default_voice_id = "af_heart"' in content
         assert "use_clipboard_for_final = true" in content
 
 
@@ -352,8 +352,8 @@ def test_format_summary_contains_backend_and_keybind():
     result = format_summary("sherpa")
     assert "Sherpa-ONNX" in result
     assert "Final injection:  Auto (recommended)" in result
-    assert "TTS provider:     ElevenLabs" in result
-    assert "TTS voice:        Default (zNsotODqUhvbJ5wMG7Ei)" in result
+    assert "TTS provider:     Kokoro" in result
+    assert "TTS voice:        Default (af_heart)" in result
     assert "Right Control" in result
     assert "hyprland.conf" in result
 
@@ -822,7 +822,7 @@ def test_write_config_rejects_invalid_tts_backend_but_accepts_melotts_and_kokoro
 
 
 def test_write_config_persists_default_playback_speed(tmp_path):
-    """write_config writes tts_playback_speed = 1.0 by default."""
+    """write_config writes tts_playback_speed = 1.25 by default."""
     with (
         patch("shuvoice.wizard_state.Config") as mock_config,
         patch("shuvoice.wizard_state._detect_cuda", return_value=False),
@@ -831,7 +831,7 @@ def test_write_config_persists_default_playback_speed(tmp_path):
         write_config("nemo")
 
     content = (tmp_path / "config.toml").read_text()
-    assert "tts_playback_speed = 1.0" in content
+    assert "tts_playback_speed = 1.25" in content
 
 
 def test_write_config_persists_explicit_playback_speed(tmp_path):
@@ -899,10 +899,10 @@ def test_write_config_playback_speed_round_trip(tmp_path):
 
 
 def test_format_summary_includes_default_playback_speed():
-    """format_summary always shows a TTS speed line, defaulting to 1.0×."""
+    """format_summary always shows a TTS speed line, defaulting to 1.25×."""
     result = format_summary("nemo")
     assert "TTS speed:" in result
-    assert "1.0×" in result
+    assert "1.25×" in result
 
 
 def test_format_summary_reflects_explicit_playback_speed():
@@ -917,7 +917,7 @@ def test_format_summary_reflects_explicit_playback_speed():
 
 
 def test_tts_playback_speed_presets_cover_supported_range():
-    """Wizard presets include the default 1.0× and stay within the valid 0.5–2.0 range."""
+    """Wizard presets include the 1.25× default and stay within the valid 0.5–2.0 range."""
     from shuvoice.wizard_state import (
         TTS_PLAYBACK_SPEED_PRESETS,
         tts_playback_speed_preset_id,
@@ -934,4 +934,4 @@ def test_tts_playback_speed_presets_cover_supported_range():
     assert tts_playback_speed_preset_id(1.27) == "1.25"
     assert tts_playback_speed_preset_id(1.9) == "2.0"
     # Non-numeric / garbage input falls back to default preset
-    assert tts_playback_speed_preset_id("garbage") == "1.0"
+    assert tts_playback_speed_preset_id("garbage") == "1.25"

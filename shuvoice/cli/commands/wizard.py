@@ -27,16 +27,18 @@ def run_welcome_wizard(*, force_reconfigure: bool = False) -> bool:
 
 
 def maybe_restart_running_service(service: str = _SHUVOICE_SERVICE) -> str:
-    """Restart ``service`` if it's currently active, so wizard changes take effect.
+    """Start or restart ``service`` after the wizard completes.
 
     Returns one of:
         - ``"restarted"``:  service was active and was restarted successfully
-        - ``"not_active"``: service was not active; nothing to do
+        - ``"started"``:    service was inactive/failed and was started successfully
+        - ``"not_active"``: service was in an unsupported non-active state; nothing to do
         - ``"unavailable"``: systemctl is not usable in this environment
-        - ``"failed"``:     restart was attempted but failed (see stderr)
+        - ``"failed"``:     start/restart was attempted but failed (see stderr)
 
-    Emits a user-friendly status line on stdout/stderr in all non-``not_active``
-    cases so the user knows why config changes are (or aren't) picked up.
+    The function name is kept for compatibility, but first-run wizard launches
+    need a start, not just a restart: the Waybar setup flow runs in a separate
+    process while ``shuvoice.service`` may still be inactive.
     """
     # Imported lazily to keep test isolation and avoid eager subprocess imports.
     from ...waybar.systemd import service_action, service_active_state
@@ -58,19 +60,27 @@ def maybe_restart_running_service(service: str = _SHUVOICE_SERVICE) -> str:
         # Nothing to restart; stay silent so manual `shuvoice` users aren't spammed.
         return "unavailable"
 
-    if state not in {"active", "activating", "reloading"}:
+    if state in {"active", "activating", "reloading"}:
+        action = "restart"
+        success_status = "restarted"
+        success_verb = "Restarted"
+    elif state in {"inactive", "failed", "dead", "deactivating"}:
+        action = "start"
+        success_status = "started"
+        success_verb = "Started"
+    else:
         return "not_active"
 
     try:
-        service_action(service, "restart")
+        service_action(service, action)
     except RuntimeError as exc:
         print(
-            f"WARNING: failed to restart {service} automatically: {exc}\n"
-            f"         Run `systemctl --user restart {service}` manually for "
+            f"WARNING: failed to {action} {service} automatically: {exc}\n"
+            f"         Run `systemctl --user {action} {service}` manually for "
             "wizard changes to take effect.",
             file=sys.stderr,
         )
         return "failed"
 
-    print(f"✓ Restarted {service} so wizard changes take effect.")
-    return "restarted"
+    print(f"✓ {success_verb} {service} so wizard changes take effect.")
+    return success_status

@@ -39,6 +39,7 @@ from ..wizard_state import (
     DEFAULT_KEYBIND_ID,
     DEFAULT_SHERPA_MODEL_NAME,
     DEFAULT_TTS_BACKEND,
+    DEFAULT_WIZARD_SHERPA_MODEL_NAME,
     DEFAULT_TTS_PLAYBACK_SPEED,
     DEFAULT_TYPING_TEXT_CASE,
     FINAL_INJECTION_MODES,
@@ -68,8 +69,6 @@ from .ui import find_logo, setup_css
 
 log = logging.getLogger(__name__)
 
-# Wizard UX default: stable Parakeet instant profile.
-DEFAULT_WIZARD_SHERPA_MODEL_NAME = PARAKEET_TDT_V3_INT8_MODEL_NAME
 _KOKORO_PREVIEW_TEXT = "Hello from ShuVoice. This is a Kokoro voice preview."
 
 
@@ -106,7 +105,7 @@ class WelcomeWizard(Gtk.Application):
         self._asr_backend = "sherpa"
         self._sherpa_model_name = DEFAULT_WIZARD_SHERPA_MODEL_NAME
         self._sherpa_enable_parakeet_streaming = False
-        self._sherpa_provider = "cuda" if _detect_cuda() else "cpu"
+        self._sherpa_provider = "cpu"
         self._typing_final_injection_mode = DEFAULT_FINAL_INJECTION_MODE
         self._typing_text_case = DEFAULT_TYPING_TEXT_CASE
         self._tts_backend = DEFAULT_TTS_BACKEND
@@ -358,18 +357,18 @@ class WelcomeWizard(Gtk.Application):
             title_margin_top=8,
         )
 
-        cuda_detected = str(getattr(self, "_sherpa_provider", "cpu")).strip().lower() == "cuda"
+        cuda_available = _detect_cuda()
         cuda_description = (
-            "Higher throughput when CUDA runtime is available. CUDA was detected on this system, "
-            "so GPU is selected by default. Wizard will attempt CUDA-capable Sherpa runtime install at finish."
-            if cuda_detected
-            else "Higher throughput when CUDA runtime is available. Wizard will attempt CUDA-capable Sherpa runtime install at finish."
+            "Higher throughput when CUDA runtime is available. CPU stays selected by default "
+            "because it is more reliable for Parakeet instant mode on memory-constrained or GPU-busy systems."
+            if cuda_available
+            else "Higher throughput when CUDA runtime is available. Select this only if your Sherpa runtime supports CUDA."
         )
         self._sherpa_provider_options = [
             (
                 "cpu",
                 "CPU",
-                "Best compatibility and lowest setup friction.",
+                "Default for Parakeet instant mode; best compatibility and lowest setup friction.",
             ),
             (
                 "cuda",
@@ -1668,7 +1667,7 @@ class WelcomeWizard(Gtk.Application):
             except Exception:
                 log.debug("Failed to disable finish button", exc_info=True)
 
-        sherpa_model_name = getattr(self, "_sherpa_model_name", DEFAULT_SHERPA_MODEL_NAME)
+        sherpa_model_name = getattr(self, "_sherpa_model_name", DEFAULT_WIZARD_SHERPA_MODEL_NAME)
         sherpa_enable_parakeet_streaming = bool(
             getattr(self, "_sherpa_enable_parakeet_streaming", False)
         )
@@ -2135,7 +2134,7 @@ class WelcomeWizard(Gtk.Application):
                 self._asr_backend,
                 self._keybind,
                 auto_add_keybind=self._auto_add_enabled(),
-                sherpa_model_name=getattr(self, "_sherpa_model_name", DEFAULT_SHERPA_MODEL_NAME),
+                sherpa_model_name=getattr(self, "_sherpa_model_name", DEFAULT_WIZARD_SHERPA_MODEL_NAME),
                 sherpa_enable_parakeet_streaming=bool(
                     getattr(self, "_sherpa_enable_parakeet_streaming", False)
                 ),

@@ -112,32 +112,48 @@ Environment=PYTHONUNBUFFERED=1
 WantedBy=graphical-session.target
 ```
 
-### Wizard → service auto-restart
+### Wizard → service start/restart
 
 `shuvoice wizard` runs as a separate process from the long-running
-`shuvoice.service`. After the wizard finishes successfully, the CLI
-automatically restarts `shuvoice.service` if it is active, so config
-changes (TTS voice, ASR backend, keybinds, etc.) take effect without a
-manual restart.
+`shuvoice.service`. After the wizard finishes successfully, the CLI now
+starts `shuvoice.service` when it is inactive/failed, or restarts it when it
+is already active, so first-run setup launches the app and reconfiguration
+picks up config changes (TTS voice, ASR backend, keybinds, etc.) without a
+manual service action.
 
 - Implemented in `shuvoice/cli/commands/wizard.py::maybe_restart_running_service`.
 - Called from `shuvoice/cli/commands/run.py::run_wizard_command` only when
   the wizard reports `completed = True`.
-- No-op when the service is not active or `systemctl --user` is unavailable
+- No-op when `systemctl --user` is unavailable or the unit state is unknown
   (keeps standalone/headless usage clean).
-- On restart failure, prints an actionable warning with the manual
-  `systemctl --user restart shuvoice.service` command.
+- On start/restart failure, prints an actionable warning with the manual
+  `systemctl --user start|restart shuvoice.service` command.
+
+### Wizard ASR defaults
+
+The setup wizard defaults to the screenshot/"stable instant" profile:
+
+- `asr_backend = "sherpa"`
+- `sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"`
+- `sherpa_provider = "cpu"`
+- `instant_mode = true`
+- `sherpa_decode_mode = "offline_instant"`
+- `[typing].output_mode = "final_only"`
+- `[typing].typing_final_injection_mode = "auto"`
+- `[typing].typing_text_case = "default"`
+- push-to-talk default: Right Control
 
 ### Wizard TTS defaults (provider / voice / speed)
 
 The wizard TTS page persists the following defaults to `[tts]` in `config.toml`:
 
-- `tts_backend` (ElevenLabs, OpenAI, Local Piper, MeloTTS, Kokoro)
-- `tts_default_voice_id` (provider-specific voice)
-- `tts_playback_speed` (default synthesis speed, 0.5×–2.0×)
+- `tts_backend = "kokoro"`
+- `tts_default_voice_id = "af_heart"`
+- `tts_kokoro_base_url = "http://localhost:8880/v1"`
+- `tts_playback_speed = 1.25`
 
 The default playback speed is exposed as a dropdown on the TTS page with
-presets: 0.75×, 1.0× (default), 1.25×, 1.5×, 1.75×, 2.0×. The selection is
+presets: 0.75×, 1.0×, 1.25× (default), 1.5×, 1.75×, 2.0×. The selection is
 also applied to the Kokoro “Speak sample” preview so you can audition the
 exact speed you picked before finishing the wizard. All backends respect
 `tts_playback_speed` at runtime — OpenAI and Kokoro use provider-native

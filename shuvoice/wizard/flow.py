@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..wizard_state import format_summary
+from ..wizard_state import DEFAULT_TTS_BACKEND, format_summary
 
 
 def summary_text(
@@ -15,7 +15,7 @@ def summary_text(
     sherpa_provider: str | None = None,
     typing_final_injection_mode: str = "auto",
     typing_text_case: str = "default",
-    tts_backend: str = "elevenlabs",
+    tts_backend: str = DEFAULT_TTS_BACKEND,
     tts_default_voice_id: str | None = None,
     tts_local_model_path: str | None = None,
     tts_kokoro_base_url: str | None = None,

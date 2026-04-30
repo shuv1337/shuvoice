@@ -9,7 +9,13 @@ from pathlib import Path
 from ..asr import get_backend_class
 from ..config import Config
 from ..piper_setup import ensure_local_piper_ready, get_curated_piper_voice, managed_piper_model_dir
-from ..wizard_state import DEFAULT_SHERPA_MODEL_NAME, needs_wizard, write_config, write_marker
+from ..wizard_state import (
+    DEFAULT_SHERPA_MODEL_NAME,
+    DEFAULT_TTS_BACKEND,
+    needs_wizard,
+    write_config,
+    write_marker,
+)
 from .hyprland import setup_keybind
 
 log = logging.getLogger(__name__)
@@ -342,7 +348,7 @@ def finish_setup(
     sherpa_enable_parakeet_streaming: bool = False,
     sherpa_provider: str | None = None,
     typing_final_injection_mode: str = "auto",
-    tts_backend: str = "elevenlabs",
+    tts_backend: str = DEFAULT_TTS_BACKEND,
     tts_default_voice_id: str | None = None,
     tts_local_model_path: str | None = None,
     tts_local_voice: str | None = None,
