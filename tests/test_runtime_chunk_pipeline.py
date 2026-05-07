@@ -46,3 +46,22 @@ def test_begin_utterance_prepends_recording_preroll():
     assert state.total == 160
     assert state.speech_samples == 160
     app._take_recording_preroll.assert_called_once()
+
+
+def test_begin_utterance_caps_inflated_dynamic_noise_gate():
+    state = _UtteranceState()
+    app = SimpleNamespace(
+        _asr_lock=threading.Lock(),
+        _asr_disabled_event=threading.Event(),
+        asr=SimpleNamespace(reset=Mock(), wants_raw_audio=True),
+        _recover_asr_after_failure=Mock(),
+        _speech_rms_threshold=0.008,
+        _noise_floor_rms=0.150,
+        _speech_rms_multiplier=1.8,
+    )
+
+    from shuvoice.runtime.chunk_pipeline import begin_utterance
+
+    begin_utterance(app, state)
+
+    assert state.utterance_rms_threshold == 0.024

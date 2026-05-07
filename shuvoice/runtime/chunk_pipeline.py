@@ -43,10 +43,10 @@ def begin_utterance(app, state) -> None:
                 log.exception("ASR reset failed at utterance start")
                 app._recover_asr_after_failure("ASR reset at utterance start")
 
-    threshold = max(
-        app._speech_rms_threshold,
-        app._noise_floor_rms * app._speech_rms_multiplier,
-    )
+    dynamic_threshold = app._noise_floor_rms * app._speech_rms_multiplier
+    if app._speech_rms_threshold > 0.0:
+        dynamic_threshold = min(dynamic_threshold, app._speech_rms_threshold * 3.0)
+    threshold = max(app._speech_rms_threshold, dynamic_threshold)
     state.reset(rms_threshold=threshold)
     take_preroll = getattr(app, "_take_recording_preroll", None)
     if callable(take_preroll):
