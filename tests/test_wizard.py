@@ -622,13 +622,14 @@ def test_keybind_presets_structure():
     assert custom[2] is None
 
 
-def test_asr_backends_has_three_entries():
-    """ASR_BACKENDS should list exactly three backend options."""
-    assert len(ASR_BACKENDS) == 3
+def test_asr_backends_has_expected_entries():
+    """ASR_BACKENDS should list local backends plus OpenAI Realtime."""
+    assert len(ASR_BACKENDS) == 4
     ids = [bid for bid, _, _ in ASR_BACKENDS]
     assert "nemo" in ids
     assert "sherpa" in ids
     assert "moonshine" in ids
+    assert "openai_realtime" in ids
 
 
 # -- MeloTTS wizard state (VAL-WIZ-001, VAL-WIZ-002, VAL-WIZ-003) -----------

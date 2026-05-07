@@ -50,6 +50,9 @@ asr-sherpa = [
 asr-moonshine = [
     "useful-moonshine-onnx",
 ]
+asr-openai-realtime = [
+    "websocket-client>=1.8",
+]
 tts-elevenlabs = []
 tts-openai = []
 tts-local = []

@@ -5326,6 +5326,9 @@ asr-nemo = [
     { name = "torch", version = "2.9.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version != '3.11.*'" },
     { name = "torch", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
 ]
+asr-openai-realtime = [
+    { name = "websocket-client" },
+]
 asr-sherpa = [
     { name = "onnxruntime-gpu", marker = "python_full_version == '3.12.*' and platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "sherpa-onnx", version = "1.12.25+cuda12.cudnn9", source = { url = "https://huggingface.co/csukuangfj2/sherpa-onnx-wheels/resolve/main/cuda/1.12.25/sherpa_onnx-1.12.25+cuda12.cudnn9-cp312-cp312-linux_x86_64.whl" }, marker = "python_full_version == '3.12.*' and platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -5362,8 +5365,9 @@ requires-dist = [
     { name = "torch", marker = "extra == 'asr'", specifier = ">=2.4" },
     { name = "torch", marker = "extra == 'asr-nemo'", specifier = ">=2.4" },
     { name = "useful-moonshine-onnx", marker = "extra == 'asr-moonshine'" },
+    { name = "websocket-client", marker = "extra == 'asr-openai-realtime'", specifier = ">=1.8" },
 ]
-provides-extras = ["asr", "asr-nemo", "asr-sherpa", "asr-moonshine", "tts-elevenlabs", "tts-openai", "tts-local", "tts-melotts", "dev"]
+provides-extras = ["asr", "asr-nemo", "asr-sherpa", "asr-moonshine", "asr-openai-realtime", "tts-elevenlabs", "tts-openai", "tts-local", "tts-melotts", "dev"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -6127,6 +6131,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/5a/3a/68800d92e065cf4750ebecf973b13979c0c929b439e1293012938862038d/webdataset-1.0.2.tar.gz", hash = "sha256:7f0498be827cfa46cc5430a58768a24e2c6a410676a61be1838f53d61afdaab4", size = 80090, upload-time = "2025-06-19T23:26:21.945Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d9/00/aca6beb3658dab4ed3dbb41a78e6e7f31342e0b41d28088f205525751601/webdataset-1.0.2-py3-none-any.whl", hash = "sha256:3dbfced32b25c0d199c6b9787937b6f85742bc3c84f652c846893075c1c082d9", size = 74956, upload-time = "2025-06-19T23:26:20.354Z" },
+]
+
+[[package]]
+name = "websocket-client"
+version = "1.9.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/41/aa4bf9664e4cda14c3b39865b12251e8e7d239f4cd0e3cc1b6c2ccde25c1/websocket_client-1.9.0.tar.gz", hash = "sha256:9e813624b6eb619999a97dc7958469217c3176312b3a16a4bd1bc7e08a46ec98", size = 70576, upload-time = "2025-10-07T21:16:36.495Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/34/db/b10e48aa8fff7407e67470363eac595018441cf32d5e1001567a7aeba5d2/websocket_client-1.9.0-py3-none-any.whl", hash = "sha256:af248a825037ef591efbf6ed20cc5faa03d3b47b9e5a2230a529eeee1c1fc3ef", size = 82616, upload-time = "2025-10-07T21:16:34.951Z" },
 ]
 
 [[package]]

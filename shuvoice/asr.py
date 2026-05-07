@@ -32,10 +32,17 @@ def _resolve_moonshine_backend() -> type[ASRBackend]:
     return MoonshineBackend
 
 
+def _resolve_openai_realtime_backend() -> type[ASRBackend]:
+    from .asr_openai_realtime import OpenAIRealtimeBackend
+
+    return OpenAIRealtimeBackend
+
+
 _BACKEND_REGISTRY: dict[str, BackendResolver] = {
     "nemo": _resolve_nemo_backend,
     "sherpa": _resolve_sherpa_backend,
     "moonshine": _resolve_moonshine_backend,
+    "openai_realtime": _resolve_openai_realtime_backend,
 }
 
 

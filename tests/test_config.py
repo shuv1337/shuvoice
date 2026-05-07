@@ -302,6 +302,29 @@ def test_asr_backend_validation():
         Config(asr_backend="bad-backend")
 
 
+def test_openai_realtime_asr_config_validation_and_section_fields():
+    from shuvoice.config import CONFIG_SECTION_FIELDS
+
+    cfg = Config(asr_backend="openai_realtime")
+
+    assert cfg.openai_realtime_model == "gpt-4o-transcribe"
+    assert cfg.openai_realtime_api_key_env == "OPENAI_API_KEY"
+    assert cfg.openai_realtime_turn_detection == "manual"
+    assert "openai_realtime_model" in CONFIG_SECTION_FIELDS["asr"]
+
+    with pytest.raises(ValueError, match="openai_realtime_turn_detection"):
+        Config(asr_backend="openai_realtime", openai_realtime_turn_detection="bad")
+
+    with pytest.raises(ValueError, match="openai_realtime_model"):
+        Config(asr_backend="openai_realtime", openai_realtime_model="gpt-realtime-whisper")
+
+    with pytest.raises(ValueError, match="openai_realtime_vad_eagerness"):
+        Config(asr_backend="openai_realtime", openai_realtime_vad_eagerness="eager")
+
+    with pytest.raises(ValueError, match="openai_realtime_commit_timeout_sec"):
+        Config(asr_backend="openai_realtime", openai_realtime_commit_timeout_sec=0)
+
+
 def test_tts_backend_validation():
     with pytest.raises(ValueError, match="tts_backend"):
         Config(tts_backend="bad-backend")

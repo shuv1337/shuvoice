@@ -27,7 +27,7 @@ auto_gain_max = 10.0
 auto_gain_settle_chunks = 2
 
 [asr]
-# sherpa | nemo | moonshine
+# sherpa | nemo | moonshine | openai_realtime
 asr_backend = "sherpa"
 # Optional low-latency profile. When true, ShuVoice applies backend-specific
 # fast-path tuning (for moonshine this forces moonshine/tiny + tighter decode window).
@@ -67,6 +67,18 @@ use_cuda_graph_decoder = false
 # moonshine_max_tokens = 64
 # moonshine_provider = "cpu"                       # cpu | cuda (requires onnxruntime with CUDAExecutionProvider)
 # moonshine_onnx_threads = 0                       # 0 = auto; set explicitly to tune CPU parallelism
+
+# OpenAI Realtime Whisper settings (used when asr_backend = "openai_realtime")
+# Sends microphone audio to OpenAI; keep Sherpa installed for offline fallback.
+# API keys are env-only. Put this in ~/.config/shuvoice/local.dev:
+# export OPENAI_API_KEY=sk-...
+# openai_realtime_model = "gpt-4o-transcribe"
+# openai_realtime_api_key_env = "OPENAI_API_KEY"
+# openai_realtime_language = "en"
+# openai_realtime_turn_detection = "manual"         # v1 supports manual only
+# openai_realtime_vad_eagerness = "auto"            # reserved for future semantic_vad support
+# openai_realtime_request_timeout_sec = 10.0
+# openai_realtime_commit_timeout_sec = 5.0
 
 [overlay]
 font_size = 22

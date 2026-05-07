@@ -18,6 +18,8 @@ class ASRCapabilities:
     supports_model_download: bool = False
     wants_raw_audio: bool = False
     expected_chunking: str = "streaming"  # "streaming" | "windowed"
+    finalization_mode: str = "local_streaming"
+    preferred_sample_rate: int | None = None
 
 
 class ASRBackend(ABC):
@@ -41,6 +43,10 @@ class ASRBackend(ABC):
     @abstractmethod
     def native_chunk_samples(self) -> int:
         """Backend-preferred chunk size in PCM samples."""
+
+    def finish_utterance(self, timeout_sec: float | None = None) -> str:
+        """Optional finalization hook for remote/manual-commit backends."""
+        return ""
 
     @property
     def wants_raw_audio(self) -> bool:

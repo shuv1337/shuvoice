@@ -138,9 +138,97 @@ def test_begin_utterance_resets_asr_before_threshold_setup():
 
     assert reset_calls == 1
     assert state.last_text == ""
+
+
+def test_remote_manual_commit_stop_bypasses_local_tail_flush():
+    state = _UtteranceState(utterance_rms_threshold=0.0)
+    state.add_chunk(np.ones(4, dtype=np.float32) * 0.1)
+    state.speech_samples = 4
+
+    finish = Mock(return_value="remote final")
+    commit = Mock()
+    app = SimpleNamespace(
+        overlay=SimpleNamespace(set_state=Mock(), hide=Mock()),
+        _drain_and_buffer=Mock(),
+        _min_speech_samples=0,
+        _asr_disabled_event=threading.Event(),
+        asr=SimpleNamespace(
+            native_chunk_samples=16,
+            wants_raw_audio=True,
+            debug_step_num=None,
+            finish_utterance=finish,
+            capabilities=SimpleNamespace(finalization_mode="remote_manual_commit"),
+        ),
+        _transcribe_native_chunk=Mock(),
+        _process_chunk_safe=Mock(return_value="remote partial"),
+        _recover_asr_after_failure=Mock(),
+        _commit_utterance=commit,
+        _flush_tail_silence=Mock(),
+        _is_offline_instant_mode=False,
+        _is_remote_manual_commit_mode=True,
+        _debug_current_transcript="",
+        _speech_rms_threshold=0.0,
+        typer=SimpleNamespace(reset=Mock()),
+        config=SimpleNamespace(
+            asr_backend="openai_realtime",
+            openai_realtime_commit_timeout_sec=0.2,
+        ),
+    )
+
+    ShuVoiceApp._handle_recording_stop(app, state)
+
+    app._process_chunk_safe.assert_called_once()
+    finish.assert_called_once_with(timeout_sec=0.2)
+    assert state.last_text == ""
+    commit.assert_called_once()
+    app._flush_tail_silence.assert_not_called()
     assert state.speech_samples == 0
-    assert state.utterance_rms_threshold == pytest.approx(0.018)
+    assert state.utterance_rms_threshold == pytest.approx(0.0)
     app._recover_asr_after_failure.assert_not_called()
+
+
+def test_remote_manual_commit_failure_does_not_commit_stale_text():
+    state = _UtteranceState(
+        last_text="stale partial",
+        speech_samples=4,
+        utterance_rms_threshold=0.0,
+    )
+
+    commit = Mock()
+    app = SimpleNamespace(
+        overlay=SimpleNamespace(set_state=Mock(), hide=Mock()),
+        _drain_and_buffer=Mock(),
+        _min_speech_samples=0,
+        _asr_disabled_event=threading.Event(),
+        asr=SimpleNamespace(
+            native_chunk_samples=16,
+            wants_raw_audio=True,
+            debug_step_num=None,
+            finish_utterance=Mock(side_effect=RuntimeError("socket closed")),
+            capabilities=SimpleNamespace(finalization_mode="remote_manual_commit"),
+        ),
+        _transcribe_native_chunk=Mock(),
+        _process_chunk_safe=Mock(),
+        _recover_asr_after_failure=Mock(),
+        _commit_utterance=commit,
+        _flush_tail_silence=Mock(),
+        _is_offline_instant_mode=False,
+        _is_remote_manual_commit_mode=True,
+        _debug_current_transcript="",
+        _speech_rms_threshold=0.0,
+        typer=SimpleNamespace(reset=Mock()),
+        config=SimpleNamespace(
+            asr_backend="openai_realtime",
+            openai_realtime_commit_timeout_sec=0.2,
+        ),
+    )
+
+    ShuVoiceApp._handle_recording_stop(app, state)
+
+    app.asr.finish_utterance.assert_called_once_with(timeout_sec=0.2)
+    app._recover_asr_after_failure.assert_called_once()
+    commit.assert_not_called()
+    app._flush_tail_silence.assert_not_called()
 
 
 def test_flush_tail_silence_aborts_when_new_recording_already_started():

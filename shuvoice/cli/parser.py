@@ -31,7 +31,7 @@ CONTROL_COMMAND_CHOICES = [
 def _add_runtime_overrides(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--asr-backend",
-        choices=["nemo", "sherpa", "moonshine"],
+        choices=["nemo", "sherpa", "moonshine", "openai_realtime"],
         default=None,
         help="ASR backend selection (default: from config)",
     )

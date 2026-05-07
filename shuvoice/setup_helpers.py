@@ -138,6 +138,9 @@ def model_status_for_backend(config: Config) -> str:
             return f"configured local directory missing ({model_dir})"
         return "fetched lazily from Hugging Face on first load"
 
+    if backend == "openai_realtime":
+        return "cloud backend; no local model download required"
+
     return "unknown"
 
 
@@ -200,6 +203,16 @@ def install_hints_for_backend(backend: str) -> tuple[str, ...]:
             [
                 "uv (project venv): uv sync --extra asr-moonshine",
                 "pip (venv): python -m pip install useful-moonshine-onnx",
+            ]
+        )
+        return tuple(hints)
+
+    if backend == "openai_realtime":
+        hints.extend(
+            [
+                "uv (project venv): uv sync --extra asr-openai-realtime",
+                "pip (venv): python -m pip install websocket-client",
+                "API key: set OPENAI_API_KEY in the environment or ~/.config/shuvoice/local.dev",
             ]
         )
         return tuple(hints)

@@ -19,6 +19,7 @@
   - [NeMo](#nemo-backend)
   - [Sherpa ONNX](#sherpa-onnx-backend)
   - [Moonshine](#moonshine-backend)
+  - [OpenAI Realtime Whisper](#openai-realtime-whisper-backend)
 - [TTS Backends](#tts-backends)
   - [ElevenLabs](#elevenlabs-backend)
   - [OpenAI](#openai-backend)
@@ -188,7 +189,8 @@ Nested table: `[typing.text_replacements]` for custom phrase corrections.
 ### Switching backends
 
 Set `[asr].asr_backend` and restart service/application.
-Only keys for the active backend need to be present.
+Only keys for the active backend need to be present. `openai_realtime` is an
+opt-in cloud backend; Sherpa/Parakeet remains the offline default.
 
 Optional low-latency profile: set `[asr].instant_mode = true`.
 This applies backend-specific tuning at runtime:
@@ -268,6 +270,7 @@ Additional control/diagnostics surface:
 |---|---|---|---|
 | NeMo | `true` | Bypassed | Backend handles normalization |
 | Moonshine | `true` | Bypassed | Backend handles normalization |
+| OpenAI Realtime | `true` | Bypassed | Sends 24 kHz PCM to OpenAI |
 | Sherpa | `false` | Enabled | App-side gain helps quiet inputs |
 
 ### NeMo Backend
@@ -496,6 +499,56 @@ moonshine_onnx_threads = 0
 ```bash
 uv sync --extra asr-moonshine
 # or: uv add useful-moonshine-onnx
+```
+
+---
+
+### OpenAI Realtime Whisper Backend
+
+**Status**: ⚠️ Opt-in cloud backend
+**Backend key**: `asr_backend = "openai_realtime"`
+**Module**: `shuvoice/asr_openai_realtime.py`
+
+#### Config
+
+```toml
+[asr]
+asr_backend = "openai_realtime"
+openai_realtime_model = "gpt-4o-transcribe"
+openai_realtime_api_key_env = "OPENAI_API_KEY"
+openai_realtime_language = "en"
+openai_realtime_turn_detection = "manual"
+openai_realtime_vad_eagerness = "auto"
+openai_realtime_request_timeout_sec = 10.0
+openai_realtime_commit_timeout_sec = 5.0
+```
+
+API keys are env-only. Store local keys in `~/.config/shuvoice/local.dev`, not
+`config.toml`:
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+#### Notes
+
+- Captures audio at 24 kHz for OpenAI `audio/pcm` input.
+- Push-to-talk uses manual commits: audio chunks are appended while recording,
+  and `input_audio_buffer.commit` is sent on release.
+- `openai_realtime_turn_detection` must remain `manual` in v1. Server and
+  semantic VAD config values are reserved until the app supports auto-commit
+  reconciliation.
+- Live deltas update the existing overlay; final transcripts still pass through
+  text replacements, capitalization/lowercase handling, and final injection.
+- Audio is sent to OpenAI when enabled. Keep Sherpa installed for offline use.
+- The launch announcement listed `gpt-4o-transcribe` at `$0.017/min`; link
+  to current OpenAI pricing/docs when publishing user-facing cost details.
+
+#### Dependencies
+
+```bash
+uv sync --extra asr-openai-realtime
+# or: uv add websocket-client
 ```
 
 ---
@@ -729,6 +782,7 @@ tts_playback_speed = 1.0
 | NeMo | `nvidia/nemotron-speech-streaming-en-0.6b` | Hugging Face cache (`~/.cache/huggingface/...`) |
 | Sherpa | `sherpa_model_name` (default `sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06`) | `~/.local/share/shuvoice/models/sherpa/<sherpa_model_name>/` or custom `sherpa_model_dir` |
 | Moonshine | `UsefulSensors/moonshine` | Hugging Face cache (`~/.cache/huggingface/...`) |
+| OpenAI Realtime Whisper | `openai_realtime_model` (default `gpt-4o-transcribe`) | Remote API (`api.openai.com/v1/realtime`); key in env (`openai_realtime_api_key_env`) |
 | ElevenLabs TTS | `tts_default_voice_id` + `tts_model_id` | Remote API (`api.elevenlabs.io`); key in env (`tts_api_key_env`) |
 | OpenAI TTS | `tts_default_voice_id` + `tts_model_id` | Remote API (`api.openai.com/v1/audio/speech`); key in env (`tts_api_key_env`) |
 | Local TTS | `tts_local_model_path` / `tts_local_voice` | Local filesystem path (Piper `.onnx` model file(s)); managed automation target: `~/.local/share/shuvoice/models/piper/` |

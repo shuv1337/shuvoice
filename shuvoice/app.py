@@ -98,9 +98,13 @@ class ShuVoiceApp(Gtk.Application):
         self.config = config
 
         self.asr = create_backend(config.asr_backend, config)
+        self._audio_sample_rate = int(
+            self.asr.capabilities.preferred_sample_rate or config.sample_rate
+        )
+        self._audio_chunk_samples = self._audio_sample_rate * int(config.chunk_ms) // 1000
         self.audio = AudioCapture(
-            config.sample_rate,
-            config.chunk_samples,
+            self._audio_sample_rate,
+            self._audio_chunk_samples,
             config.fallback_sample_rate,
             device=config.audio_device,
             input_gain=config.input_gain,
@@ -193,7 +197,7 @@ class ShuVoiceApp(Gtk.Application):
         self._speech_rms_multiplier = max(1.0, float(self.config.silence_rms_multiplier))
         self._min_speech_samples = max(
             0,
-            self.config.sample_rate * max(0, int(self.config.min_speech_ms)) // 1000,
+            self._audio_sample_rate * max(0, int(self.config.min_speech_ms)) // 1000,
         )
         self._auto_gain_target_peak = max(1e-4, float(self.config.auto_gain_target_peak))
         self._auto_gain_max = max(1.0, float(self.config.auto_gain_max))
@@ -380,6 +384,12 @@ class ShuVoiceApp(Gtk.Application):
 
         self.control.stop()
         self.audio.stop()
+        close_asr = getattr(self.asr, "close", None)
+        if callable(close_asr):
+            try:
+                close_asr()
+            except Exception:
+                log.debug("ASR backend close failed during shutdown", exc_info=True)
 
         for worker in self._daemon_threads:
             if worker.is_alive():
@@ -540,6 +550,10 @@ class ShuVoiceApp(Gtk.Application):
             and self.config.resolved_sherpa_decode_mode == "offline_instant"
         )
 
+    @property
+    def _is_remote_manual_commit_mode(self) -> bool:
+        return self.asr.capabilities.finalization_mode == "remote_manual_commit"
+
     def _process_chunk_safe(self, audio_data: np.ndarray) -> str:
         """Serialize access to mutable ASR streaming state."""
         if self._asr_disabled_event.is_set():
@@ -626,12 +640,12 @@ class ShuVoiceApp(Gtk.Application):
             freq=freq,
             duration_ms=self.config.feedback_duration_ms,
             volume=self.config.feedback_volume,
-            sample_rate=self.config.sample_rate,
+            sample_rate=self._audio_sample_rate,
         )
 
     def _capture_recording_preroll(self) -> None:
         chunks = self.audio.drain_pending_chunks()
-        max_samples = self.config.sample_rate * max(0, int(self.config.recording_preroll_ms)) // 1000
+        max_samples = self._audio_sample_rate * max(0, int(self.config.recording_preroll_ms)) // 1000
         with self._recording_preroll_lock:
             chunks = [*self._recording_preroll_chunks, *chunks]
 
@@ -1216,6 +1230,51 @@ class ShuVoiceApp(Gtk.Application):
         if self._is_offline_instant_mode:
             self._decode_offline_utterance(state)
             self._commit_utterance(state)
+
+            if self.overlay:
+                self.overlay.hide()
+            self._debug_current_transcript = ""
+            state.reset(rms_threshold=self._speech_rms_threshold)
+            self.typer.reset()
+            return
+
+        if getattr(self, "_is_remote_manual_commit_mode", False):
+            remote_failed = False
+            while (
+                state.total >= self.asr.native_chunk_samples
+                and not self._asr_disabled_event.is_set()
+            ):
+                has_more = self._transcribe_native_chunk(
+                    state, "ASR buffered remote chunk failed"
+                )
+                if not has_more:
+                    break
+
+            if state.total > 0 and not self._asr_disabled_event.is_set():
+                audio_data = (
+                    state.buffer[0] if len(state.buffer) == 1 else np.concatenate(state.buffer)
+                )
+                try:
+                    text = self._process_chunk_safe(audio_data)
+                except Exception:
+                    remote_failed = True
+                    self._recover_asr_after_failure("ASR remote final audio append failed")
+                else:
+                    state.last_text = prefer_transcript(state.last_text, text)
+
+            if not remote_failed and not self._asr_disabled_event.is_set():
+                try:
+                    text = self.asr.finish_utterance(
+                        timeout_sec=self.config.openai_realtime_commit_timeout_sec
+                    )
+                except Exception:
+                    remote_failed = True
+                    self._recover_asr_after_failure("ASR remote utterance commit failed")
+                else:
+                    state.last_text = prefer_transcript(state.last_text, text)
+
+            if not remote_failed and not self._asr_disabled_event.is_set():
+                self._commit_utterance(state)
 
             if self.overlay:
                 self.overlay.hide()

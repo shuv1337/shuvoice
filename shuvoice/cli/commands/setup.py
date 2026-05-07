@@ -37,7 +37,10 @@ def _download_model_for_backend(config: Config) -> None:
     backend_cls = get_backend_class(config.asr_backend)
 
     if not backend_cls.capabilities.supports_model_download:
-        print("Model download: skipped (backend downloads lazily at runtime).")
+        if config.asr_backend == "openai_realtime":
+            print("Model download: skipped (OpenAI Realtime uses cloud transcription).")
+        else:
+            print("Model download: skipped (backend downloads lazily at runtime).")
         return
 
     kwargs: dict[str, object] = {}
@@ -211,6 +214,11 @@ def _auto_install_commands(backend: str, *, prefer_cuda: bool | None = None) -> 
     if backend == "nemo":
         if _running_in_venv():
             commands.extend(_venv_install_commands(["nemo-toolkit[asr]", "torch"]))
+        return commands
+
+    if backend == "openai_realtime":
+        if _running_in_venv():
+            commands.extend(_venv_install_commands(["websocket-client>=1.8"]))
         return commands
 
     return commands
@@ -508,6 +516,9 @@ def run_setup(
     print("=" * 13)
     print(f"ASR backend: {config.asr_backend}")
     print(f"TTS backend: {config.tts_backend}")
+    if config.asr_backend == "openai_realtime":
+        print(f"OpenAI Realtime model: {config.openai_realtime_model}")
+        print(f"OpenAI API key env: {config.openai_realtime_api_key_env}")
 
     report = build_backend_setup_report(config)
     print(f"Model status: {report.model_status}")

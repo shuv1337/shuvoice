@@ -291,10 +291,13 @@ def maybe_download_model(
         return "cancelled", _with_provider_note("Model download cancelled by user.")
 
     if not backend_cls.capabilities.supports_model_download:
+        if cfg.asr_backend == "openai_realtime":
+            _emit(1.0, "Model download skipped (cloud backend)")
+            return "skipped", _with_provider_note(
+                "OpenAI Realtime uses cloud transcription; no local model download is required."
+            )
         _emit(1.0, "Model download skipped (lazy backend)")
-        return "skipped", _with_provider_note(
-            "Selected backend downloads models lazily at runtime."
-        )
+        return "skipped", _with_provider_note("Selected backend downloads models lazily at runtime.")
 
     kwargs: dict[str, object] = {}
     if cfg.asr_backend == "nemo":

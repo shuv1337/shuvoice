@@ -71,6 +71,14 @@ CONFIG_SECTION_FIELDS: dict[str, tuple[str, ...]] = {
         "moonshine_max_tokens",
         "moonshine_provider",
         "moonshine_onnx_threads",
+        "openai_realtime_model",
+        "openai_realtime_api_key_env",
+        "openai_realtime_language",
+        "openai_realtime_latency_target_sec",
+        "openai_realtime_turn_detection",
+        "openai_realtime_vad_eagerness",
+        "openai_realtime_request_timeout_sec",
+        "openai_realtime_commit_timeout_sec",
     ),
     "overlay": (
         "font_size",
@@ -221,7 +229,7 @@ class Config:
     auto_gain_settle_chunks: int = 2  # speech-level chunks before gain updates
 
     # ASR
-    asr_backend: str = "sherpa"  # sherpa | nemo | moonshine
+    asr_backend: str = "sherpa"  # sherpa | nemo | moonshine | openai_realtime
     instant_mode: bool = False  # low-latency profile with backend-specific tuning
     model_name: str = "nvidia/nemotron-speech-streaming-en-0.6b"
     # 13 gives the highest streaming accuracy (at the cost of latency).
@@ -254,6 +262,16 @@ class Config:
     moonshine_max_tokens: int = 64
     moonshine_provider: str = "cpu"  # cpu | cuda
     moonshine_onnx_threads: int = 0  # 0 = auto (os.cpu_count())
+
+    # OpenAI Realtime Whisper (when asr_backend = "openai_realtime")
+    openai_realtime_model: str = "gpt-4o-transcribe"
+    openai_realtime_api_key_env: str = "OPENAI_API_KEY"
+    openai_realtime_language: str = "en"
+    openai_realtime_latency_target_sec: float = 0.8
+    openai_realtime_turn_detection: str = "manual"  # manual | server_vad | semantic_vad
+    openai_realtime_vad_eagerness: str = "auto"  # auto | low | medium | high
+    openai_realtime_request_timeout_sec: float = 10.0
+    openai_realtime_commit_timeout_sec: float = 5.0
 
     # Overlay
     font_size: int = 22
@@ -338,8 +356,10 @@ class Config:
             )
 
         self.asr_backend = str(self.asr_backend).strip().lower()
-        if self.asr_backend not in {"nemo", "sherpa", "moonshine"}:
-            raise ValueError("asr_backend must be one of: nemo, sherpa, moonshine")
+        if self.asr_backend not in {"nemo", "sherpa", "moonshine", "openai_realtime"}:
+            raise ValueError(
+                "asr_backend must be one of: nemo, sherpa, moonshine, openai_realtime"
+            )
 
         if not isinstance(self.instant_mode, bool):
             raise ValueError("instant_mode must be true or false")
@@ -392,6 +412,69 @@ class Config:
         self.moonshine_model_precision = str(self.moonshine_model_precision).strip().lower()
         if not self.moonshine_model_precision:
             raise ValueError("moonshine_model_precision must not be empty")
+
+        self.openai_realtime_model = str(self.openai_realtime_model).strip()
+        allowed_realtime_models = {
+            "whisper-1",
+            "gpt-4o-transcribe",
+            "gpt-4o-transcribe-latest",
+            "gpt-4o-mini-transcribe",
+        }
+        if self.openai_realtime_model not in allowed_realtime_models:
+            raise ValueError(
+                "openai_realtime_model must be one of: "
+                + ", ".join(sorted(allowed_realtime_models))
+            )
+
+        self.openai_realtime_api_key_env = str(self.openai_realtime_api_key_env).strip()
+        if not self.openai_realtime_api_key_env or not _SAFE_ID_RE.fullmatch(
+            self.openai_realtime_api_key_env
+        ):
+            raise ValueError("openai_realtime_api_key_env must be a non-empty safe env var name")
+        if self.openai_realtime_api_key_env.startswith(("sk_", "sk-")):
+            raise ValueError(
+                "openai_realtime_api_key_env looks like a raw API key value, "
+                "expected an environment variable name"
+            )
+
+        self.openai_realtime_language = str(self.openai_realtime_language).strip()
+        if self.openai_realtime_language and not _SAFE_ID_RE.fullmatch(
+            self.openai_realtime_language
+        ):
+            raise ValueError("openai_realtime_language contains unsupported characters")
+
+        if float(self.openai_realtime_latency_target_sec) <= 0:
+            raise ValueError("openai_realtime_latency_target_sec must be > 0")
+        self.openai_realtime_latency_target_sec = float(
+            self.openai_realtime_latency_target_sec
+        )
+
+        self.openai_realtime_turn_detection = str(
+            self.openai_realtime_turn_detection
+        ).strip().lower()
+        if self.openai_realtime_turn_detection not in {"manual", "server_vad", "semantic_vad"}:
+            raise ValueError(
+                "openai_realtime_turn_detection must be one of: manual, server_vad, semantic_vad"
+            )
+
+        self.openai_realtime_vad_eagerness = str(
+            self.openai_realtime_vad_eagerness
+        ).strip().lower()
+        if self.openai_realtime_vad_eagerness not in {"auto", "low", "medium", "high"}:
+            raise ValueError(
+                "openai_realtime_vad_eagerness must be one of: auto, low, medium, high"
+            )
+
+        if float(self.openai_realtime_request_timeout_sec) <= 0:
+            raise ValueError("openai_realtime_request_timeout_sec must be > 0")
+        self.openai_realtime_request_timeout_sec = float(
+            self.openai_realtime_request_timeout_sec
+        )
+        if float(self.openai_realtime_commit_timeout_sec) <= 0:
+            raise ValueError("openai_realtime_commit_timeout_sec must be > 0")
+        self.openai_realtime_commit_timeout_sec = float(
+            self.openai_realtime_commit_timeout_sec
+        )
 
         if int(self.audio_queue_max_size) < 1:
             raise ValueError("audio_queue_max_size must be >= 1")

@@ -58,6 +58,11 @@ ASR_BACKENDS = [
         "Moonshine-ONNX",
         "Lightweight ONNX ASR with low resource usage.  CPU-friendly.",
     ),
+    (
+        "openai_realtime",
+        "OpenAI Realtime Whisper",
+        "Online low-latency Whisper transcription. Requires OPENAI_API_KEY.",
+    ),
 ]
 
 DEFAULT_SHERPA_MODEL_NAME = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
@@ -932,6 +937,12 @@ def write_config(
             asr_table["sherpa_decode_mode"] = "auto"
             asr_table["instant_mode"] = False
             typing_table["output_mode"] = "final_only"
+    elif asr_backend == "openai_realtime":
+        asr_table["openai_realtime_model"] = "gpt-4o-transcribe"
+        asr_table["openai_realtime_api_key_env"] = "OPENAI_API_KEY"
+        asr_table["openai_realtime_language"] = "en"
+        asr_table["openai_realtime_turn_detection"] = "manual"
+        typing_table["output_mode"] = "final_only"
 
     tts_table["tts_backend"] = tts_backend_value
     tts_table["tts_default_voice_id"] = tts_voice_value
@@ -1093,6 +1104,11 @@ def format_summary(
         lines.insert(3, f"Sherpa model:   {model_label}")
         lines.insert(4, f"Sherpa decode:  {decode_label}")
         lines.insert(5, f"Output mode:    {output_mode_label}")
+    elif asr_backend == "openai_realtime":
+        lines.insert(1, "ASR model:        gpt-4o-transcribe")
+        lines.insert(2, "ASR language:     en")
+        lines.insert(3, "ASR API key env:  OPENAI_API_KEY")
+        lines.insert(4, "ASR turn detect:  manual")
 
     if hypr_key:
         bind_lines = format_hyprland_bind_for_keybind(

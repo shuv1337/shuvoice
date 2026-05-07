@@ -364,7 +364,7 @@ The wizard creates this for you. To edit manually, see the full reference at
 
 ```toml
 [asr]
-asr_backend = "sherpa"     # sherpa | nemo | moonshine
+asr_backend = "sherpa"     # sherpa | nemo | moonshine | openai_realtime
 ```
 
 Restart the service after changing:
@@ -380,6 +380,7 @@ systemctl --user restart shuvoice.service
 | **Sherpa-ONNX** | General use, CPU systems | No (optional CUDA) | Good | Fast |
 | **NeMo** | Maximum accuracy | Yes (CUDA) | Best | Medium |
 | **Moonshine** | Low-resource systems | No (optional CUDA) | Fair | Varies |
+| **OpenAI Realtime Whisper** | Online low-latency dictation | No | Cloud | Fast |
 
 <details>
 <summary><strong>Detailed backend configuration</strong></summary>
@@ -435,6 +436,32 @@ moonshine_model_name = "moonshine/tiny"    # moonshine/tiny (fast) | moonshine/b
 moonshine_provider = "cpu"                 # cpu | cuda
 moonshine_max_window_sec = 5.0
 ```
+
+#### OpenAI Realtime Whisper
+
+Opt-in cloud ASR using OpenAI Realtime transcription. This sends microphone
+audio to OpenAI while the backend is enabled, so keep Sherpa installed for
+offline/local use. API keys are environment-only; do not put raw keys in
+`config.toml`.
+
+```toml
+[asr]
+asr_backend = "openai_realtime"
+openai_realtime_model = "gpt-4o-transcribe"
+openai_realtime_api_key_env = "OPENAI_API_KEY"
+openai_realtime_language = "en"
+openai_realtime_turn_detection = "manual"  # v1 supports manual PTT commits only
+```
+
+```bash
+cat >> ~/.config/shuvoice/local.dev <<'EOF'
+export OPENAI_API_KEY=sk-...
+EOF
+uv sync --extra asr-openai-realtime
+```
+
+Current pricing can change; check OpenAI's pricing page. The launch note for
+`gpt-4o-transcribe` listed `$0.017/min`.
 
 </details>
 

@@ -83,9 +83,11 @@ def run_preflight(config: Config) -> bool:
 
         import sounddevice as sd
 
+        backend_cls = get_backend_class(config.asr_backend)
+        sample_rate = int(backend_cls.capabilities.preferred_sample_rate or config.sample_rate)
         # Raises if the device cannot be resolved as input.
-        sd.check_input_settings(device=config.audio_device, samplerate=config.sample_rate)
-        return str(config.audio_device)
+        sd.check_input_settings(device=config.audio_device, samplerate=sample_rate)
+        return f"{config.audio_device} @ {sample_rate}Hz"
 
     def check_tts_output_device() -> str:
         if not config.tts_enabled:
@@ -190,6 +192,13 @@ def run_preflight(config: Config) -> bool:
             )
             if looks_like_parakeet:
                 detail += f", parakeet_runnable={parakeet_runnable}"
+        elif config.asr_backend == "openai_realtime":
+            detail += (
+                f", model={config.openai_realtime_model}"
+                f", language={config.openai_realtime_language or 'auto'}"
+                f", turn_detection={config.openai_realtime_turn_detection}"
+                f", api_key_env={config.openai_realtime_api_key_env}"
+            )
 
         if startup_warnings:
             detail += " | warnings: " + " | ".join(startup_warnings)
