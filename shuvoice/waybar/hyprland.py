@@ -16,6 +16,13 @@ _COMMAND_PATTERNS: dict[str, tuple[str, ...]] = {
     "start": ("--control start", " control start"),
     "tts_speak": ("--control tts_speak", " control tts_speak"),
 }
+# Description-based fallback for Lua-dispatched binds (Hyprland records
+# `dispatcher="__lua"` with a numeric `arg`, so we cannot match on the command
+# string itself). Descriptions are case-insensitive exact-ish matches.
+_DESCRIPTION_PATTERNS: dict[str, tuple[str, ...]] = {
+    "start": ("shuvoice start",),
+    "tts_speak": ("shuvoice tts speak", "shuvoice tts_speak"),
+}
 
 
 def _format_bind(bind: dict[str, Any]) -> str | None:
@@ -45,6 +52,13 @@ def _matches_shuvoice_command(arg: str, command: str) -> bool:
     return any(pattern in arg_lc for pattern in _COMMAND_PATTERNS.get(command, ()))
 
 
+def _matches_shuvoice_description(description: str, command: str) -> bool:
+    desc_lc = str(description).lower()
+    if "shuvoice" not in desc_lc:
+        return False
+    return any(pattern in desc_lc for pattern in _DESCRIPTION_PATTERNS.get(command, ()))
+
+
 def _detect_keybinds_uncached() -> dict[str, str | None]:
     detected: dict[str, str | None] = {command: None for command in _COMMAND_PATTERNS}
 
@@ -60,10 +74,21 @@ def _detect_keybinds_uncached() -> dict[str, str | None]:
         binds = json.loads(result.stdout)
         for bind in binds:
             arg = bind.get("arg", "")
+            description = bind.get("description", "")
+            # Skip release-only binds for press-style commands (start, tts_speak).
+            # Hyprland records both the press "ShuVoice start" bind and the
+            # release "ShuVoice stop" bind; only the former is the actual
+            # keybind we want to show in the tooltip.
+            is_release = bool(bind.get("release", False))
             for command in detected:
                 if detected[command] is not None:
                     continue
-                if not _matches_shuvoice_command(arg, command):
+                matched = _matches_shuvoice_command(arg, command) or (
+                    _matches_shuvoice_description(description, command)
+                )
+                if not matched:
+                    continue
+                if is_release:
                     continue
                 detected[command] = _format_bind(bind)
             if all(value is not None for value in detected.values()):
