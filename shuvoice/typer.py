@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import subprocess
 import time
@@ -16,6 +17,14 @@ _YDOTOOL_HOLD_DELAY_MS = 0
 _KEY_BACKSPACE = 14
 _KEY_LEFTCTRL = 29
 _KEY_V = 47
+_LINE_BREAK_RE = re.compile(r"[ \t\f\v]*(?:\r\n|\r|\n)+[ \t\f\v]*")
+
+
+def sanitize_final_injection_text(text: str) -> str:
+    """Return final STT text that is safe for Enter-to-submit prompt boxes."""
+    if not text:
+        return text
+    return _LINE_BREAK_RE.sub(" ", text).strip()
 
 
 class StreamingTyper:
@@ -481,6 +490,8 @@ class StreamingTyper:
 
     def commit_final(self, final_text: str):
         """Erase partial text, then inject final text using the resolved mode."""
+        final_text = sanitize_final_injection_text(final_text)
+
         use_clipboard = True
         if self.final_injection_mode == "direct":
             use_clipboard = False

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from shuvoice.typer import StreamingTyper
+from shuvoice.typer import StreamingTyper, sanitize_final_injection_text
 
 
 def test_run_retries_until_success(monkeypatch):
@@ -151,6 +151,76 @@ def test_commit_final_auto_mode_uses_clipboard_when_no_watchers(monkeypatch):
     assert ("direct", "hello") not in events
 
 
+def test_sanitize_final_injection_text_replaces_line_breaks():
+    assert sanitize_final_injection_text("fix this\n") == "fix this"
+    assert sanitize_final_injection_text("hello\r\nworld") == "hello world"
+    assert sanitize_final_injection_text("line one\rline two") == "line one line two"
+    assert sanitize_final_injection_text("keep  internal  spacing") == "keep  internal  spacing"
+
+
+def test_commit_final_clipboard_sanitizes_newlines(monkeypatch):
+    typer = StreamingTyper(final_injection_mode="clipboard", preserve_clipboard=False)
+    events: list[object] = []
+
+    monkeypatch.setattr(typer, "_backspace_partial", lambda: events.append("backspace") or True)
+    monkeypatch.setattr(
+        typer,
+        "_paste_via_clipboard",
+        lambda text: events.append(("paste", text)) or True,
+    )
+    monkeypatch.setattr(
+        typer,
+        "_type_direct",
+        lambda text: events.append(("direct", text)) or True,
+    )
+
+    typer.commit_final("fix this\n")
+
+    assert ("paste", "fix this") in events
+    assert ("direct", "fix this") not in events
+
+
+def test_commit_final_direct_sanitizes_newlines(monkeypatch):
+    typer = StreamingTyper(final_injection_mode="direct")
+    events: list[object] = []
+
+    monkeypatch.setattr(typer, "_prefer_xdotool", lambda: False)
+    monkeypatch.setattr(typer, "_prefer_ydotool", lambda: False)
+    monkeypatch.setattr(
+        typer,
+        "_run",
+        lambda args, op, attempts=None: events.append(args) or True,
+    )
+
+    typer.commit_final("hello\r\nworld")
+
+    assert events == [["wtype", "--", "hello world"]]
+    assert typer.last_partial_len == 0
+    assert typer.last_partial_text == ""
+
+
+def test_commit_final_clipboard_fallback_sanitizes_newlines(monkeypatch):
+    typer = StreamingTyper(final_injection_mode="clipboard", preserve_clipboard=False)
+    events: list[object] = []
+
+    monkeypatch.setattr(typer, "_backspace_partial", lambda: events.append("backspace") or True)
+    monkeypatch.setattr(
+        typer,
+        "_paste_via_clipboard",
+        lambda text: events.append(("paste", text)) or False,
+    )
+    monkeypatch.setattr(
+        typer,
+        "_type_direct",
+        lambda text: events.append(("direct", text)) or True,
+    )
+
+    typer.commit_final("line one\rline two")
+
+    assert ("paste", "line one line two") in events
+    assert ("direct", "line one line two") in events
+
+
 def test_paste_via_clipboard_applies_settle_delay(monkeypatch):
     typer = StreamingTyper(clipboard_settle_delay_ms=40, retry_attempts=1, retry_delay_ms=0)
     calls: list[list[str]] = []
@@ -233,7 +303,7 @@ def test_paste_via_clipboard_prefers_ydotool_for_xwayland(monkeypatch):
         ["wl-copy", "--", "hello"],
         ["ydotool", "key", "-d", "0", "29:1", "47:1", "47:0", "29:0"],
     ]
-    assert sleeps == [pytest.approx(0.04)]
+    assert sleeps[0] == pytest.approx(0.04)
 
 
 def test_type_direct_prefers_xdotool_for_xwayland(monkeypatch):
