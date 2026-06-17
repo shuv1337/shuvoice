@@ -5346,6 +5346,9 @@ dev = [
     { name = "pytest" },
     { name = "ruff" },
 ]
+gpu = [
+    { name = "shuvoice", extra = ["asr-sherpa"] },
+]
 
 [package.metadata]
 requires-dist = [
@@ -5374,6 +5377,7 @@ dev = [
     { name = "pytest", specifier = ">=8.0" },
     { name = "ruff", specifier = ">=0.9" },
 ]
+gpu = [{ name = "shuvoice", extras = ["asr-sherpa"] }]
 
 [[package]]
 name = "six"
