@@ -61,7 +61,7 @@ from .runtime import (
     transcribe_native_chunk,
     update_noise_floor,
 )
-from .selection import SelectionError, capture_selection
+from .selection import SelectionError, capture_clipboard, capture_selection
 from .transcript import prefer_transcript
 from .tts import create_tts_backend
 from .tts_base import TTSCapabilities
@@ -870,7 +870,12 @@ class ShuVoiceApp(Gtk.Application):
         self._processing_done.wait(timeout=max(0.0, timeout_sec))
         return not self._processing.is_set()
 
-    def _tts_speak_selection(self) -> None:
+    def _tts_prepare(self) -> None:
+        """Run STT/TTS mutual-exclusion guards before text capture.
+
+        Capture must happen only after these guards so a failed capture does not
+        leave recording active while STT is still running.
+        """
         if not self._tts_runtime_ready():
             raise RuntimeError("tts not available")
 
@@ -880,14 +885,15 @@ class ShuVoiceApp(Gtk.Application):
         if self._processing.is_set() and not self._wait_for_stt_processing_clear():
             raise RuntimeError("Timed out waiting for STT processing to finish")
 
-        text = capture_selection()
+    def _tts_speak(self, text: str, *, source: str) -> None:
         max_chars = int(self.config.tts_max_chars)
         original_len = len(text)
         if original_len > max_chars:
             log.warning(
-                "Selected text truncated from %d to %d chars (tts_max_chars limit)",
+                "TTS text truncated from %d to %d chars (tts_max_chars limit, source=%s)",
                 original_len,
                 max_chars,
+                source,
             )
             text = text[:max_chars]
 
@@ -901,7 +907,8 @@ class ShuVoiceApp(Gtk.Application):
         self._tts_last_preview_text = text
 
         log.info(
-            "TTS speak: backend=%s voice=%s speed=%sx text_len=%d",
+            "TTS speak: source=%s backend=%s voice=%s speed=%sx text_len=%d",
+            source,
             self.config.tts_backend,
             self._tts_voice_id,
             getattr(self, "_tts_playback_speed", 1.0),
@@ -910,6 +917,16 @@ class ShuVoiceApp(Gtk.Application):
 
         if self.tts_overlay is not None:
             self.tts_overlay.set_state("synthesizing", preview_text=text)
+
+    def _tts_speak_selection(self) -> None:
+        self._tts_prepare()
+        text = capture_selection()
+        self._tts_speak(text, source="selection")
+
+    def _tts_speak_clipboard(self) -> None:
+        self._tts_prepare()
+        text = capture_clipboard()
+        self._tts_speak(text, source="clipboard")
 
     def _tts_pause(self) -> bool:
         if not self._tts_runtime_ready():
@@ -1018,6 +1035,10 @@ class ShuVoiceApp(Gtk.Application):
         try:
             if command == "tts_speak":
                 self._tts_speak_selection()
+                return "OK tts speaking"
+
+            if command == "tts_speak_clipboard":
+                self._tts_speak_clipboard()
                 return "OK tts speaking"
 
             if command == "tts_pause":

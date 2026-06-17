@@ -5,27 +5,16 @@ from __future__ import annotations
 import argparse
 from typing import TYPE_CHECKING
 
+from shuvoice.control import CONTROL_COMMANDS
+
 if TYPE_CHECKING:
     from shuvoice.config import Config
 
 LEGACY_FLAG_WARNING = "This legacy flag is deprecated and will be removed in a future release."
 
-CONTROL_COMMAND_CHOICES = [
-    "start",
-    "stop",
-    "toggle",
-    "status",
-    "ping",
-    "metrics",
-    "debug_status",
-    "tts_speak",
-    "tts_pause",
-    "tts_resume",
-    "tts_toggle_pause",
-    "tts_restart",
-    "tts_stop",
-    "tts_status",
-]
+# Derived from the canonical allowlist in shuvoice.control so the parser's
+# argparse choices and the socket handler's validation can never drift apart.
+CONTROL_COMMAND_CHOICES = list(CONTROL_COMMANDS)
 
 
 def _add_runtime_overrides(parser: argparse.ArgumentParser) -> None:

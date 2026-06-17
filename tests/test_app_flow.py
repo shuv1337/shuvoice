@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from unittest.mock import Mock
 
 import numpy as np
@@ -680,6 +680,20 @@ def test_recording_start_stops_active_tts_first(monkeypatch):
     assert called["started"] is True
 
 
+def _bind_real_methods(app: SimpleNamespace, *names: str) -> None:
+    """Wire real ``ShuVoiceApp`` methods onto a stub ``app``.
+
+    The TTS speak flow is split into ``_tts_prepare`` (guards) and ``_tts_speak``
+    (capture-agnostic playback). Tests that exercise the full ``_tts_speak_*``
+    chain bind the real helpers via ``MethodType`` so the bound method tracks the
+    real signature automatically — no hand-restated lambda to rot if the method
+    split changes.
+    """
+
+    for name in names:
+        setattr(app, name, MethodType(getattr(ShuVoiceApp, name), app))
+
+
 def test_tts_speak_selection_stops_recording_and_starts_player(monkeypatch):
     monkeypatch.setattr("shuvoice.app.capture_selection", lambda: "selected text")
 
@@ -699,6 +713,7 @@ def test_tts_speak_selection_stops_recording_and_starts_player(monkeypatch):
         tts_overlay=SimpleNamespace(set_state=Mock()),
         _tts_last_preview_text="",
     )
+    _bind_real_methods(app, "_tts_prepare", "_tts_speak")
 
     ShuVoiceApp._tts_speak_selection(app)
 
@@ -706,6 +721,48 @@ def test_tts_speak_selection_stops_recording_and_starts_player(monkeypatch):
     app.tts_player.speak.assert_called_once_with("selected text", "voice", "model")
     app.metrics.observe_tts_speak.assert_called_once()
     app.metrics.observe_tts_interrupt.assert_not_called()
+
+
+def test_tts_speak_clipboard_captures_clipboard_and_starts_player(monkeypatch):
+    monkeypatch.setattr("shuvoice.app.capture_clipboard", lambda: "clipboard text")
+
+    prepare = Mock()
+    app = SimpleNamespace(
+        _tts_prepare=prepare,
+        config=SimpleNamespace(tts_max_chars=5000, tts_model_id="model", tts_backend="elevenlabs"),
+        _tts_voice_id="voice",
+        tts_player=SimpleNamespace(speak=Mock(return_value=False)),
+        metrics=SimpleNamespace(observe_tts_interrupt=Mock(), observe_tts_speak=Mock()),
+        tts_overlay=SimpleNamespace(set_state=Mock()),
+        _tts_last_preview_text="",
+    )
+    _bind_real_methods(app, "_tts_speak")
+
+    ShuVoiceApp._tts_speak_clipboard(app)
+
+    prepare.assert_called_once()
+    app.tts_player.speak.assert_called_once_with("clipboard text", "voice", "model")
+    app.metrics.observe_tts_speak.assert_called_once()
+    app.tts_overlay.set_state.assert_called_once_with("synthesizing", preview_text="clipboard text")
+
+
+def test_tts_speak_truncates_text_and_updates_overlay():
+    app = SimpleNamespace(
+        config=SimpleNamespace(tts_max_chars=5, tts_model_id="model", tts_backend="elevenlabs"),
+        _tts_voice_id="voice",
+        tts_player=SimpleNamespace(speak=Mock(return_value=True)),
+        metrics=SimpleNamespace(observe_tts_interrupt=Mock(), observe_tts_speak=Mock()),
+        tts_overlay=SimpleNamespace(set_state=Mock()),
+        _tts_last_preview_text="",
+    )
+
+    ShuVoiceApp._tts_speak(app, "123456789", source="selection")
+
+    app.tts_player.speak.assert_called_once_with("12345", "voice", "model")
+    app.metrics.observe_tts_interrupt.assert_called_once()
+    app.metrics.observe_tts_speak.assert_called_once()
+    assert app._tts_last_preview_text == "12345"
+    app.tts_overlay.set_state.assert_called_once_with("synthesizing", preview_text="12345")
 
 
 def test_tts_set_playback_speed_updates_player_overlay_and_metrics():

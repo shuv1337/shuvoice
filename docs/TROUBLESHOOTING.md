@@ -60,6 +60,7 @@ sherpa_offline_max_utterance_sec = 60.0
 | `Control socket not found` | Start ShuVoice before sending control commands |
 | `espeak-ng not found` | `sudo pacman -S espeak-ng` |
 | `tts_speak` says no selected text | Highlight text first and verify `wl-paste` works |
+| Zellij selection not detected | Copy the text first, then use `shuvoice control tts_speak_clipboard --control-wait-sec 0` |
 | ElevenLabs/OpenAI 401 | Export the API key named by `tts_api_key_env`; run `shuvoice preflight` |
 | `Failed to build kaldialign` on Python 3.14 | Use `uv sync --extra asr-nemo --override packaging/constraints/py314-overrides.txt` |
 

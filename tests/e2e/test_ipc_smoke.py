@@ -46,7 +46,7 @@ def ipc_server(tmp_path: Path):
     state = {"recording": False, "tts": "idle"}
 
     def handle_tts(command: str) -> str:
-        if command == "tts_speak":
+        if command in {"tts_speak", "tts_speak_clipboard"}:
             state["tts"] = "playing"
             return "OK tts speaking"
         if command == "tts_stop":
@@ -149,6 +149,19 @@ def test_control_cli_tts_round_trip(ipc_server):
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "OK tts stopped"
     assert state["tts"] == "idle"
+
+
+def test_control_cli_tts_speak_clipboard_round_trip(ipc_server):
+    socket_path, state, runtime_dir = ipc_server
+
+    env = dict(os.environ)
+    env["XDG_RUNTIME_DIR"] = str(runtime_dir)
+    env["XDG_CONFIG_HOME"] = str(runtime_dir / "xdg-config")
+
+    result = _run_control_cli("tts_speak_clipboard", socket_path, env)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "OK tts speaking"
+    assert state["tts"] == "playing"
 
 
 def test_control_cli_returns_error_when_socket_not_running(tmp_path: Path):

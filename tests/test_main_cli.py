@@ -110,6 +110,20 @@ def test_subcommand_control_accepts_tts_commands():
     assert warnings == []
 
 
+def test_subcommand_control_accepts_tts_speak_clipboard():
+    _parser, args, route, warnings = _parse(["control", "tts_speak_clipboard"])
+    assert route == "control"
+    assert args.control_action == "tts_speak_clipboard"
+    assert warnings == []
+
+
+def test_legacy_control_accepts_tts_speak_clipboard():
+    _parser, args, route, warnings = _parse(["--control", "tts_speak_clipboard"])
+    assert route == "control"
+    assert args.control_action == "tts_speak_clipboard"
+    assert warnings
+
+
 def test_subcommand_config_effective_route():
     _parser, _args, route, _warnings = _parse(["config", "effective"])
     assert route == "config_effective"
