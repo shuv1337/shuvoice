@@ -364,6 +364,9 @@ def main(argv: list[str] | None = None) -> int:
     tts_keybind = detect_keybind("tts_speak")
     if tts_keybind:
         info.append(f"TTS Key:  {tts_keybind}")
+    tts_clipboard_keybind = detect_keybind("tts_speak_clipboard")
+    if tts_clipboard_keybind:
+        info.append(f"TTS Clip: {tts_clipboard_keybind}")
 
     if os.environ.get("SHUVOICE_WAYBAR_DEBUG_METRICS", "").lower() in {"1", "true", "yes"}:
         try:

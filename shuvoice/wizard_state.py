@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from .asr import get_backend_class
+from .hyprland_control import matches_control_command_token
 from .config import (
     CURRENT_CONFIG_VERSION,
     DEFAULT_ELEVENLABS_TTS_API_KEY_ENV,
@@ -139,6 +140,15 @@ TTS_KEYBIND_PRESETS = [
         "Super + Ctrl + S",
         "SUPER CTRL, S",
         "Speak selected text via ShuVoice TTS (primary selection + clipboard fallback).",
+    ),
+]
+
+TTS_CLIPBOARD_KEYBIND_PRESETS = [
+    (
+        "super_ctrl_shift_s",
+        "Super + Ctrl + Shift + S",
+        "SUPER CTRL SHIFT, S",
+        "Speak clipboard text via ShuVoice TTS (clipboard only).",
     ),
 ]
 DEFAULT_TTS_KEYBIND_ID = "super_ctrl_s"
@@ -300,12 +310,20 @@ def format_hyprland_bind(hypr_key_spec: str, *, shuvoice_command: str = "shuvoic
 
 
 def _tts_bind_lines(*, shuvoice_command: str) -> list[str]:
-    _, _label, hypr_key_spec, _description = TTS_KEYBIND_PRESETS[0]
-    return [
-        "bind = "
-        + f"{hypr_key_spec}, exec, "
-        + _control_exec("tts_speak", shuvoice_command=shuvoice_command)
-    ]
+    lines: list[str] = []
+    for _preset_id, _label, hypr_key_spec, _description in TTS_KEYBIND_PRESETS:
+        lines.append(
+            "bind = "
+            + f"{hypr_key_spec}, exec, "
+            + _control_exec("tts_speak", shuvoice_command=shuvoice_command)
+        )
+    for _preset_id, _label, hypr_key_spec, _description in TTS_CLIPBOARD_KEYBIND_PRESETS:
+        lines.append(
+            "bind = "
+            + f"{hypr_key_spec}, exec, "
+            + _control_exec("tts_speak_clipboard", shuvoice_command=shuvoice_command)
+        )
+    return lines
 
 
 def _bind_lines_for_preset(
@@ -471,7 +489,13 @@ def _is_shuvoice_stop_command(command_lc: str) -> bool:
 def _is_shuvoice_tts_speak_command(command_lc: str) -> bool:
     if not _is_shuvoice_control_command(command_lc):
         return False
-    return "--control tts_speak" in command_lc or " control tts_speak" in command_lc
+    return matches_control_command_token(command_lc, "tts_speak")
+
+
+def _is_shuvoice_tts_speak_clipboard_command(command_lc: str) -> bool:
+    if not _is_shuvoice_control_command(command_lc):
+        return False
+    return matches_control_command_token(command_lc, "tts_speak_clipboard")
 
 
 def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
@@ -516,12 +540,15 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
     desired_stop_specs = {target_spec}
     conflict_specs = {target_spec}
 
-    tts_key_spec = TTS_KEYBIND_PRESETS[0][2]
     desired_tts_specs: set[str] = set()
-    normalized_tts_spec = _normalize_hypr_key_spec(tts_key_spec)
-    if normalized_tts_spec is not None:
-        desired_tts_specs.add(normalized_tts_spec)
-        conflict_specs.add(normalized_tts_spec)
+    for _preset_id, _label, hypr_key_spec, _description in (
+        *TTS_KEYBIND_PRESETS,
+        *TTS_CLIPBOARD_KEYBIND_PRESETS,
+    ):
+        normalized_tts_spec = _normalize_hypr_key_spec(hypr_key_spec)
+        if normalized_tts_spec is not None:
+            desired_tts_specs.add(normalized_tts_spec)
+            conflict_specs.add(normalized_tts_spec)
 
     extra_stop_spec: str | None = None
     if keybind_id == "right_ctrl":
@@ -534,6 +561,7 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
     has_target_stop = False
     has_extra_stop = False
     has_tts_speak = False
+    has_tts_speak_clipboard = False
     has_other_shuvoice_bind = False
     shuvoice_binding_count = 0
 
@@ -552,6 +580,7 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
             is_start = _is_shuvoice_start_command(command_lc)
             is_stop = _is_shuvoice_stop_command(command_lc)
             is_tts_speak = _is_shuvoice_tts_speak_command(command_lc)
+            is_tts_speak_clipboard = _is_shuvoice_tts_speak_clipboard_command(command_lc)
 
             if spec in conflict_specs and not is_shuvoice:
                 conflict_files.setdefault(config_file, []).append(line_no)
@@ -559,7 +588,7 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
             if not is_shuvoice:
                 continue
 
-            if is_start or is_stop or is_tts_speak:
+            if is_start or is_stop or is_tts_speak or is_tts_speak_clipboard:
                 shuvoice_binding_count += 1
                 shuvoice_lines.setdefault(config_file, []).append(line_no)
 
@@ -575,7 +604,10 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
             if is_tts_speak and spec in desired_tts_specs:
                 has_tts_speak = True
                 continue
-            if is_start or is_stop or is_tts_speak:
+            if is_tts_speak_clipboard and spec in desired_tts_specs:
+                has_tts_speak_clipboard = True
+                continue
+            if is_start or is_stop or is_tts_speak or is_tts_speak_clipboard:
                 has_other_shuvoice_bind = True
 
     if conflict_files:
@@ -594,7 +626,9 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
     if extra_stop_spec is not None:
         is_fully_configured = is_fully_configured and has_extra_stop
     if desired_tts_specs:
-        is_fully_configured = is_fully_configured and has_tts_speak
+        is_fully_configured = (
+            is_fully_configured and has_tts_speak and has_tts_speak_clipboard
+        )
 
     if (
         is_fully_configured
@@ -630,6 +664,7 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
                     _is_shuvoice_start_command(command_lc)
                     or _is_shuvoice_stop_command(command_lc)
                     or _is_shuvoice_tts_speak_command(command_lc)
+                    or _is_shuvoice_tts_speak_clipboard_command(command_lc)
                 )
                 if is_shuvoice_control and is_control_bind:
                     continue

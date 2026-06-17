@@ -432,6 +432,10 @@ def test_format_summary_includes_hyprland_bind_lines_for_preset():
     assert "bind = SUPER, V, exec, shuvoice control start --control-wait-sec 0" in result
     assert "bindr = SUPER, V, exec, shuvoice control stop --control-wait-sec 0" in result
     assert "bind = SUPER CTRL, S, exec, shuvoice control tts_speak --control-wait-sec 0" in result
+    assert (
+        "bind = SUPER CTRL SHIFT, S, exec, shuvoice control tts_speak_clipboard --control-wait-sec 0"
+        in result
+    )
 
 
 def test_format_summary_manual_mode_shows_manual_copy_hint():
@@ -505,6 +509,7 @@ def test_auto_add_hyprland_keybind_adds_lines_when_key_unused(tmp_path):
     assert "control start --control-wait-sec 0" in content
     assert "control stop --control-wait-sec 0" in content
     assert "control tts_speak --control-wait-sec 0" in content
+    assert "control tts_speak_clipboard --control-wait-sec 0" in content
 
 
 def test_auto_add_hyprland_keybind_uses_resolved_binary(tmp_path):
@@ -528,6 +533,9 @@ def test_auto_add_hyprland_keybind_uses_resolved_binary(tmp_path):
     assert "/opt/shuvoice/bin/shuvoice control start --control-wait-sec 0" in content
     assert "/opt/shuvoice/bin/shuvoice control stop --control-wait-sec 0" in content
     assert "/opt/shuvoice/bin/shuvoice control tts_speak --control-wait-sec 0" in content
+    assert (
+        "/opt/shuvoice/bin/shuvoice control tts_speak_clipboard --control-wait-sec 0" in content
+    )
 
 
 def test_auto_add_hyprland_keybind_reports_conflict(tmp_path):
@@ -554,6 +562,7 @@ def test_auto_add_hyprland_keybind_detects_existing_bind(tmp_path):
         "bind = , Insert, exec, shuvoice control start --control-wait-sec 0\n"
         "bindr = , Insert, exec, shuvoice control stop --control-wait-sec 0\n"
         "bind = SUPER CTRL, S, exec, shuvoice control tts_speak --control-wait-sec 0\n"
+        "bind = SUPER CTRL SHIFT, S, exec, shuvoice control tts_speak_clipboard --control-wait-sec 0\n"
     )
 
     with patch("shuvoice.wizard_state.Config") as mock_config:
@@ -578,6 +587,7 @@ def test_auto_add_hyprland_keybind_updates_existing_shuvoice_bindings_conf(tmp_p
         "bind = , Insert, exec, /venv/bin/shuvoice control start --control-wait-sec 0\n"
         "bindr = , Insert, exec, /venv/bin/shuvoice control stop --control-wait-sec 0\n"
         "bind = SUPER CTRL, S, exec, /venv/bin/shuvoice control tts_speak --control-wait-sec 0\n"
+        "bind = SUPER CTRL SHIFT, S, exec, /venv/bin/shuvoice control tts_speak_clipboard --control-wait-sec 0\n"
     )
     hyprland_conf.write_text("source = ~/.config/hypr/bindings.conf\n")
 
@@ -596,6 +606,9 @@ def test_auto_add_hyprland_keybind_updates_existing_shuvoice_bindings_conf(tmp_p
     assert "/venv/bin/shuvoice control start --control-wait-sec 0" in bindings_text
     assert "/venv/bin/shuvoice control stop --control-wait-sec 0" in bindings_text
     assert "/venv/bin/shuvoice control tts_speak --control-wait-sec 0" in bindings_text
+    assert (
+        "/venv/bin/shuvoice control tts_speak_clipboard --control-wait-sec 0" in bindings_text
+    )
     assert (
         "bindr = CTRL, Control_R, exec, /venv/bin/shuvoice control stop --control-wait-sec 0"
         in bindings_text
