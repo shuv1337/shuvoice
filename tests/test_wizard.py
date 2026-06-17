@@ -533,9 +533,7 @@ def test_auto_add_hyprland_keybind_uses_resolved_binary(tmp_path):
     assert "/opt/shuvoice/bin/shuvoice control start --control-wait-sec 0" in content
     assert "/opt/shuvoice/bin/shuvoice control stop --control-wait-sec 0" in content
     assert "/opt/shuvoice/bin/shuvoice control tts_speak --control-wait-sec 0" in content
-    assert (
-        "/opt/shuvoice/bin/shuvoice control tts_speak_clipboard --control-wait-sec 0" in content
-    )
+    assert "/opt/shuvoice/bin/shuvoice control tts_speak_clipboard --control-wait-sec 0" in content
 
 
 def test_auto_add_hyprland_keybind_reports_conflict(tmp_path):
@@ -606,9 +604,7 @@ def test_auto_add_hyprland_keybind_updates_existing_shuvoice_bindings_conf(tmp_p
     assert "/venv/bin/shuvoice control start --control-wait-sec 0" in bindings_text
     assert "/venv/bin/shuvoice control stop --control-wait-sec 0" in bindings_text
     assert "/venv/bin/shuvoice control tts_speak --control-wait-sec 0" in bindings_text
-    assert (
-        "/venv/bin/shuvoice control tts_speak_clipboard --control-wait-sec 0" in bindings_text
-    )
+    assert "/venv/bin/shuvoice control tts_speak_clipboard --control-wait-sec 0" in bindings_text
     assert (
         "bindr = CTRL, Control_R, exec, /venv/bin/shuvoice control stop --control-wait-sec 0"
         in bindings_text

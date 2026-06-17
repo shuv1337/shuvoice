@@ -14,7 +14,6 @@ import sys
 from pathlib import Path
 
 from .asr import get_backend_class
-from .hyprland_control import matches_control_command_token
 from .config import (
     CURRENT_CONFIG_VERSION,
     DEFAULT_ELEVENLABS_TTS_API_KEY_ENV,
@@ -32,6 +31,7 @@ from .config import (
 )
 from .config_io import load_raw, write_atomic
 from .config_migrations import migrate_to_latest
+from .hyprland_control import matches_control_command_token
 from .tts_base import DEFAULT_LOCAL_TTS_MODEL_ID, DEFAULT_LOCAL_TTS_VOICE_ID
 from .tts_speed import (
     format_tts_playback_speed,
@@ -540,14 +540,17 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
     desired_stop_specs = {target_spec}
     conflict_specs = {target_spec}
 
-    desired_tts_specs: set[str] = set()
-    for _preset_id, _label, hypr_key_spec, _description in (
-        *TTS_KEYBIND_PRESETS,
-        *TTS_CLIPBOARD_KEYBIND_PRESETS,
-    ):
+    desired_tts_speak_specs: set[str] = set()
+    desired_tts_clipboard_specs: set[str] = set()
+    for _preset_id, _label, hypr_key_spec, _description in TTS_KEYBIND_PRESETS:
         normalized_tts_spec = _normalize_hypr_key_spec(hypr_key_spec)
         if normalized_tts_spec is not None:
-            desired_tts_specs.add(normalized_tts_spec)
+            desired_tts_speak_specs.add(normalized_tts_spec)
+            conflict_specs.add(normalized_tts_spec)
+    for _preset_id, _label, hypr_key_spec, _description in TTS_CLIPBOARD_KEYBIND_PRESETS:
+        normalized_tts_spec = _normalize_hypr_key_spec(hypr_key_spec)
+        if normalized_tts_spec is not None:
+            desired_tts_clipboard_specs.add(normalized_tts_spec)
             conflict_specs.add(normalized_tts_spec)
 
     extra_stop_spec: str | None = None
@@ -601,10 +604,10 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
                 if extra_stop_spec and spec == extra_stop_spec:
                     has_extra_stop = True
                 continue
-            if is_tts_speak and spec in desired_tts_specs:
+            if is_tts_speak and spec in desired_tts_speak_specs:
                 has_tts_speak = True
                 continue
-            if is_tts_speak_clipboard and spec in desired_tts_specs:
+            if is_tts_speak_clipboard and spec in desired_tts_clipboard_specs:
                 has_tts_speak_clipboard = True
                 continue
             if is_start or is_stop or is_tts_speak or is_tts_speak_clipboard:
@@ -625,10 +628,8 @@ def auto_add_hyprland_keybind(keybind_id: str) -> tuple[str, str]:
     is_fully_configured = has_target_start and has_target_stop
     if extra_stop_spec is not None:
         is_fully_configured = is_fully_configured and has_extra_stop
-    if desired_tts_specs:
-        is_fully_configured = (
-            is_fully_configured and has_tts_speak and has_tts_speak_clipboard
-        )
+    if desired_tts_speak_specs or desired_tts_clipboard_specs:
+        is_fully_configured = is_fully_configured and has_tts_speak and has_tts_speak_clipboard
 
     if (
         is_fully_configured

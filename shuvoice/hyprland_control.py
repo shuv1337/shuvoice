@@ -22,14 +22,18 @@ DESCRIPTION_PATTERNS: dict[str, tuple[str, ...]] = {
 
 
 def _pattern_has_command_boundary(text_lc: str, pattern: str) -> bool:
-    idx = text_lc.find(pattern)
-    if idx == -1:
-        return False
-    end = idx + len(pattern)
-    if end >= len(text_lc):
-        return True
-    next_char = text_lc[end]
-    return next_char in (" ", "\t") or text_lc[end:].startswith("--")
+    start = 0
+    while True:
+        idx = text_lc.find(pattern, start)
+        if idx == -1:
+            return False
+        end = idx + len(pattern)
+        if end >= len(text_lc):
+            return True
+        next_char = text_lc[end]
+        if next_char in (" ", "\t") or text_lc[end:].startswith("--"):
+            return True
+        start = end
 
 
 def _pattern_has_description_boundary(text_lc: str, pattern: str) -> bool:
@@ -39,7 +43,8 @@ def _pattern_has_description_boundary(text_lc: str, pattern: str) -> bool:
     end = idx + len(pattern)
     if end >= len(text_lc):
         return True
-    return not text_lc[end:].strip()
+    next_char = text_lc[end]
+    return not (next_char.isalnum() or next_char == "_")
 
 
 def matches_control_command_token(command_lc: str, token: str) -> bool:
@@ -65,7 +70,23 @@ def matches_shuvoice_description(description: str, command: str) -> bool:
     desc_lc = str(description).lower()
     if "shuvoice" not in desc_lc:
         return False
-    return any(
-        _pattern_has_description_boundary(desc_lc, pattern)
-        for pattern in DESCRIPTION_PATTERNS.get(command, ())
-    )
+
+    own_patterns = DESCRIPTION_PATTERNS.get(command, ())
+    best_own = ""
+    for pattern in own_patterns:
+        if _pattern_has_description_boundary(desc_lc, pattern) and len(pattern) > len(best_own):
+            best_own = pattern
+
+    if not best_own:
+        return False
+
+    for other_command, other_patterns in DESCRIPTION_PATTERNS.items():
+        if other_command == command:
+            continue
+        for other_pattern in other_patterns:
+            if len(other_pattern) <= len(best_own):
+                continue
+            if _pattern_has_description_boundary(desc_lc, other_pattern):
+                return False
+
+    return True
