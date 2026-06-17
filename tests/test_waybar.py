@@ -81,7 +81,10 @@ def test_main_includes_ptt_and_tts_keybinds_in_tooltip(capsys):
     with (
         patch("shuvoice.waybar.Config.load", return_value=Config()),
         patch("shuvoice.waybar._query_runtime_state", return_value=("idle", None, None)),
-        patch("shuvoice.waybar.detect_keybind", side_effect=["Super + V", "Super + Ctrl + S"]),
+        patch(
+            "shuvoice.waybar.detect_keybind",
+            side_effect=["Super + V", "Super + Ctrl + S", "Super + Ctrl + Shift + S"],
+        ),
     ):
         exit_code = main(["status"])
 
@@ -89,6 +92,7 @@ def test_main_includes_ptt_and_tts_keybinds_in_tooltip(capsys):
     payload = json.loads(capsys.readouterr().out)
     assert "PTT Key:  Super + V" in payload["tooltip"]
     assert "TTS Key:  Super + Ctrl + S" in payload["tooltip"]
+    assert "TTS Clip: Super + Ctrl + Shift + S" in payload["tooltip"]
 
 
 def test_perform_action_launch_wizard_calls_detached_launcher():

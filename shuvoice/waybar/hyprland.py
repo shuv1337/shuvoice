@@ -8,25 +8,17 @@ import threading
 import time
 from typing import Any
 
+from shuvoice.hyprland_control import (
+    CONTROL_COMMAND_PATTERNS,
+    matches_shuvoice_command,
+    matches_shuvoice_description,
+)
+
 _CACHE_TTL_SEC = 2.0
 _cache_lock = threading.Lock()
 _cached_value: dict[str, str | None] | None = None
 _cached_at_monotonic: float = 0.0
-# NOTE: matching is substring-based (see `_matches_shuvoice_command`), so adding
-# `tts_speak_clipboard` here would also match `tts_speak` ("tts_speak" is a prefix
-# of "tts_speak_clipboard"). Boundary-aware matching + the clipboard bind are
-# deferred to issue #61 before that command can be auto-detected here.
-_COMMAND_PATTERNS: dict[str, tuple[str, ...]] = {
-    "start": ("--control start", " control start"),
-    "tts_speak": ("--control tts_speak", " control tts_speak"),
-}
-# Description-based fallback for Lua-dispatched binds (Hyprland records
-# `dispatcher="__lua"` with a numeric `arg`, so we cannot match on the command
-# string itself). Descriptions are case-insensitive exact-ish matches.
-_DESCRIPTION_PATTERNS: dict[str, tuple[str, ...]] = {
-    "start": ("shuvoice start",),
-    "tts_speak": ("shuvoice tts speak", "shuvoice tts_speak"),
-}
+_COMMAND_PATTERNS = CONTROL_COMMAND_PATTERNS
 
 
 def _format_bind(bind: dict[str, Any]) -> str | None:
@@ -47,20 +39,6 @@ def _format_bind(bind: dict[str, Any]) -> str | None:
     if mod_names:
         return " + ".join([*mod_names, key])
     return key
-
-
-def _matches_shuvoice_command(arg: str, command: str) -> bool:
-    arg_lc = str(arg).lower()
-    if "shuvoice" not in arg_lc:
-        return False
-    return any(pattern in arg_lc for pattern in _COMMAND_PATTERNS.get(command, ()))
-
-
-def _matches_shuvoice_description(description: str, command: str) -> bool:
-    desc_lc = str(description).lower()
-    if "shuvoice" not in desc_lc:
-        return False
-    return any(pattern in desc_lc for pattern in _DESCRIPTION_PATTERNS.get(command, ()))
 
 
 def _detect_keybinds_uncached() -> dict[str, str | None]:
@@ -87,8 +65,8 @@ def _detect_keybinds_uncached() -> dict[str, str | None]:
             for command in detected:
                 if detected[command] is not None:
                     continue
-                matched = _matches_shuvoice_command(arg, command) or (
-                    _matches_shuvoice_description(description, command)
+                matched = matches_shuvoice_command(arg, command) or (
+                    matches_shuvoice_description(description, command)
                 )
                 if not matched:
                     continue
@@ -119,8 +97,8 @@ def detect_keybinds(*, ttl_sec: float = _CACHE_TTL_SEC) -> dict[str, str | None]
 def detect_keybind(command: str = "start", *, ttl_sec: float = _CACHE_TTL_SEC) -> str | None:
     """Detect a specific ShuVoice keybind.
 
-    Supported commands currently include ``start`` (push-to-talk/STT) and
-    ``tts_speak``.
+    Supported commands include ``start`` (push-to-talk/STT), ``tts_speak``,
+    and ``tts_speak_clipboard``.
     """
     return detect_keybinds(ttl_sec=ttl_sec).get(command)
 
