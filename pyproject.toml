@@ -91,9 +91,20 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.9",
 ]
+# GPU ASR backend, installed by default (see tool.uv.default-groups) so a bare
+# `uv sync` keeps CUDAExecutionProvider instead of pruning the CUDA Sherpa wheel
+# and falling back to CPU-only ASR. Self-references the asr-sherpa extra (kept
+# for pip/AUR consumers) so the pinned wheel lives in one place. Opt out with
+# `uv sync --no-group gpu`.
+gpu = ["shuvoice[asr-sherpa]"]
 
 # Python 3.14 compatibility: pin kaldialign to avoid source-build issues.
 # Apply with: uv sync --extra asr-nemo --override packaging/constraints/py314-overrides.txt
+
+[tool.uv]
+# Keep the gpu group (CUDA Sherpa-ONNX backend) in a bare `uv sync`; dev is the
+# uv default and must be listed explicitly once default-groups is set.
+default-groups = ["dev", "gpu"]
 
 [tool.pytest.ini_options]
 markers = [
