@@ -149,7 +149,8 @@ class SherpaBackend(ASRBackend):
 
         try:
             import sherpa_onnx
-        except Exception:
+        except Exception as exc:
+            e = exc
             lib_dir = sherpa_lib_dir()
             if lib_dir is not None and lib_dir.is_dir():
                 repaired, _detail = prepare_import_runtime(lib_dir)
@@ -659,8 +660,6 @@ class SherpaBackend(ASRBackend):
 
     def _load_online_recognizer(self) -> None:
         """Load OnlineRecognizer for streaming mode."""
-        import sherpa_onnx
-
         model_files = self._model_files
         assert model_files is not None
 
@@ -674,6 +673,10 @@ class SherpaBackend(ASRBackend):
                     "Use sherpa_decode_mode='offline_instant' for this model."
                 )
             log.info("Sherpa streaming Parakeet mode enabled (model_type='nemo_transducer')")
+
+        # Import after the fast compatibility gate so incompatible models fail
+        # before paying the cost of loading the native sherpa_onnx extension.
+        import sherpa_onnx
 
         recognizer_cls = sherpa_onnx.OnlineRecognizer
         if hasattr(recognizer_cls, "from_transducer"):
