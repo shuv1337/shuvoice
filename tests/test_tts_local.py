@@ -11,6 +11,19 @@ from shuvoice.tts_base import TTSSynthesisRequest
 from shuvoice.tts_local import LocalTTSBackend
 
 
+@pytest.fixture(autouse=True)
+def _stub_piper_binary(monkeypatch):
+    """Make Piper discovery hermetic for this module.
+
+    ``LocalTTSBackend.__init__`` resolves the piper binary, but these tests
+    exercise command shaping, sample-rate, and streaming behavior — not binary
+    discovery (covered by test_piper_setup.py). Pin a stable name so the suite
+    does not require a real piper install (e.g. in CI).
+    """
+
+    monkeypatch.setattr("shuvoice.tts_local.find_piper_binary", lambda: "piper")
+
+
 class _FakePopen:
     def __init__(self, command, *, stdout_chunks=None, returncode=0, stderr=b""):
         self.command = list(command)
