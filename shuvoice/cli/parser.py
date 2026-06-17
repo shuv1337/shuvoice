@@ -19,6 +19,7 @@ CONTROL_COMMAND_CHOICES = [
     "metrics",
     "debug_status",
     "tts_speak",
+    "tts_speak_clipboard",
     "tts_pause",
     "tts_resume",
     "tts_toggle_pause",

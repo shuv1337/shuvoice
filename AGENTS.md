@@ -203,9 +203,13 @@ This applies backend-specific tuning at runtime:
 ### TTS trigger + selection behavior
 
 - Primary command: `shuvoice control tts_speak`
-- Recommended Hyprland bind: `SUPER + CTRL + S`
-- Selection capture order: `wl-paste --primary --no-newline` first, then
-  clipboard fallback (`wl-paste --no-newline`)
+- Clipboard-only command: `shuvoice control tts_speak_clipboard` (system clipboard
+  only; useful for Zellij/copy-mode workflows)
+- Recommended Hyprland binds: `SUPER + CTRL + S` (selection), `SUPER + CTRL +
+  SHIFT + S` (clipboard)
+- `tts_speak` selection capture order: `wl-paste --primary --no-newline` first,
+  then clipboard fallback (`wl-paste --no-newline`)
+- `tts_speak_clipboard` reads only `wl-paste --no-newline` (no primary selection)
 - STT and TTS are mutually exclusive at runtime (starting one stops the other)
 - TTS overlay exposes runtime pause/resume, restart, stop, voice selection,
   and provider-backed speed controls (0.5×–2.0×)
@@ -580,6 +584,7 @@ tts_playback_speed = 1.0
 
 - API key value is **env-only** (named by `tts_api_key_env`), never stored in config.
 - `tts_speak` captures selected text using primary selection first, clipboard fallback second.
+- `tts_speak_clipboard` captures system clipboard text only (`capture_clipboard()`).
 - `tts_playback_speed` controls the default synthesis speed (0.5×–2.0×).
 - Runtime speed changes restart the current utterance from the beginning.
 - Overlay namespace: `tts-overlay` (interactive controls, keyboard mode on-demand).

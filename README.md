@@ -96,6 +96,7 @@ shuvoice control start
 shuvoice control stop
 shuvoice control status
 shuvoice control tts_speak
+shuvoice control tts_speak_clipboard
 ```
 
 Recommended Hyprland binds:
@@ -105,7 +106,12 @@ bind = , Control_R, exec, shuvoice control start --control-wait-sec 0
 bindr = , Control_R, exec, shuvoice control stop --control-wait-sec 0
 bindr = CTRL, Control_R, exec, shuvoice control stop --control-wait-sec 0
 bind = SUPER CTRL, S, exec, shuvoice control tts_speak --control-wait-sec 0
+bind = SUPER CTRL SHIFT, S, exec, shuvoice control tts_speak_clipboard --control-wait-sec 0
 ```
+
+`tts_speak` reads the primary selection first, then falls back to the clipboard.
+`tts_speak_clipboard` reads only the system clipboard — useful in Zellij and
+other terminals where you copy text explicitly before triggering TTS.
 
 ## Configuration
 

@@ -37,6 +37,23 @@ def _capture_wl_paste(*args: str) -> str | None:
     return text or None
 
 
+def capture_clipboard() -> str:
+    """Capture text from the system clipboard only.
+
+    Returns:
+        Trimmed clipboard text.
+
+    Raises:
+        SelectionError: if the clipboard is empty or unavailable.
+    """
+
+    clipboard = _capture_wl_paste()
+    if clipboard:
+        return clipboard
+
+    raise SelectionError("No clipboard text found")
+
+
 def capture_selection() -> str:
     """Capture selected text using primary selection, then clipboard fallback.
 
@@ -55,8 +72,9 @@ def capture_selection() -> str:
     if primary:
         return primary
 
-    clipboard = _capture_wl_paste()
-    if clipboard:
-        return clipboard
-
-    raise SelectionError("No selected text found (primary selection and clipboard were empty)")
+    try:
+        return capture_clipboard()
+    except SelectionError:
+        raise SelectionError(
+            "No selected text found (primary selection and clipboard were empty)"
+        ) from None
