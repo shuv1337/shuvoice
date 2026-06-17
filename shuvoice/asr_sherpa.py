@@ -900,9 +900,7 @@ class SherpaBackend(ASRBackend):
         # When over the cap, keep only the trailing window so the most recent
         # speech still gets transcribed.
         sample_rate = int(self.config.sample_rate)
-        max_seconds = float(
-            getattr(self.config, "sherpa_offline_max_utterance_sec", 0.0) or 0.0
-        )
+        max_seconds = float(getattr(self.config, "sherpa_offline_max_utterance_sec", 0.0) or 0.0)
         if max_seconds > 0 and waveform.size > sample_rate * max_seconds:
             max_samples = max(1, int(sample_rate * max_seconds))
             log.warning(

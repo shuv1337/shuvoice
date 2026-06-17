@@ -64,7 +64,9 @@ def test_validate_piper_voice_artifacts_accepts_valid_voice_dir(tmp_path: Path):
     assert "22050" in detail
 
 
-def test_ensure_local_piper_ready_returns_missing_deps_when_binary_absent(monkeypatch, tmp_path: Path):
+def test_ensure_local_piper_ready_returns_missing_deps_when_binary_absent(
+    monkeypatch, tmp_path: Path
+):
     monkeypatch.setattr("shuvoice.piper_setup.find_piper_binary", lambda: None)
 
     result = ensure_local_piper_ready(

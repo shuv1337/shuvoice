@@ -40,8 +40,12 @@ class TTSPlayer:
     ):
         self._backend = backend
         self._output_device = output_device
-        self._sample_rate = int(sample_rate) if sample_rate is not None else int(
-            getattr(backend, "sample_rate_hz", lambda: self._parse_sample_rate(output_format))()
+        self._sample_rate = (
+            int(sample_rate)
+            if sample_rate is not None
+            else int(
+                getattr(backend, "sample_rate_hz", lambda: self._parse_sample_rate(output_format))()
+            )
         )
         self._on_state_change = on_state_change
 
@@ -226,7 +230,10 @@ class TTSPlayer:
                     except Full:
                         put_attempts += 1
                         if put_attempts >= max_put_attempts:
-                            log.warning("TTS synthesis queue full after %d attempts; dropping chunk", put_attempts)
+                            log.warning(
+                                "TTS synthesis queue full after %d attempts; dropping chunk",
+                                put_attempts,
+                            )
                             break
                         put_timeout = min(1.0, put_timeout * 2)
         except Exception as exc:
@@ -253,7 +260,10 @@ class TTSPlayer:
                         break
                     sentinel_attempts += 1
                     if sentinel_attempts >= 10:
-                        log.warning("TTS synthesis could not enqueue sentinel after %d attempts", sentinel_attempts)
+                        log.warning(
+                            "TTS synthesis could not enqueue sentinel after %d attempts",
+                            sentinel_attempts,
+                        )
                         break
                     sentinel_timeout = min(1.0, sentinel_timeout * 2)
 
@@ -425,9 +435,7 @@ class TTSPlayer:
             if worker and worker.is_alive():
                 worker.join(timeout=1.0)
                 if worker.is_alive():
-                    log.warning(
-                        "TTS worker %r did not exit within timeout", worker.name
-                    )
+                    log.warning("TTS worker %r did not exit within timeout", worker.name)
 
         self._close_stream()
 

@@ -2134,7 +2134,9 @@ class WelcomeWizard(Gtk.Application):
                 self._asr_backend,
                 self._keybind,
                 auto_add_keybind=self._auto_add_enabled(),
-                sherpa_model_name=getattr(self, "_sherpa_model_name", DEFAULT_WIZARD_SHERPA_MODEL_NAME),
+                sherpa_model_name=getattr(
+                    self, "_sherpa_model_name", DEFAULT_WIZARD_SHERPA_MODEL_NAME
+                ),
                 sherpa_enable_parakeet_streaming=bool(
                     getattr(self, "_sherpa_enable_parakeet_streaming", False)
                 ),

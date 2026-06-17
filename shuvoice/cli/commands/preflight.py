@@ -137,9 +137,7 @@ def run_preflight(config: Config) -> bool:
         backend = get_tts_backend_instance()
         detail = f"{config.tts_backend} deps OK"
         if config.tts_backend == "local":
-            detail += (
-                f" ({len(backend.list_voices())} voices, sample_rate={int(backend.sample_rate_hz())}Hz)"
-            )
+            detail += f" ({len(backend.list_voices())} voices, sample_rate={int(backend.sample_rate_hz())}Hz)"
         elif config.tts_backend == "kokoro":
             voices = backend.list_voices()
             detail += (

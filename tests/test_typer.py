@@ -257,9 +257,7 @@ def test_type_direct_prefers_ydotool_for_xwayland(monkeypatch):
     )
 
     assert typer._type_direct("hello") is True
-    assert calls == [
-        ["ydotool", "type", "--key-delay", "0", "--key-hold", "0", "--", "hello"]
-    ]
+    assert calls == [["ydotool", "type", "--key-delay", "0", "--key-hold", "0", "--", "hello"]]
 
 
 def test_type_direct_falls_back_to_ydotool_when_wtype_fails(monkeypatch):
@@ -319,7 +317,9 @@ def test_type_direct_prefers_xdotool_for_xwayland(monkeypatch):
     )
 
     assert typer._type_direct("hello") is True
-    assert calls == [["xdotool", "type", "--clearmodifiers", "--delay", "0", "--window", "123", "hello"]]
+    assert calls == [
+        ["xdotool", "type", "--clearmodifiers", "--delay", "0", "--window", "123", "hello"]
+    ]
 
 
 def test_paste_via_clipboard_prefers_xdotool_for_xwayland(monkeypatch):

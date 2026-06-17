@@ -297,7 +297,9 @@ def maybe_download_model(
                 "OpenAI Realtime uses cloud transcription; no local model download is required."
             )
         _emit(1.0, "Model download skipped (lazy backend)")
-        return "skipped", _with_provider_note("Selected backend downloads models lazily at runtime.")
+        return "skipped", _with_provider_note(
+            "Selected backend downloads models lazily at runtime."
+        )
 
     kwargs: dict[str, object] = {}
     if cfg.asr_backend == "nemo":

@@ -142,16 +142,12 @@ def test_subcommand_config_set_route():
 
 
 def test_subcommand_config_set_text_case_route():
-    _parser, _args, route, _warnings = _parse(
-        ["config", "set", "typing_text_case", "lowercase"]
-    )
+    _parser, _args, route, _warnings = _parse(["config", "set", "typing_text_case", "lowercase"])
     assert route == "config_set"
 
 
 def test_subcommand_config_set_overlay_debug_mode_route():
-    _parser, _args, route, _warnings = _parse(
-        ["config", "set", "overlay_debug_mode", "true"]
-    )
+    _parser, _args, route, _warnings = _parse(["config", "set", "overlay_debug_mode", "true"])
     assert route == "config_set"
 
 

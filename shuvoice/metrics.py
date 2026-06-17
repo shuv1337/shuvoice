@@ -123,7 +123,9 @@ class MetricsCollector:
 
         recording_active = recording_started_at is not None
         recording_duration_sec = (
-            max(0.0, time.monotonic() - recording_started_at) if recording_started_at is not None else 0.0
+            max(0.0, time.monotonic() - recording_started_at)
+            if recording_started_at is not None
+            else 0.0
         )
 
         summary: dict[str, Any] = {

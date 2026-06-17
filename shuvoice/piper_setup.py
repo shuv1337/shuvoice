@@ -219,7 +219,9 @@ def piper_sample_rate_from_sidecar(model_file: Path) -> int | None:
         return None
 
     candidates = [
-        payload.get("audio", {}).get("sample_rate") if isinstance(payload.get("audio"), dict) else None,
+        payload.get("audio", {}).get("sample_rate")
+        if isinstance(payload.get("audio"), dict)
+        else None,
         payload.get("sample_rate"),
         payload.get("sampleRate"),
     ]
@@ -233,7 +235,9 @@ def piper_sample_rate_from_sidecar(model_file: Path) -> int | None:
     return None
 
 
-def validate_piper_voice_artifacts(path_or_dir: Path, voice_id: str | None = None) -> tuple[bool, str]:
+def validate_piper_voice_artifacts(
+    path_or_dir: Path, voice_id: str | None = None
+) -> tuple[bool, str]:
     path = Path(path_or_dir).expanduser()
 
     if path.is_file():
@@ -290,7 +294,10 @@ def _validate_download_url(url: str) -> None:
     if parsed.scheme != "https":
         raise ValueError(f"Download URL must use HTTPS scheme: {url}")
     hostname = (parsed.hostname or "").lower()
-    if not any(hostname == domain or hostname.endswith("." + domain) for domain in _ALLOWED_DOWNLOAD_DOMAINS):
+    if not any(
+        hostname == domain or hostname.endswith("." + domain)
+        for domain in _ALLOWED_DOWNLOAD_DOMAINS
+    ):
         raise ValueError(
             f"Download URL domain {hostname!r} is not in the allowed list: {_ALLOWED_DOWNLOAD_DOMAINS}"
         )
@@ -318,9 +325,10 @@ def _download_to_file(
     _check_cancel(cancel_check)
     req = urllib.request.Request(url, headers={"User-Agent": "shuvoice"})
     try:
-        with urllib.request.urlopen(req, timeout=_DOWNLOAD_TIMEOUT_SEC) as response, temp_path.open(
-            "wb"
-        ) as handle:
+        with (
+            urllib.request.urlopen(req, timeout=_DOWNLOAD_TIMEOUT_SEC) as response,
+            temp_path.open("wb") as handle,
+        ):
             header_total = response.headers.get("Content-Length")
             total = int(header_total) if header_total and header_total.isdigit() else None
             downloaded = 0
@@ -360,7 +368,9 @@ def ensure_piper_voice_downloaded(
     progress_callback: Callable[[float | None, str], None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> Path:
-    target_dir = Path(model_dir).expanduser() if model_dir is not None else managed_piper_model_dir()
+    target_dir = (
+        Path(model_dir).expanduser() if model_dir is not None else managed_piper_model_dir()
+    )
     target_dir.mkdir(parents=True, exist_ok=True)
 
     model_file = target_dir / f"{voice.stem}.onnx"
@@ -369,7 +379,9 @@ def ensure_piper_voice_downloaded(
     valid, detail = validate_piper_voice_artifacts(target_dir, voice.stem)
     if valid:
         log.info("Local Piper voice already available: %s (%s)", voice.stem, target_dir)
-        _emit_progress(progress_callback, 1.0, f"Local Piper voice already available: {voice.label}")
+        _emit_progress(
+            progress_callback, 1.0, f"Local Piper voice already available: {voice.label}"
+        )
         return _model_file_for_voice(target_dir, voice.stem)
 
     log.info(
@@ -425,7 +437,9 @@ def ensure_local_piper_ready(
     progress_callback: Callable[[float | None, str], None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> LocalPiperSetupResult:
-    target_dir = Path(model_dir).expanduser() if model_dir is not None else managed_piper_model_dir()
+    target_dir = (
+        Path(model_dir).expanduser() if model_dir is not None else managed_piper_model_dir()
+    )
 
     binary_name = find_piper_binary()
     if binary_name is None and auto_install_missing:

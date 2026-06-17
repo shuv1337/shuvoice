@@ -66,7 +66,9 @@ def test_sherpa_lib_dir_supports_namespace_package_without___file__(tmp_path: Pa
 def test_cuda_provider_runtime_status_detects_missing_runtime_symbols(tmp_path: Path, monkeypatch):
     sherpa_lib = _make_fake_sherpa_layout(tmp_path)
 
-    monkeypatch.setattr(sherpa_cuda.shutil, "which", lambda exe: "/usr/bin/ldd" if exe == "ldd" else None)
+    monkeypatch.setattr(
+        sherpa_cuda.shutil, "which", lambda exe: "/usr/bin/ldd" if exe == "ldd" else None
+    )
     monkeypatch.setattr(
         sherpa_cuda.subprocess,
         "run",

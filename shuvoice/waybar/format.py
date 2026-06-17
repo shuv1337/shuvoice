@@ -83,7 +83,9 @@ def config_info_lines(config: Config) -> list[str]:
     lines.append(f"Device:   {device}")
     if config.tts_enabled:
         lines.append(f"TTS:      {_tts_backend_label(config.tts_backend)}")
-        lines.append(f"Voice:    {_tts_voice_label(config.tts_backend, config.tts_default_voice_id)}")
+        lines.append(
+            f"Voice:    {_tts_voice_label(config.tts_backend, config.tts_default_voice_id)}"
+        )
         lines.append(
             f"Speed:    {format_tts_playback_speed(config.tts_playback_speed)} (default synth)"
         )

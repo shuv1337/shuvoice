@@ -50,7 +50,9 @@ class KokoroTTSBackend(TTSBackend):
 
     def __init__(self, config):
         super().__init__(config)
-        self._base_url = str(getattr(config, "tts_kokoro_base_url", "http://localhost:8880/v1")).rstrip("/")
+        self._base_url = str(
+            getattr(config, "tts_kokoro_base_url", "http://localhost:8880/v1")
+        ).rstrip("/")
         self._voice_cache: list[VoiceInfo] = []
         self._voice_cache_expires_at = 0.0
         self._cache_lock = threading.Lock()
@@ -185,9 +187,7 @@ class KokoroTTSBackend(TTSBackend):
         except TimeoutError as exc:
             raise RuntimeError("Kokoro voice list request timed out") from exc
         except OSError as exc:
-            raise RuntimeError(
-                f"Kokoro voice list request failed: {type(exc).__name__}"
-            ) from exc
+            raise RuntimeError(f"Kokoro voice list request failed: {type(exc).__name__}") from exc
         except json.JSONDecodeError as exc:
             raise RuntimeError("Invalid Kokoro voice list response") from exc
 
@@ -204,9 +204,7 @@ class KokoroTTSBackend(TTSBackend):
                 voice_identifier = raw.strip()
                 if not voice_identifier:
                     continue
-                voices.append(
-                    VoiceInfo(id=voice_identifier, name=voice_identifier, description="")
-                )
+                voices.append(VoiceInfo(id=voice_identifier, name=voice_identifier, description=""))
                 continue
 
             if not isinstance(raw, dict):
