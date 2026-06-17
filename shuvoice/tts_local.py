@@ -144,7 +144,9 @@ class LocalTTSBackend(TTSBackend):
 
         first = next(iter(sorted(self._model_path.glob("*.onnx"))), None)
         if first is None:
-            raise RuntimeError(f"No .onnx model files found under local TTS path: {self._model_path}")
+            raise RuntimeError(
+                f"No .onnx model files found under local TTS path: {self._model_path}"
+            )
         return first
 
     @staticmethod

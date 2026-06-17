@@ -56,7 +56,10 @@ def config_set(key: str, value: str) -> int:
         )
         return 1
 
-    if key_norm == "typing_final_injection_mode" and value_norm not in _ALLOWED_FINAL_INJECTION_MODES:
+    if (
+        key_norm == "typing_final_injection_mode"
+        and value_norm not in _ALLOWED_FINAL_INJECTION_MODES
+    ):
         allowed = ", ".join(sorted(_ALLOWED_FINAL_INJECTION_MODES))
         print(
             f"ERROR: typing_final_injection_mode must be one of: {allowed}",
@@ -86,7 +89,11 @@ def config_set(key: str, value: str) -> int:
         raw = load_raw(config_file)
         migrated, _report = migrate_to_latest(raw)
 
-        target_section = "typing" if key_norm in {"typing_final_injection_mode", "typing_text_case"} else "overlay"
+        target_section = (
+            "typing"
+            if key_norm in {"typing_final_injection_mode", "typing_text_case"}
+            else "overlay"
+        )
         target_table = migrated.get(target_section)
         if not isinstance(target_table, dict):
             target_table = {}
@@ -114,9 +121,9 @@ def config_set(key: str, value: str) -> int:
         extra = f" (path={config_file}"
 
     if backup is not None:
-        print("OK " f"set {key_norm}={value_norm}" f"{extra}, backup={backup})")
+        print(f"OK set {key_norm}={value_norm}{extra}, backup={backup})")
     else:
-        print("OK " f"set {key_norm}={value_norm}" f"{extra})")
+        print(f"OK set {key_norm}={value_norm}{extra})")
 
     return 0
 

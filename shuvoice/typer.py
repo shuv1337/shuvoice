@@ -227,13 +227,9 @@ class StreamingTyper:
 
         prefer_xdotool = self._prefer_xdotool()
         prefer_ydotool = self._prefer_ydotool()
-        if prefer_xdotool and self._send_backspaces_via_xdotool(
-            count, "xdotool partial backspace"
-        ):
+        if prefer_xdotool and self._send_backspaces_via_xdotool(count, "xdotool partial backspace"):
             return True
-        if prefer_ydotool and self._send_backspaces_via_ydotool(
-            count, "ydotool partial backspace"
-        ):
+        if prefer_ydotool and self._send_backspaces_via_ydotool(count, "ydotool partial backspace"):
             return True
 
         remaining = count
@@ -241,14 +237,14 @@ class StreamingTyper:
             batch = min(remaining, _BACKSPACE_BATCH_SIZE)
             ok = self._run(self._backspace_args(batch), op)
             if not ok:
-                if self._xdotool_installed() and self._active_window_is_xwayland() and not prefer_xdotool:
-                    return self._send_backspaces_via_xdotool(
-                        remaining, "xdotool partial backspace"
-                    )
+                if (
+                    self._xdotool_installed()
+                    and self._active_window_is_xwayland()
+                    and not prefer_xdotool
+                ):
+                    return self._send_backspaces_via_xdotool(remaining, "xdotool partial backspace")
                 if self._ydotool_installed() and not prefer_ydotool:
-                    return self._send_backspaces_via_ydotool(
-                        remaining, "ydotool partial backspace"
-                    )
+                    return self._send_backspaces_via_ydotool(remaining, "ydotool partial backspace")
                 return False
             remaining -= batch
         return True
@@ -332,7 +328,11 @@ class StreamingTyper:
         if typed:
             return typed
 
-        if self._xdotool_installed() and self._active_window_is_xwayland() and not attempted_xdotool:
+        if (
+            self._xdotool_installed()
+            and self._active_window_is_xwayland()
+            and not attempted_xdotool
+        ):
             attempted_xdotool = True
             log.info("Falling back to xdotool direct typing for focused XWayland window.")
             typed = self._run(
@@ -410,7 +410,11 @@ class StreamingTyper:
         if pasted:
             return pasted
 
-        if self._xdotool_installed() and self._active_window_is_xwayland() and not attempted_xdotool:
+        if (
+            self._xdotool_installed()
+            and self._active_window_is_xwayland()
+            and not attempted_xdotool
+        ):
             attempted_xdotool = True
             log.info("Falling back to xdotool Ctrl+V paste for focused XWayland window.")
             pasted = self._run(

@@ -658,26 +658,34 @@ class TestLooksLikeCudaOomErrorBfcArena:
     def test_detects_bfc_arena_substring(self):
         from shuvoice.asr_sherpa import looks_like_cuda_oom_error
 
-        assert looks_like_cuda_oom_error(
-            RuntimeError("bfc_arena.cc:359 ... AllocateRawInternal ...")
-        ) is True
+        assert (
+            looks_like_cuda_oom_error(RuntimeError("bfc_arena.cc:359 ... AllocateRawInternal ..."))
+            is True
+        )
 
     def test_detects_failed_to_allocate_memory_substring(self):
         from shuvoice.asr_sherpa import looks_like_cuda_oom_error
 
-        assert looks_like_cuda_oom_error(
-            RuntimeError("Failed to allocate memory for requested buffer of size 123")
-        ) is True
+        assert (
+            looks_like_cuda_oom_error(
+                RuntimeError("Failed to allocate memory for requested buffer of size 123")
+            )
+            is True
+        )
 
     def test_does_not_treat_generic_memcpy_node_as_oom(self):
         from shuvoice.asr_sherpa import looks_like_cuda_oom_error
 
-        assert looks_like_cuda_oom_error(
-            RuntimeError("running MemcpyFromHost node. Name:'Memcpy_token_530'")
-        ) is False
-        assert looks_like_cuda_oom_error(
-            RuntimeError("running MemcpyToHost node. Name:'Memcpy_out'")
-        ) is False
+        assert (
+            looks_like_cuda_oom_error(
+                RuntimeError("running MemcpyFromHost node. Name:'Memcpy_token_530'")
+            )
+            is False
+        )
+        assert (
+            looks_like_cuda_oom_error(RuntimeError("running MemcpyToHost node. Name:'Memcpy_out'"))
+            is False
+        )
 
 
 # -- Regression: utterance length cap in offline_instant mode ---------------

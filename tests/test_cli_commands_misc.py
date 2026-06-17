@@ -174,7 +174,7 @@ def test_config_set_rejects_invalid_typing_text_case(capsys):
 
 def test_config_set_updates_overlay_debug_mode(monkeypatch, tmp_path, capsys):
     config_file = tmp_path / "config.toml"
-    config_file.write_text('[overlay]\noverlay_debug_mode = false\n', encoding="utf-8")
+    config_file.write_text("[overlay]\noverlay_debug_mode = false\n", encoding="utf-8")
 
     monkeypatch.setattr(config_cmd.Config, "config_path", classmethod(lambda cls: config_file))
 

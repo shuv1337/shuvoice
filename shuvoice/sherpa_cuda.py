@@ -23,9 +23,7 @@ REQUIRED_CUDA_LIBS: tuple[str, ...] = (
     "libcurand.so.10",
     "libcudnn.so.9",
 )
-_REQUIRED_IMPORT_RUNTIME_LIBS: tuple[str, ...] = (
-    "libonnxruntime.so",
-)
+_REQUIRED_IMPORT_RUNTIME_LIBS: tuple[str, ...] = ("libonnxruntime.so",)
 _PATCH_RPATH_LIBS: tuple[str, ...] = (
     "libonnxruntime_providers_cuda.so",
     "libonnxruntime_providers_shared.so",
@@ -56,7 +54,6 @@ def _module_root(module: Any) -> Path | None:
             return Path(origin).resolve().parent
 
     return None
-
 
 
 def sherpa_lib_dir() -> Path | None:
@@ -228,9 +225,7 @@ def ensure_onnxruntime_gpu_provider_libs(lib_dir: Path | None = None) -> tuple[b
 
     capi_dir = _onnxruntime_capi_dir(resolved_lib_dir)
     if capi_dir is None:
-        required_present = all(
-            (resolved_lib_dir / name).exists() for name in _PATCH_RPATH_LIBS[:2]
-        )
+        required_present = all((resolved_lib_dir / name).exists() for name in _PATCH_RPATH_LIBS[:2])
         if required_present:
             return True, "ONNX Runtime GPU provider libs already present"
         return False, "onnxruntime-gpu capi directory not found"

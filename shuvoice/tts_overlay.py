@@ -275,7 +275,9 @@ class TTSOverlay:
 
         if self._speed_label is not None:
             if self._speed_supported:
-                self._speed_label.set_text(f"Speed {format_tts_playback_speed(self._playback_speed)}")
+                self._speed_label.set_text(
+                    f"Speed {format_tts_playback_speed(self._playback_speed)}"
+                )
             else:
                 self._speed_label.set_text("Speed unavailable")
 

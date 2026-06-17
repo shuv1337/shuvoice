@@ -357,9 +357,7 @@ class Config:
 
         self.asr_backend = str(self.asr_backend).strip().lower()
         if self.asr_backend not in {"nemo", "sherpa", "moonshine", "openai_realtime"}:
-            raise ValueError(
-                "asr_backend must be one of: nemo, sherpa, moonshine, openai_realtime"
-            )
+            raise ValueError("asr_backend must be one of: nemo, sherpa, moonshine, openai_realtime")
 
         if not isinstance(self.instant_mode, bool):
             raise ValueError("instant_mode must be true or false")
@@ -445,21 +443,17 @@ class Config:
 
         if float(self.openai_realtime_latency_target_sec) <= 0:
             raise ValueError("openai_realtime_latency_target_sec must be > 0")
-        self.openai_realtime_latency_target_sec = float(
-            self.openai_realtime_latency_target_sec
-        )
+        self.openai_realtime_latency_target_sec = float(self.openai_realtime_latency_target_sec)
 
-        self.openai_realtime_turn_detection = str(
-            self.openai_realtime_turn_detection
-        ).strip().lower()
+        self.openai_realtime_turn_detection = (
+            str(self.openai_realtime_turn_detection).strip().lower()
+        )
         if self.openai_realtime_turn_detection not in {"manual", "server_vad", "semantic_vad"}:
             raise ValueError(
                 "openai_realtime_turn_detection must be one of: manual, server_vad, semantic_vad"
             )
 
-        self.openai_realtime_vad_eagerness = str(
-            self.openai_realtime_vad_eagerness
-        ).strip().lower()
+        self.openai_realtime_vad_eagerness = str(self.openai_realtime_vad_eagerness).strip().lower()
         if self.openai_realtime_vad_eagerness not in {"auto", "low", "medium", "high"}:
             raise ValueError(
                 "openai_realtime_vad_eagerness must be one of: auto, low, medium, high"
@@ -467,14 +461,10 @@ class Config:
 
         if float(self.openai_realtime_request_timeout_sec) <= 0:
             raise ValueError("openai_realtime_request_timeout_sec must be > 0")
-        self.openai_realtime_request_timeout_sec = float(
-            self.openai_realtime_request_timeout_sec
-        )
+        self.openai_realtime_request_timeout_sec = float(self.openai_realtime_request_timeout_sec)
         if float(self.openai_realtime_commit_timeout_sec) <= 0:
             raise ValueError("openai_realtime_commit_timeout_sec must be > 0")
-        self.openai_realtime_commit_timeout_sec = float(
-            self.openai_realtime_commit_timeout_sec
-        )
+        self.openai_realtime_commit_timeout_sec = float(self.openai_realtime_commit_timeout_sec)
 
         if int(self.audio_queue_max_size) < 1:
             raise ValueError("audio_queue_max_size must be >= 1")
@@ -550,7 +540,9 @@ class Config:
 
         self.tts_backend = str(self.tts_backend).strip().lower()
         if self.tts_backend not in {"elevenlabs", "openai", "local", "melotts", "kokoro"}:
-            raise ValueError("tts_backend must be one of: elevenlabs, openai, local, melotts, kokoro")
+            raise ValueError(
+                "tts_backend must be one of: elevenlabs, openai, local, melotts, kokoro"
+            )
 
         if self.tts_local_model_path is not None:
             local_model_path = str(self.tts_local_model_path).strip()
@@ -624,9 +616,7 @@ class Config:
         if not self.tts_model_id:
             raise ValueError("tts_model_id must not be empty")
         if not _SAFE_ID_RE.fullmatch(self.tts_model_id):
-            raise ValueError(
-                f"tts_model_id contains invalid characters: {self.tts_model_id!r}"
-            )
+            raise ValueError(f"tts_model_id contains invalid characters: {self.tts_model_id!r}")
         if not _SAFE_ID_RE.fullmatch(self.tts_default_voice_id):
             raise ValueError(
                 f"tts_default_voice_id contains invalid characters: {self.tts_default_voice_id!r}"

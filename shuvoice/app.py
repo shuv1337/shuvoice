@@ -645,7 +645,9 @@ class ShuVoiceApp(Gtk.Application):
 
     def _capture_recording_preroll(self) -> None:
         chunks = self.audio.drain_pending_chunks()
-        max_samples = self._audio_sample_rate * max(0, int(self.config.recording_preroll_ms)) // 1000
+        max_samples = (
+            self._audio_sample_rate * max(0, int(self.config.recording_preroll_ms)) // 1000
+        )
         with self._recording_preroll_lock:
             chunks = [*self._recording_preroll_chunks, *chunks]
 
@@ -1244,9 +1246,7 @@ class ShuVoiceApp(Gtk.Application):
                 state.total >= self.asr.native_chunk_samples
                 and not self._asr_disabled_event.is_set()
             ):
-                has_more = self._transcribe_native_chunk(
-                    state, "ASR buffered remote chunk failed"
-                )
+                has_more = self._transcribe_native_chunk(state, "ASR buffered remote chunk failed")
                 if not has_more:
                     break
 

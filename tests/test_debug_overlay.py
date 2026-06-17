@@ -101,7 +101,9 @@ def test_update_debug_overlay_pushes_runtime_lines_and_logs(recent_logs: RecentL
 
     app = SimpleNamespace(
         overlay=overlay,
-        config=SimpleNamespace(overlay_debug_mode=True, overlay_debug_max_lines=12, asr_backend="sherpa"),
+        config=SimpleNamespace(
+            overlay_debug_mode=True, overlay_debug_max_lines=12, asr_backend="sherpa"
+        ),
         metrics=metrics,
         audio=SimpleNamespace(queue=SimpleNamespace(qsize=lambda: 3, maxsize=200)),
         asr=SimpleNamespace(debug_step_num=9, native_chunk_samples=1600, wants_raw_audio=False),
