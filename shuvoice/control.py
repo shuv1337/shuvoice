@@ -20,7 +20,11 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-VALID_COMMANDS = {
+# Canonical, ordered allowlist of control-socket commands. This is the single
+# source of truth: the CLI parser derives its argparse `choices` from this
+# tuple (see shuvoice/cli/parser.py) so the two never drift. Order is preserved
+# for stable --help / error output.
+CONTROL_COMMANDS: tuple[str, ...] = (
     "start",
     "stop",
     "toggle",
@@ -36,7 +40,10 @@ VALID_COMMANDS = {
     "tts_restart",
     "tts_stop",
     "tts_status",
-}
+)
+
+# Membership-test view used by the socket handler.
+VALID_COMMANDS = frozenset(CONTROL_COMMANDS)
 
 
 def _is_within(path: Path, root: Path) -> bool:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from unittest.mock import Mock
 
 import numpy as np
@@ -680,6 +680,20 @@ def test_recording_start_stops_active_tts_first(monkeypatch):
     assert called["started"] is True
 
 
+def _bind_real_methods(app: SimpleNamespace, *names: str) -> None:
+    """Wire real ``ShuVoiceApp`` methods onto a stub ``app``.
+
+    The TTS speak flow is split into ``_tts_prepare`` (guards) and ``_tts_speak``
+    (capture-agnostic playback). Tests that exercise the full ``_tts_speak_*``
+    chain bind the real helpers via ``MethodType`` so the bound method tracks the
+    real signature automatically — no hand-restated lambda to rot if the method
+    split changes.
+    """
+
+    for name in names:
+        setattr(app, name, MethodType(getattr(ShuVoiceApp, name), app))
+
+
 def test_tts_speak_selection_stops_recording_and_starts_player(monkeypatch):
     monkeypatch.setattr("shuvoice.app.capture_selection", lambda: "selected text")
 
@@ -699,8 +713,7 @@ def test_tts_speak_selection_stops_recording_and_starts_player(monkeypatch):
         tts_overlay=SimpleNamespace(set_state=Mock()),
         _tts_last_preview_text="",
     )
-    app._tts_prepare = lambda: ShuVoiceApp._tts_prepare(app)
-    app._tts_speak = lambda text, *, source: ShuVoiceApp._tts_speak(app, text, source=source)
+    _bind_real_methods(app, "_tts_prepare", "_tts_speak")
 
     ShuVoiceApp._tts_speak_selection(app)
 
@@ -723,7 +736,7 @@ def test_tts_speak_clipboard_captures_clipboard_and_starts_player(monkeypatch):
         tts_overlay=SimpleNamespace(set_state=Mock()),
         _tts_last_preview_text="",
     )
-    app._tts_speak = lambda text, *, source: ShuVoiceApp._tts_speak(app, text, source=source)
+    _bind_real_methods(app, "_tts_speak")
 
     ShuVoiceApp._tts_speak_clipboard(app)
 

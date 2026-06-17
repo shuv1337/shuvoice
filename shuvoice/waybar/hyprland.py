@@ -12,6 +12,10 @@ _CACHE_TTL_SEC = 2.0
 _cache_lock = threading.Lock()
 _cached_value: dict[str, str | None] | None = None
 _cached_at_monotonic: float = 0.0
+# NOTE: matching is substring-based (see `_matches_shuvoice_command`), so adding
+# `tts_speak_clipboard` here would also match `tts_speak` ("tts_speak" is a prefix
+# of "tts_speak_clipboard"). Boundary-aware matching + the clipboard bind are
+# deferred to issue #61 before that command can be auto-detected here.
 _COMMAND_PATTERNS: dict[str, tuple[str, ...]] = {
     "start": ("--control start", " control start"),
     "tts_speak": ("--control tts_speak", " control tts_speak"),
