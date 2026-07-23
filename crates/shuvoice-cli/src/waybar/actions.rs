@@ -27,8 +27,8 @@ pub const ERR_SOCKET_AFTER_START: &str = "control socket not ready after startin
 pub const ERR_SOCKET_AFTER_RESTART: &str = "control socket not ready after restarting service";
 pub const ERR_NO_MENU: &str = "No menu launcher found (install/use omarchy-launch-walker, walker, wofi, rofi, bemenu, or dmenu)";
 
-const STATUS_TIMEOUT: Duration = Duration::from_millis(350);
-const TOGGLE_STATUS_TIMEOUT: Duration = Duration::from_millis(500);
+const STATUS_TIMEOUT: Duration = Duration::from_secs(1);
+const TOGGLE_STATUS_TIMEOUT: Duration = Duration::from_secs(1);
 const CONTROL_CMD_TIMEOUT: Duration = Duration::from_secs(1);
 const PING_TIMEOUT: Duration = Duration::from_millis(200);
 
