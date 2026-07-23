@@ -23,15 +23,28 @@
   <img src="./docs/assets/screenshots/splash-overlay.png" alt="ShuVoice splash overlay on Hyprland" width="760">
 </p>
 
+## What it is
+
+ShuVoice is a **Rust** desktop application: shell, runtime, GTK overlays, control
+socket, setup/wizard, and packaging entrypoints are all native. The default
+Cargo feature set is `desktop` (audio + native Sherpa/OpenAI ASR + GTK UI + TTS,
+including MeloTTS over the worker protocol).
+
+Optional heavy model stacks — **NeMo ASR**, **Moonshine ASR**, and **MeloTTS** —
+run as **isolated, versioned Python workers** under `workers/`. They speak a
+framed worker protocol (`shuvoice-worker-proto`) over stdio. The app never
+imports Python ML code into its process.
+
 ## Features
 
 - Push-to-talk dictation for Wayland desktops, optimized for Hyprland.
-- Pluggable ASR backends: Sherpa-ONNX, NeMo, Moonshine, and OpenAI Realtime Whisper.
-- Text-to-speech from selected text using ElevenLabs, OpenAI, Piper, MeloTTS, or Kokoro.
-- Native GTK4 layer-shell overlay with live status and transcription feedback.
-- Waybar status helper with recording, service, setup, and TTS actions.
+- Native ASR: static **Sherpa-ONNX** (CPU) and **OpenAI Realtime** Whisper.
+- Optional worker ASR: **NeMo** and **Moonshine** (isolated Python processes).
+- TTS: ElevenLabs, OpenAI, local Piper, Kokoro (HTTP), and MeloTTS (worker-proto only).
+- Native GTK4 layer-shell overlays with live status and transcription feedback.
+- Waybar helper (`shuvoice-waybar`) with recording, service, setup, and TTS actions.
 - Guided setup wizard for backend selection, model download, keybinds, and service setup.
-- Runs as a user service with no root input-device hooks.
+- User systemd service with dependency failures exiting **78** (no restart storms).
 
 ## Quick Start
 
@@ -54,8 +67,6 @@ dependency details, and service overrides, see [Installation](docs/INSTALLATION.
 
 ## First Run
 
-Run the wizard:
-
 ```bash
 shuvoice wizard
 ```
@@ -73,6 +84,10 @@ The wizard walks through:
 5. TTS provider, voice, speed, and provider settings
 6. Model download and Hyprland keybind setup
 
+Wizard defaults (stable instant profile): Sherpa Parakeet int8 on **CPU**,
+`instant_mode = true`, `sherpa_decode_mode = "offline_instant"`, typing
+`final_only` / `auto` injection, Kokoro TTS at **1.25×**.
+
 <p align="center">
   <img src="./docs/assets/screenshots/wizard-asr-selection.png" alt="ASR backend selection" width="760">
   <br><br>
@@ -83,8 +98,6 @@ The wizard walks through:
 
 Hold your configured push-to-talk key, speak, and release. ShuVoice transcribes
 the audio and injects final text into the focused app.
-
-Useful commands:
 
 ```bash
 shuvoice --help
@@ -115,26 +128,22 @@ other terminals where you copy text explicitly before triggering TTS.
 
 ## Configuration
 
-Primary config lives at `~/.config/shuvoice/config.toml`. The wizard writes it
-for you, and manual reference examples live in `examples/`.
-
-Common ASR choice:
+Primary config: `~/.config/shuvoice/config.toml` (wizard-written). Local API keys
+belong in `~/.config/shuvoice/local.dev`. Manual examples live under `examples/`.
 
 ```toml
 [asr]
 asr_backend = "sherpa"     # sherpa | nemo | moonshine | openai_realtime
-```
 
-Common typing choice:
-
-```toml
 [typing]
 typing_final_injection_mode = "auto"   # auto | clipboard | direct
 typing_text_case = "default"           # default | lowercase
 ```
 
-See [Configuration](docs/CONFIGURATION.md) for backend profiles, text
-replacements, overlay tuning, TTS providers, and example config links.
+Native Sherpa is **static CPU**. `sherpa_provider = "cuda"` fails closed at
+setup/preflight/load — there is no Python wheel install or RUNPATH repair path.
+
+See [Configuration](docs/CONFIGURATION.md) for full keys, profiles, and TTS.
 
 ## Waybar
 
@@ -142,14 +151,10 @@ replacements, overlay tuning, TTS providers, and example config links.
   <img src="./docs/assets/screenshots/waybar-tooltip.png" alt="Waybar tooltip" width="420">
 </p>
 
-ShuVoice includes `shuvoice-waybar`, a JSON-producing helper for a Waybar
-`custom/shuvoice` module. It shows service state, recording state, configured
-TTS voice, and keybind hints. See [Waybar Integration](docs/WAYBAR.md) for the
-module config, CSS, and launcher actions.
+`shuvoice-waybar` emits JSON for a Waybar `custom/shuvoice` module. See
+[Waybar Integration](docs/WAYBAR.md).
 
 ## Troubleshooting
-
-Start with:
 
 ```bash
 shuvoice preflight
@@ -157,22 +162,33 @@ systemctl --user status shuvoice.service
 journalctl --user -u shuvoice.service -n 80 --no-pager
 ```
 
-Common fixes for missing Python modules, ASR backend errors, audio device
-selection, clipboard behavior, GTK layer-shell, and TTS credentials are in
+Covers feature-off exit 78, layer-shell, audio devices, control socket, worker
+discovery, and Sherpa CUDA fail-closed behavior:
 [Troubleshooting](docs/TROUBLESHOOTING.md).
 
 ## Development
 
+Rust workspace (application):
+
 ```bash
 git clone https://github.com/shuv1337/shuvoice.git
 cd shuvoice
-uv sync --dev
-uv run ruff check shuvoice tests
-uv run ruff format --check shuvoice tests
-uv run pytest -m "not gui" -v
+
+cargo fmt
+cargo check -p shuvoice-cli                 # default features = desktop
+cargo clippy -p shuvoice-cli -- -D warnings
+cargo test -p shuvoice-cli
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor workflow.
+Optional model workers (stdlib only for protocol tests):
+
+```bash
+cd workers
+python -m unittest discover -s tests -v
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md). Architecture
+ADRs live under `docs/adr/`; rewrite map in `docs/architecture/RUST_REWRITE.md`.
 
 ## Project Links
 

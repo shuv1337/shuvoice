@@ -1,0 +1,73 @@
+[package]
+name = "shuvoice-cli"
+description = "ShuVoice application, command-line interface, and Waybar helper"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# Packaged desktop builds: audio + native Sherpa/OpenAI ASR + GTK UI + CPAL TTS + worker-proto.
+default = ["desktop"]
+desktop = ["audio", "asr-sherpa", "asr-openai", "ui", "tts", "tts-worker"]
+audio = ["dep:cpal", "shuvoice-io/audio"]
+ui = ["dep:shuvoice-ui", "shuvoice-ui/gtk", "dep:gtk4", "dep:glib"]
+# Real shuvoice-asr backends (static Sherpa; no Python wheel / CUDA repair).
+asr-sherpa = ["shuvoice-asr/sherpa"]
+asr-openai = ["shuvoice-asr/openai"]
+# Optional TTS crate surface (setup Piper/Kokoro still use CLI HTTP helpers).
+# `tts` always enables CPAL output for player + feedback tones.
+tts = ["dep:shuvoice-tts", "shuvoice-tts/cpal-output"]
+# MeloTTS worker-proto path (never legacy helper).
+tts-worker = ["tts", "shuvoice-tts/worker-proto"]
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+clap.workspace = true
+cpal = { workspace = true, optional = true }
+futures-util.workspace = true
+glib = { workspace = true, optional = true }
+gtk4 = { workspace = true, optional = true }
+regex.workspace = true
+reqwest.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+# Always linked (worker client + factory). Feature flags enable native engines.
+shuvoice-app.workspace = true
+shuvoice-asr = { path = "../shuvoice-asr", default-features = false }
+shuvoice-control.workspace = true
+shuvoice-core.workspace = true
+shuvoice-io = { path = "../shuvoice-io", default-features = false }
+shuvoice-tts = { path = "../shuvoice-tts", optional = true, default-features = false }
+shuvoice-ui = { workspace = true, optional = true }
+libc = { workspace = true }
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+toml_edit.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+which.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+httpmock.workspace = true
+insta.workspace = true
+predicates.workspace = true
+serial_test.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "shuvoice"
+path = "src/bin/shuvoice.rs"
+
+[[bin]]
+name = "shuvoice-waybar"
+path = "src/bin/shuvoice-waybar.rs"

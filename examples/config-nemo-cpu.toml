@@ -1,4 +1,17 @@
-# ShuVoice example: NeMo on CPU (fallback only; high latency)
+# ShuVoice example: NeMo ASR via optional Python worker (CPU)
+#
+# NeMo does NOT run inside the Rust app process. The desktop binary spawns
+# `python -m nemo_asr` from a discoverable workers tree over worker-proto.
+#
+# Prerequisites:
+#   - workers tree with shuvoice_worker_proto/ + nemo_asr/
+#     (dev: repo workers/; packaged: /usr/lib/shuvoice/workers or SHUVOICE_WORKERS_DIR)
+#   - venv at ~/.local/share/shuvoice/workers-nemo-venv/
+# Bootstrap: shuvoice setup --asr-backend nemo
+# Validate:  shuvoice config validate && shuvoice preflight
+#
+# CPU is a high-latency fallback; prefer config-nemo-cuda.toml when the worker
+# host has a working CUDA torch stack.
 
 config_version = 1
 
@@ -15,6 +28,7 @@ min_speech_ms = 80
 asr_backend = "nemo"
 model_name = "nvidia/nemotron-speech-streaming-en-0.6b"
 right_context = 6
+# Worker-side device string (not an in-process Rust/CUDA provider).
 device = "cpu"
 use_cuda_graph_decoder = false
 

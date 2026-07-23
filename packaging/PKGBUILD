@@ -1,4 +1,4 @@
-# Maintainer: Shuv <shuv@example.com>
+# Maintainer: shuv1337 <shuv@shuv.dev>
 
 pkgname=shuvoice-git
 pkgver=0.1.3.r0
@@ -10,65 +10,100 @@ license=('MIT')
 provides=('shuvoice')
 conflicts=('shuvoice')
 
-# NOTE:
-# - Default Sherpa backend runtime is included via python-sherpa-onnx
-#   (typically provided by python-sherpa-onnx-bin on AUR).
-# - NeMo/Moonshine backends are optional and can be installed via distro packages or pip/uv.
-# - python-pytorch-cuda enables GPU acceleration for NeMo/Sherpa CUDA backends.
+# Runtime notes:
+# - Primary binaries are the Rust desktop build (`shuvoice`, `shuvoice-waybar`).
+# - Optional Python model workers are bundled under /usr/lib/shuvoice/workers.
+# - Python / ML engines are NOT hard dependencies of the application shell.
+# - Worker ML stacks install into isolated XDG data venvs via `shuvoice setup`
+#   (prefer `uv`); system python-pytorch packages are intentionally not listed.
 depends=(
-  'python'
-  'python-numpy'
-  'python-sounddevice'
-  'python-sherpa-onnx'
   'gtk4'
   'gtk4-layer-shell'
-  'python-gobject'
+  'alsa-lib'
   'wtype'
   'wl-clipboard'
-  'portaudio'
   'pipewire'
   'pipewire-audio'
   'pipewire-alsa'
 )
 optdepends=(
-  'python-pytorch-cuda: GPU acceleration for NeMo and Sherpa CUDA backends'
-  'python-tomli: TOML parsing for Python < 3.11'
-  'python-nemo-toolkit: NeMo ASR backend (if packaged for your Arch setup)'
-  'python-pip: install optional backend wheels (nemo-toolkit[asr], useful-moonshine-onnx)'
+  'python: interpreter for optional NeMo / Moonshine / MeloTTS workers'
+  'uv: preferred tool for creating isolated worker venvs (shuvoice setup --install-missing)'
   'xdotool: XWayland text injection fallback'
   'ydotool: alternative text injection utility'
-  'espeak-ng: TTS engine for scripts/tts_roundtrip.py'
+  'piper-tts: Local Piper TTS binary'
 )
+# Build: static sherpa-onnx prebuilts + gtk-rs + cpal (ALSA/PipeWire).
 makedepends=(
   'git'
-  'python-build'
-  'python-installer'
-  'python-hatchling'
+  'cargo'
+  'rust'
+  'pkgconf'
+  'clang'
+  'gtk4'
+  'gtk4-layer-shell'
+  'alsa-lib'
+  'pipewire'
 )
 source=('git+https://github.com/shuv1337/shuvoice.git')
 sha256sums=('SKIP')
+options=('!lto') # workspace release profile already sets LTO
 
 pkgver() {
   cd "$srcdir/shuvoice"
   printf "0.1.3.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
+prepare() {
+  cd "$srcdir/shuvoice"
+  export CARGO_TERM_COLOR=always
+  # Populate the cargo cache from the locked workspace (network allowed in AUR builds).
+  cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
+}
+
 build() {
   cd "$srcdir/shuvoice"
-  python -m build --wheel --no-isolation
+  export CARGO_TERM_COLOR=always
+  # Full packaged desktop feature set (audio + static Sherpa + OpenAI ASR + GTK UI + TTS).
+  cargo build --release --locked -p shuvoice-cli --features desktop \
+    --bin shuvoice --bin shuvoice-waybar
 }
 
 package() {
   cd "$srcdir/shuvoice"
-  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  install -Dm755 target/release/shuvoice "$pkgdir/usr/bin/shuvoice"
+  install -Dm755 target/release/shuvoice-waybar "$pkgdir/usr/bin/shuvoice-waybar"
 
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   install -Dm644 examples/config.toml "$pkgdir/usr/share/doc/$pkgname/config.toml.example"
-  install -Dm644 packaging/systemd/user/shuvoice.service "$pkgdir/usr/lib/systemd/user/shuvoice.service"
+  install -Dm644 packaging/systemd/user/shuvoice.service \
+    "$pkgdir/usr/lib/systemd/user/shuvoice.service"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 
   install -d "$pkgdir/usr/share/doc/$pkgname/docs/assets/branding"
   install -d "$pkgdir/usr/share/doc/$pkgname/docs/assets/screenshots"
-  install -m644 docs/assets/branding/*.png "$pkgdir/usr/share/doc/$pkgname/docs/assets/branding/"
-  install -m644 docs/assets/screenshots/*.png "$pkgdir/usr/share/doc/$pkgname/docs/assets/screenshots/"
+  if compgen -G "docs/assets/branding/*.png" > /dev/null; then
+    install -m644 docs/assets/branding/*.png \
+      "$pkgdir/usr/share/doc/$pkgname/docs/assets/branding/"
+  fi
+  if compgen -G "docs/assets/screenshots/*.png" > /dev/null; then
+    install -m644 docs/assets/screenshots/*.png \
+      "$pkgdir/usr/share/doc/$pkgname/docs/assets/screenshots/"
+  fi
+
+  # Optional model workers (source only). Discovered at:
+  #   /usr/lib/shuvoice/workers
+  # Layout must keep package dirs importable via PYTHONPATH=<workers root>.
+  local workers_src=workers
+  local workers_dst="$pkgdir/usr/lib/shuvoice/workers"
+  local pkg_name
+  install -d "$workers_dst"
+  for pkg_name in shuvoice_worker_proto nemo_asr moonshine_asr melotts; do
+    install -d "$workers_dst/$pkg_name"
+    local py
+    while IFS= read -r -d '' py; do
+      install -Dm644 "$py" "$workers_dst/$pkg_name/$(basename "$py")"
+    done < <(find "$workers_src/$pkg_name" -maxdepth 1 -type f -name '*.py' -print0)
+  done
 }

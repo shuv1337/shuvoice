@@ -1,0 +1,32 @@
+[package]
+name = "shuvoice-io"
+description = "Audio, selection, text injection, and Wayland adapters for ShuVoice"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["audio"]
+audio = ["dep:cpal"]
+
+[dependencies]
+cpal = { workspace = true, optional = true }
+libc.workspace = true
+regex.workspace = true
+rustix = { workspace = true, features = ["fs", "process", "runtime", "thread"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+which.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+rstest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

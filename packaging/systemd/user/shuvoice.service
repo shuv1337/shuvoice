@@ -7,17 +7,18 @@ PartOf=graphical-session.target
 
 [Service]
 Type=simple
-# Packaged install path. For repo/venv workflows, override with:
+# Packaged install path. For repo/cargo workflows, override with:
 #   systemctl --user edit shuvoice.service
 #   [Service]
 #   ExecStart=
-#   ExecStart=%h/.venv/bin/shuvoice
+#   ExecStart=%h/repos/shuvoice/target/release/shuvoice
 ExecStart=/usr/bin/shuvoice
 Restart=on-failure
 RestartSec=2
 # Do not restart-loop when backend dependencies are missing.
 RestartPreventExitStatus=78
-Environment=PYTHONUNBUFFERED=1
+# Optional tracing defaults for journald.
+Environment=RUST_LOG=info
 
 [Install]
 WantedBy=graphical-session.target

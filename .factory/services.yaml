@@ -1,7 +1,15 @@
+# ShuVoice agent service commands (Rust-first).
+# Application checks: cargo. Optional workers: stdlib unittest under workers/.
 commands:
-  install: uv sync --dev
-  test: uv run pytest tests/ -x -q
-  test_verbose: uv run pytest tests/ -x -v
-  lint: uv run ruff check shuvoice/ tests/
-  format_check: uv run ruff format --check shuvoice/ tests/
-  format: uv run ruff format shuvoice/ tests/
+  install: cargo build -p shuvoice-cli
+  check: cargo check -p shuvoice-cli
+  check_minimal: cargo check -p shuvoice-cli --no-default-features
+  test: cargo test -p shuvoice-cli
+  test_minimal: cargo test -p shuvoice-cli --no-default-features
+  test_core: cargo test -p shuvoice-core
+  test_worker_proto: cargo test -p shuvoice-worker-proto
+  test_workers: cd workers && python -m unittest discover -s tests -v
+  lint: cargo clippy -p shuvoice-cli -- -D warnings
+  lint_minimal: cargo clippy -p shuvoice-cli --no-default-features -- -D warnings
+  format_check: cargo fmt --all -- --check
+  format: cargo fmt --all

@@ -1,6 +1,8 @@
 {
-  // Repo-checkout variant using the shell wrapper script.
+  // Repo-checkout variant using scripts/shuvoice-waybar.sh (Rust binary launcher).
+  // Resolves target/{release,debug}/shuvoice-waybar, then PATH — no Python app.
   // Update the repo path if your checkout is elsewhere.
+  // Installed / PATH variant: examples/waybar-custom-shuvoice.jsonc
   "custom/shuvoice": {
     "return-type": "json",
     "exec": "$HOME/repos/shuvoice/scripts/shuvoice-waybar.sh status",

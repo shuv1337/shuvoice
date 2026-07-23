@@ -1,0 +1,44 @@
+[package]
+name = "shuvoice-tts"
+description = "Text-to-speech providers and playback state machine for ShuVoice"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+## Production CPAL playback sink (`CpalAudioOutputFactory`).
+cpal-output = ["dep:cpal"]
+## MeloTTS via shuvoice-worker-proto framed protocol (requires compiling worker-proto).
+worker-proto = ["dep:shuvoice-worker-proto"]
+
+[dependencies]
+async-stream.workspace = true
+async-trait.workspace = true
+bytes.workspace = true
+cpal = { workspace = true, optional = true }
+futures-util.workspace = true
+parking_lot.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+shuvoice-core.workspace = true
+shuvoice-worker-proto = { workspace = true, optional = true }
+symphonia.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+url.workspace = true
+which.workspace = true
+
+[dev-dependencies]
+httpmock.workspace = true
+rstest.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

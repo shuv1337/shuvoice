@@ -1,4 +1,11 @@
 # ShuVoice example: Sherpa Parakeet TDT v3 (offline instant mode)
+#
+# Native static Sherpa — CPU only. Matches the wizard stable ASR profile
+# (Parakeet offline-instant + sherpa_provider = "cpu").
+#
+# Apply / bootstrap:
+#   shuvoice setup --asr-backend sherpa
+#   shuvoice config validate
 
 config_version = 1
 
@@ -26,7 +33,7 @@ sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 instant_mode = true
 sherpa_decode_mode = "offline_instant"
 
-# cpu | cuda (falls back to cpu at runtime if CUDA provider is unavailable)
+# Native static Sherpa is CPU-only; "cuda" fails closed (see config-sherpa-cuda.toml).
 sherpa_provider = "cpu"
 sherpa_num_threads = 2
 

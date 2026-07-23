@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /home/shuv/repos/shuvoice
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
 
-# Install dev dependencies (idempotent)
-uv sync --dev 2>/dev/null || true
+# Ensure Rust workspace compiles (default desktop features). Idempotent check.
+if command -v cargo >/dev/null 2>&1; then
+  cargo check -p shuvoice-cli
+else
+  echo "warning: cargo not on PATH; install a Rust toolchain matching workspace rust-version" >&2
+fi
 
-echo "Environment ready."
+echo "Environment ready (Rust workspace). Optional workers: cd workers && python -m unittest discover -s tests -v"
