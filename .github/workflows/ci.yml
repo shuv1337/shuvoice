@@ -18,23 +18,42 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # Ubuntu 24.04 has no libgtk4-layer-shell-dev. Cargo enables gtk4-layer-shell
+  # feature v1_3 → gtk4-layer-shell-sys needs pkg-config gtk4-layer-shell-0 >= 1.3.
+  # Pin upstream v1.3.0 by immutable git commit (tag v1.3.0).
+  GTK4_LAYER_SHELL_VERSION: "1.3.0"
+  GTK4_LAYER_SHELL_GIT_COMMIT: "1c963c51514581c41b9bdae08cdf69171265cdda"
+  # Source-install prefix (validated on clean ubuntu:24.04). Meson may use plain
+  # lib/ or multiarch lib/<triplet>/; both are on the pkg-config/loader paths.
+  GTK4_LAYER_SHELL_PREFIX: "/usr/local"
+  PKG_CONFIG_PATH: /usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig
+  LD_LIBRARY_PATH: /usr/local/lib:/usr/local/lib/x86_64-linux-gnu
 
 jobs:
   rust:
     name: Rust workspace
-    runs-on: ubuntu-latest
+    # Noble: stable GHA image. Distro gtk4-layer-shell-dev is only on 25.10+
+    # (25.10 still ships < 1.3). Commit-pinned source install covers desktop UI.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install native build dependencies
+      # YAML anchor on the step mapping; smoke reuses via alias (workflow-only).
+      - &install-native-deps
+        name: Install native build dependencies
         run: |
+          set -euo pipefail
+
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential \
             pkg-config \
             clang \
+            meson \
+            ninja-build \
+            git \
+            ca-certificates \
             libgtk-4-dev \
-            libgtk4-layer-shell-dev \
             libglib2.0-dev \
             libcairo2-dev \
             libpango1.0-dev \
@@ -42,7 +61,40 @@ jobs:
             libgraphene-1.0-dev \
             libpipewire-0.3-dev \
             libasound2-dev \
-            libwayland-dev
+            libwayland-dev \
+            wayland-protocols
+
+          # Reproducible source install: gtk4-layer-shell is absent from Ubuntu 24.04.
+          prefix="${GTK4_LAYER_SHELL_PREFIX}"
+          src_dir="${RUNNER_TEMP:-/tmp}/gtk4-layer-shell-src"
+          rm -rf "${src_dir}"
+          mkdir -p "${src_dir}"
+          git -C "${src_dir}" init --quiet
+          git -C "${src_dir}" remote add origin https://github.com/wmww/gtk4-layer-shell.git
+          git -C "${src_dir}" fetch --depth=1 --quiet origin "${GTK4_LAYER_SHELL_GIT_COMMIT}"
+          git -C "${src_dir}" checkout --quiet --detach FETCH_HEAD
+          got_commit="$(git -C "${src_dir}" rev-parse HEAD)"
+          test "${got_commit}" = "${GTK4_LAYER_SHELL_GIT_COMMIT}"
+          grep -F "version: '${GTK4_LAYER_SHELL_VERSION}'" "${src_dir}/meson.build"
+
+          meson setup "${src_dir}/build" "${src_dir}" \
+            --prefix="${prefix}" \
+            --buildtype=release \
+            -Dexamples=false \
+            -Ddocs=false \
+            -Dtests=false \
+            -Dsmoke-tests=false \
+            -Dintrospection=false \
+            -Dvapi=false
+          meson compile -C "${src_dir}/build"
+          sudo meson install -C "${src_dir}/build"
+          sudo ldconfig
+
+          # Match gtk4-layer-shell-sys system-deps: gtk4_layer_shell_0 >= 1.3
+          pkg-config --exists --print-errors 'gtk4-layer-shell-0 >= 1.3'
+          modversion="$(pkg-config --modversion gtk4-layer-shell-0)"
+          test "${modversion}" = "${GTK4_LAYER_SHELL_VERSION}"
+          echo "gtk4-layer-shell-0 ${modversion} (git ${got_commit}, prefix ${prefix})"
 
       # Pin to workspace package.rust-version (Cargo.toml), not floating stable.
       - name: Install Rust toolchain (MSRV 1.92)
@@ -100,7 +152,7 @@ jobs:
 
   workers:
     name: Python workers (stdlib unittest)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -116,27 +168,11 @@ jobs:
     name: Optional smoke (no live service/mic)
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_smoke == 'true' }}
     needs: [rust, workers]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install native build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            pkg-config \
-            clang \
-            libgtk-4-dev \
-            libgtk4-layer-shell-dev \
-            libglib2.0-dev \
-            libcairo2-dev \
-            libpango1.0-dev \
-            libgdk-pixbuf-2.0-dev \
-            libgraphene-1.0-dev \
-            libpipewire-0.3-dev \
-            libasound2-dev \
-            libwayland-dev
+      - *install-native-deps
 
       - name: Install Rust toolchain (MSRV 1.92)
         uses: dtolnay/rust-toolchain@master
