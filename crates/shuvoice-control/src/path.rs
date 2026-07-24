@@ -347,6 +347,13 @@ fn resolve_control_socket_path_inner(
 
     if create_parent {
         ensure_secure_directory(&parent_resolved)?;
+    } else if parent_resolved.exists() {
+        // Clients must enforce the same owner/mode contract the server
+        // establishes. Without this, a local attacker who pre-creates the
+        // parent (e.g. /tmp/shuvoice under the world-writable /tmp fallback)
+        // makes the server's bind fail while clients happily connect to the
+        // attacker's socket and trust its responses.
+        verify_secure_dir(&parent_resolved)?;
     }
 
     let name = candidate.file_name().ok_or(ControlError::PathBadSuffix)?;
@@ -436,6 +443,39 @@ mod tests {
         let resolved = resolve_control_socket_path(Some(sock.to_str().unwrap())).unwrap();
         assert_eq!(resolved, sock);
         assert!(!sock.parent().unwrap().exists());
+    }
+
+    #[test]
+    fn client_rejects_insecure_existing_parent() {
+        // A pre-created world-readable parent (e.g. an attacker's /tmp/shuvoice)
+        // must be refused on the client path, not just at server bind.
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let parent = dir.path().join("shuvoice");
+        fs::create_dir(&parent).unwrap();
+        let mut perms = fs::metadata(&parent).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&parent, perms).unwrap();
+        let sock = parent.join("control.sock");
+        let err = resolve_control_socket_path(Some(sock.to_str().unwrap())).unwrap_err();
+        assert!(
+            matches!(err, ControlError::DirectoryInsecureMode { .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn client_accepts_secure_existing_parent() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let parent = dir.path().join("shuvoice");
+        fs::create_dir(&parent).unwrap();
+        let mut perms = fs::metadata(&parent).unwrap().permissions();
+        perms.set_mode(0o700);
+        fs::set_permissions(&parent, perms).unwrap();
+        let sock = parent.join("control.sock");
+        let resolved = resolve_control_socket_path(Some(sock.to_str().unwrap())).unwrap();
+        assert_eq!(resolved, sock);
     }
 
     #[test]
