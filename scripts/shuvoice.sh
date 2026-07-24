@@ -3,11 +3,10 @@ set -euo pipefail
 
 # Thin wrapper so `shuvoice` works from PATH during development.
 #
-# Resolution order:
-#   1. Installed console script (pip install -e .) if it isn't this wrapper
-#   2. Repo virtualenv console script
-#   3. Repo virtualenv `python -m shuvoice`
-#   4. System python -m shuvoice
+# Resolution order (Rust-only; no Python/.venv fallbacks):
+#   1. Repo Cargo release binary
+#   2. Repo Cargo debug binary
+#   3. Installed binary on PATH (if it isn't this wrapper)
 
 SCRIPT_PATH="${BASH_SOURCE[0]}"
 if command -v readlink >/dev/null 2>&1; then
@@ -25,6 +24,15 @@ resolved_path() {
   fi
 }
 
+for cand in \
+  "$ROOT_DIR/target/release/shuvoice" \
+  "$ROOT_DIR/target/debug/shuvoice"
+do
+  if [ -x "$cand" ]; then
+    exec "$cand" "$@"
+  fi
+done
+
 if command -v shuvoice >/dev/null 2>&1; then
   CMD_PATH="$(command -v shuvoice)"
   if [ "$(resolved_path "$CMD_PATH")" != "$SELF" ]; then
@@ -32,21 +40,7 @@ if command -v shuvoice >/dev/null 2>&1; then
   fi
 fi
 
-# Prefer .venv312 (has all backends installed), fall back to .venv.
-for venv in "$ROOT_DIR/.venv312" "$ROOT_DIR/.venv"; do
-  if [ -x "$venv/bin/shuvoice" ]; then
-    exec "$venv/bin/shuvoice" "$@"
-  fi
-done
-
-for venv in "$ROOT_DIR/.venv312" "$ROOT_DIR/.venv"; do
-  if [ -x "$venv/bin/python" ]; then
-    exec "$venv/bin/python" -m shuvoice "$@"
-  fi
-done
-
-if command -v python3 >/dev/null 2>&1; then
-  exec python3 -m shuvoice "$@"
-fi
-
-exec python -m shuvoice "$@"
+printf 'shuvoice: no Rust binary found.\n' >&2
+printf 'Build one with: cargo build -p shuvoice-cli --features desktop\n' >&2
+printf 'Or install the package providing /usr/bin/shuvoice.\n' >&2
+exit 127

@@ -42,3 +42,4 @@ docs/internal/
 # Native artifacts
 *.so
 *.log
+/target/

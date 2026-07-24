@@ -1,0 +1,1 @@
+"""Optional MeloTTS external worker."""

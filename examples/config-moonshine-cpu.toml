@@ -1,4 +1,14 @@
-# ShuVoice example: Moonshine ONNX (CPU)
+# ShuVoice example: Moonshine ONNX ASR via optional Python worker (CPU)
+#
+# Moonshine does NOT run inside the Rust app process. The desktop binary spawns
+# `python -m moonshine_asr` from a discoverable workers tree over worker-proto.
+#
+# Prerequisites:
+#   - workers tree with shuvoice_worker_proto/ + moonshine_asr/
+#     (dev: repo workers/; packaged: /usr/lib/shuvoice/workers or SHUVOICE_WORKERS_DIR)
+#   - venv at ~/.local/share/shuvoice/workers-moonshine-venv/
+# Bootstrap: shuvoice setup --asr-backend moonshine
+# Validate:  shuvoice config validate && shuvoice preflight
 
 config_version = 1
 
@@ -6,7 +16,7 @@ config_version = 1
 sample_rate = 16000
 chunk_ms = 100
 fallback_sample_rate = 48000
-# Moonshine consumes raw audio; small boost can help quieter mics.
+# Moonshine worker consumes raw audio; small boost can help quieter mics.
 input_gain = 1.3
 silence_rms_threshold = 0.008
 silence_rms_multiplier = 1.8
@@ -21,6 +31,7 @@ moonshine_model_precision = "float"
 moonshine_chunk_ms = 100
 moonshine_max_window_sec = 5.0
 moonshine_max_tokens = 64
+# Worker-side ONNX provider string (cpu | cuda). Not in-process app CUDA.
 moonshine_provider = "cpu"
 moonshine_onnx_threads = 0
 

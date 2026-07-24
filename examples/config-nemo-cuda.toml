@@ -1,4 +1,17 @@
-# ShuVoice example: NeMo on CUDA (best quality)
+# ShuVoice example: NeMo ASR via optional Python worker (CUDA)
+#
+# NeMo does NOT run inside the Rust app process. The desktop binary spawns
+# `python -m nemo_asr` from a discoverable workers tree over worker-proto.
+#
+# Prerequisites:
+#   - workers tree with shuvoice_worker_proto/ + nemo_asr/
+#     (dev: repo workers/; packaged: /usr/lib/shuvoice/workers or SHUVOICE_WORKERS_DIR)
+#   - venv at ~/.local/share/shuvoice/workers-nemo-venv/ with CUDA-capable torch/NeMo
+# Bootstrap: shuvoice setup --asr-backend nemo
+# Validate:  shuvoice config validate && shuvoice preflight
+#
+# `device` is the worker-side device string (cuda | cpu). This is unrelated to
+# Sherpa's sherpa_provider (native Sherpa is CPU-only and rejects cuda).
 
 config_version = 1
 
@@ -6,7 +19,7 @@ config_version = 1
 sample_rate = 16000
 chunk_ms = 100
 fallback_sample_rate = 48000
-# NeMo consumes raw audio; moderate input gain helps quiet mics.
+# NeMo worker consumes raw audio; moderate input gain helps quiet mics.
 input_gain = 1.8
 silence_rms_threshold = 0.008
 silence_rms_multiplier = 1.8

@@ -1,0 +1,43 @@
+[package]
+name = "shuvoice-asr"
+description = "Speech-recognition contracts and backends for ShuVoice"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+sherpa = ["dep:bzip2", "dep:reqwest", "dep:sherpa-onnx", "dep:tar", "dep:tempfile", "dep:sha2", "dep:hex"]
+openai = ["dep:tokio-tungstenite"]
+
+[dependencies]
+async-trait.workspace = true
+base64.workspace = true
+bzip2 = { workspace = true, optional = true }
+futures-util.workspace = true
+hex = { version = "0.4", optional = true }
+reqwest = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = { version = "0.10", optional = true }
+sherpa-onnx = { workspace = true, optional = true }
+shuvoice-core.workspace = true
+shuvoice-worker-proto.workspace = true
+tar = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
+thiserror.workspace = true
+tokio.workspace = true
+tokio-tungstenite = { workspace = true, optional = true }
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+httpmock.workspace = true
+rstest.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread", "io-util", "net", "sync", "time"] }
+
+[lints]
+workspace = true

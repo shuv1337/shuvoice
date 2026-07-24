@@ -1,13 +1,22 @@
-# ShuVoice example: Sherpa ONNX on CUDA
-config_version = 1
+# ShuVoice DIAGNOSTIC fixture: Sherpa + sherpa_provider = "cuda"
+#
+# INTENTIONAL FAIL-CLOSED EXAMPLE — do not use as a working profile.
+#
+# The Rust desktop binary links a static CPU-only sherpa-onnx build.
+# Config parse accepts the key (schema allows "cpu" | "cuda"), but
+# setup / preflight / ASR load reject cuda with an actionable error and
+# exit guidance to set sherpa_provider = "cpu". There is no Python wheel
+# install path and no runtime CUDA→CPU fallback for native Sherpa.
+#
+# Supported Sherpa profile: examples/config-sherpa-cpu.toml
+# Expected outcome when selected at runtime: fail closed (often exit 78).
 
-# Profile tuned for lower false-silent drops in low-noise desktop environments.
+config_version = 1
 
 [audio]
 sample_rate = 16000
 chunk_ms = 100
 fallback_sample_rate = 48000
-# Sherpa uses app-side auto-gain; keep raw capture gain neutral.
 input_gain = 1.0
 audio_queue_max_size = 200
 recording_preroll_ms = 200
@@ -20,21 +29,8 @@ auto_gain_settle_chunks = 2
 
 [asr]
 asr_backend = "sherpa"
-# Default streaming model:
-# sherpa_model_name = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
-# sherpa_decode_mode = "auto"
-#
-# Parakeet TDT v3 offline-instant option (stable/default):
-# sherpa_model_name = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
-# instant_mode = true
-# sherpa_decode_mode = "offline_instant"
-#
-# Optional Parakeet streaming override:
-# sherpa_decode_mode = "streaming"
-# sherpa_enable_parakeet_streaming = true
-#
-# Set this to your local model directory. See README.md for Sherpa model setup.
-sherpa_model_dir = "/path/to/sherpa-model-dir"
+# Optional local model directory. If unset, ShuVoice auto-downloads sherpa_model_name.
+# sherpa_model_dir = "/path/to/sherpa-model-dir"
 sherpa_provider = "cuda"
 sherpa_num_threads = 2
 sherpa_chunk_ms = 100

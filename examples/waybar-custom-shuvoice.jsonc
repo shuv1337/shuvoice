@@ -1,6 +1,7 @@
 {
   // Add "custom/shuvoice" to your modules-left/center/right array.
-  // Wrapper-script variant: examples/waybar-custom-shuvoice-wrapper.jsonc
+  // Uses the installed Rust helper on PATH (shuvoice-waybar).
+  // Repo-checkout wrapper variant: examples/waybar-custom-shuvoice-wrapper.jsonc
   "custom/shuvoice": {
     "return-type": "json",
     "exec": "shuvoice-waybar status",

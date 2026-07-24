@@ -1,4 +1,11 @@
 # ShuVoice example: Sherpa Parakeet TDT v3 (streaming opt-in)
+#
+# Native static Sherpa — CPU only. Enables the Parakeet streaming gate;
+# default/stable path remains offline_instant (see config-sherpa-parakeet-offline.toml).
+#
+# Apply / bootstrap:
+#   shuvoice setup --asr-backend sherpa
+#   shuvoice config validate
 
 config_version = 1
 
@@ -27,7 +34,7 @@ instant_mode = false
 sherpa_decode_mode = "streaming"
 sherpa_enable_parakeet_streaming = true
 
-# cpu | cuda (falls back to cpu at runtime if CUDA provider is unavailable)
+# Native static Sherpa is CPU-only; "cuda" fails closed (see config-sherpa-cuda.toml).
 sherpa_provider = "cpu"
 sherpa_num_threads = 2
 sherpa_chunk_ms = 100

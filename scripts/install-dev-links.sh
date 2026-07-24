@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Install development symlinks so `shuvoice` and `shuvoice-waybar` are
-# available on PATH without a full pip install.
+# available on PATH without a full package install.
+# Wrappers resolve Rust binaries only (repo target/ then installed PATH).
 #
 # Default:
 #   ~/.local/bin/shuvoice        -> <repo>/scripts/shuvoice.sh
@@ -23,7 +24,7 @@ LINKS=(
 )
 
 usage() {
-  cat <<'EOF'
+  cat <<'EOF_USAGE'
 Usage: install-dev-links.sh [options]
 
 Install development symlinks for shuvoice and shuvoice-waybar.
@@ -33,7 +34,7 @@ Options:
   --force            Replace existing files/symlinks at destination
   --dry-run          Print planned actions without changing anything
   -h, --help         Show this help text
-EOF
+EOF_USAGE
 }
 
 resolve_path() {
@@ -107,3 +108,7 @@ if ! echo "$PATH" | tr ':' '\n' | grep -qx "$BIN_DIR"; then
   log ""
   log "Note: $BIN_DIR is not in PATH. Add it to your shell profile."
 fi
+
+log ""
+log "Wrappers resolve: target/release → target/debug → installed PATH binary."
+log "Build with: cargo build -p shuvoice-cli --features desktop"

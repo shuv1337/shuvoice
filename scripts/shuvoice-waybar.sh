@@ -3,8 +3,10 @@ set -euo pipefail
 
 # Thin wrapper for Waybar custom module commands.
 #
-# It prefers the installed console script (`shuvoice-waybar`) and falls back
-# to the repo virtualenv/module path for local development checkouts.
+# Resolution order (Rust-only; no Python/.venv fallbacks):
+#   1. Repo Cargo release binary
+#   2. Repo Cargo debug binary
+#   3. Installed binary on PATH (if it isn't this wrapper)
 
 SCRIPT_PATH="${BASH_SOURCE[0]}"
 if command -v readlink >/dev/null 2>&1; then
@@ -22,6 +24,15 @@ resolved_path() {
   fi
 }
 
+for cand in \
+  "$ROOT_DIR/target/release/shuvoice-waybar" \
+  "$ROOT_DIR/target/debug/shuvoice-waybar"
+do
+  if [ -x "$cand" ]; then
+    exec "$cand" "$@"
+  fi
+done
+
 if command -v shuvoice-waybar >/dev/null 2>&1; then
   CMD_PATH="$(command -v shuvoice-waybar)"
   if [ "$(resolved_path "$CMD_PATH")" != "$SELF" ]; then
@@ -29,20 +40,7 @@ if command -v shuvoice-waybar >/dev/null 2>&1; then
   fi
 fi
 
-for venv in "$ROOT_DIR/.venv312" "$ROOT_DIR/.venv"; do
-  if [ -x "$venv/bin/shuvoice-waybar" ]; then
-    exec "$venv/bin/shuvoice-waybar" "$@"
-  fi
-done
-
-for venv in "$ROOT_DIR/.venv312" "$ROOT_DIR/.venv"; do
-  if [ -x "$venv/bin/python" ]; then
-    exec "$venv/bin/python" -m shuvoice.waybar "$@"
-  fi
-done
-
-if command -v python3 >/dev/null 2>&1; then
-  exec python3 -m shuvoice.waybar "$@"
-fi
-
-exec python -m shuvoice.waybar "$@"
+printf 'shuvoice-waybar: no Rust binary found.\n' >&2
+printf 'Build one with: cargo build -p shuvoice-cli --features desktop\n' >&2
+printf 'Or install the package providing /usr/bin/shuvoice-waybar.\n' >&2
+exit 127

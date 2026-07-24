@@ -6,8 +6,8 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      run_gui:
-        description: "Run optional GUI smoke tests"
+      run_smoke:
+        description: "Run optional local smoke script (no service/mic/display)"
         required: false
         default: "false"
         type: choice
@@ -15,126 +15,177 @@ on:
           - "false"
           - "true"
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Ubuntu 24.04 has no libgtk4-layer-shell-dev. Cargo enables gtk4-layer-shell
+  # feature v1_3 → gtk4-layer-shell-sys needs pkg-config gtk4-layer-shell-0 >= 1.3.
+  # Pin upstream v1.3.0 by immutable git commit (tag v1.3.0).
+  GTK4_LAYER_SHELL_VERSION: "1.3.0"
+  GTK4_LAYER_SHELL_GIT_COMMIT: "1c963c51514581c41b9bdae08cdf69171265cdda"
+  # Source-install prefix (validated on clean ubuntu:24.04). Meson may use plain
+  # lib/ or multiarch lib/<triplet>/; both are on the pkg-config/loader paths.
+  GTK4_LAYER_SHELL_PREFIX: "/usr/local"
+  PKG_CONFIG_PATH: /usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig
+  LD_LIBRARY_PATH: /usr/local/lib:/usr/local/lib/x86_64-linux-gnu
+
 jobs:
-  lint:
-    runs-on: ubuntu-latest
+  rust:
+    name: Rust workspace
+    # Noble: stable GHA image. Distro gtk4-layer-shell-dev is only on 25.10+
+    # (25.10 still ships < 1.3). Commit-pinned source install covers desktop UI.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      - uses: astral-sh/setup-uv@v5
+      # YAML anchor on the step mapping; smoke reuses via alias (workflow-only).
+      - &install-native-deps
+        name: Install native build dependencies
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            clang \
+            meson \
+            ninja-build \
+            git \
+            ca-certificates \
+            libgtk-4-dev \
+            libglib2.0-dev \
+            libcairo2-dev \
+            libpango1.0-dev \
+            libgdk-pixbuf-2.0-dev \
+            libgraphene-1.0-dev \
+            libpipewire-0.3-dev \
+            libasound2-dev \
+            libwayland-dev \
+            wayland-protocols
+
+          # Reproducible source install: gtk4-layer-shell is absent from Ubuntu 24.04.
+          prefix="${GTK4_LAYER_SHELL_PREFIX}"
+          src_dir="${RUNNER_TEMP:-/tmp}/gtk4-layer-shell-src"
+          rm -rf "${src_dir}"
+          mkdir -p "${src_dir}"
+          git -C "${src_dir}" init --quiet
+          git -C "${src_dir}" remote add origin https://github.com/wmww/gtk4-layer-shell.git
+          git -C "${src_dir}" fetch --depth=1 --quiet origin "${GTK4_LAYER_SHELL_GIT_COMMIT}"
+          git -C "${src_dir}" checkout --quiet --detach FETCH_HEAD
+          got_commit="$(git -C "${src_dir}" rev-parse HEAD)"
+          test "${got_commit}" = "${GTK4_LAYER_SHELL_GIT_COMMIT}"
+          grep -F "version: '${GTK4_LAYER_SHELL_VERSION}'" "${src_dir}/meson.build"
+
+          meson setup "${src_dir}/build" "${src_dir}" \
+            --prefix="${prefix}" \
+            --buildtype=release \
+            -Dexamples=false \
+            -Ddocs=false \
+            -Dtests=false \
+            -Dsmoke-tests=false \
+            -Dintrospection=false \
+            -Dvapi=false
+          meson compile -C "${src_dir}/build"
+          sudo meson install -C "${src_dir}/build"
+          sudo ldconfig
+
+          # Match gtk4-layer-shell-sys system-deps: gtk4_layer_shell_0 >= 1.3
+          pkg-config --exists --print-errors 'gtk4-layer-shell-0 >= 1.3'
+          modversion="$(pkg-config --modversion gtk4-layer-shell-0)"
+          test "${modversion}" = "${GTK4_LAYER_SHELL_VERSION}"
+          echo "gtk4-layer-shell-0 ${modversion} (git ${got_commit}, prefix ${prefix})"
+
+      # Pin to workspace package.rust-version (Cargo.toml), not floating stable.
+      - name: Install Rust toolchain (MSRV 1.92)
+        uses: dtolnay/rust-toolchain@master
         with:
-          enable-cache: true
+          toolchain: "1.92"
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: shuvoice-desktop-1.92
+
+      - name: Format (workspace)
+        run: cargo fmt --all -- --check
+
+      - name: Check workspace (default features)
+        run: cargo check --locked --workspace --all-targets
+
+      - name: Check CLI (no default features)
+        run: cargo check --locked -p shuvoice-cli --no-default-features --all-targets
+
+      - name: Check CLI (desktop / default features)
+        run: cargo check --locked -p shuvoice-cli --features desktop --all-targets
+
+      - name: Check CLI (all features)
+        run: cargo check --locked -p shuvoice-cli --all-features --all-targets
+
+      - name: Test workspace (default features)
+        run: cargo test --locked --workspace --all-targets -- --nocapture
+
+      - name: Test CLI (no default features)
+        run: cargo test --locked -p shuvoice-cli --no-default-features --all-targets -- --nocapture
+
+      - name: Test CLI (desktop / default features)
+        run: cargo test --locked -p shuvoice-cli --features desktop --all-targets -- --nocapture
+
+      - name: Test CLI (all features)
+        run: cargo test --locked -p shuvoice-cli --all-features --all-targets -- --nocapture
+
+      - name: Clippy workspace (default features)
+        run: cargo clippy --locked --workspace --all-targets --no-deps -- -D warnings
+
+      - name: Clippy CLI (no default features)
+        run: cargo clippy --locked -p shuvoice-cli --no-default-features --all-targets --no-deps -- -D warnings
+
+      - name: Clippy CLI (desktop / default features)
+        run: cargo clippy --locked -p shuvoice-cli --features desktop --all-targets --no-deps -- -D warnings
+
+      - name: Clippy CLI (all features)
+        run: cargo clippy --locked -p shuvoice-cli --all-features --all-targets --no-deps -- -D warnings
+
+      - name: Packaging unit contract
+        run: cargo test --locked -p shuvoice-cli --features desktop --test packaging_unit -- --nocapture
+
+  workers:
+    name: Python workers (stdlib unittest)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libportaudio2 libasound2t64 libevdev2 \
-            gobject-introspection libgirepository1.0-dev libgirepository-2.0-dev libcairo2-dev pkg-config
+      - name: Worker protocol + fake-engine tests
+        working-directory: workers
+        run: python -m unittest discover -s tests -v
 
-      - name: Install dependencies
-        run: uv sync --dev --no-group gpu
-
-      - name: Ruff check
-        run: uv run ruff check shuvoice tests scripts
-
-      - name: Ruff format check
-        run: uv run ruff format --check shuvoice tests scripts
-
-      - name: Docs/config drift checks
-        run: |
-          uv run python scripts/validate-doc-config-sync.py
-          uv run python scripts/validate-cli-help-sync.py
-
-  unit:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
-
+  smoke:
+    name: Optional smoke (no live service/mic)
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_smoke == 'true' }}
+    needs: [rust, workers]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      - uses: astral-sh/setup-uv@v5
+      - *install-native-deps
+
+      - name: Install Rust toolchain (MSRV 1.92)
+        uses: dtolnay/rust-toolchain@master
         with:
-          enable-cache: true
+          toolchain: "1.92"
 
-      - uses: actions/setup-python@v5
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
         with:
-          python-version: ${{ matrix.python-version }}
+          shared-key: shuvoice-desktop-1.92
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libportaudio2 libasound2t64 libevdev2 \
-            gir1.2-gtk-4.0 \
-            gobject-introspection libgirepository1.0-dev libgirepository-2.0-dev libcairo2-dev pkg-config
+      - name: Build debug CLI (desktop)
+        run: cargo build --locked -p shuvoice-cli --features desktop --bins
 
-      - name: Install Python dependencies
-        run: uv sync --dev --no-group gpu
-
-      - name: Run headless-safe unit tests
-        run: uv run pytest -m "not gui and not e2e and not integration and not gpu" -v
-
-  e2e:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libportaudio2 libasound2t64 libevdev2 \
-            gir1.2-gtk-4.0 \
-            gobject-introspection libgirepository1.0-dev libgirepository-2.0-dev libcairo2-dev pkg-config
-
-      - name: Install Python dependencies
-        run: uv sync --dev --no-group gpu
-
-      - name: Run IPC end-to-end tests
-        run: uv run pytest -m e2e -v
-
-  gui-smoke:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_gui == 'true' }}
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libportaudio2 libasound2t64 libevdev2 \
-            python3-gi gir1.2-gtk-4.0 \
-            gobject-introspection libgirepository1.0-dev libgirepository-2.0-dev libcairo2-dev pkg-config
-
-      - name: Install Python dependencies
-        run: uv sync --dev --no-group gpu
-
-      - name: Run GUI smoke tests
-        run: uv run pytest -m gui -v
+      - name: Run smoke script
+        run: ./scripts/smoke-test.sh
