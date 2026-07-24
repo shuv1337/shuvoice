@@ -9,8 +9,10 @@ use shuvoice_app::{Config, SessionEvent, TTS_AWAIT_FINALIZE_TIMEOUT, TestHarness
 use shuvoice_asr::FallbackOutcome;
 
 fn cfg() -> Config {
-    // Belt-and-suspenders: never leave process-global hang armed across tests.
-    shuvoice_app::TEST_HANG_ACTOR_ON_SHUTDOWN.store(false, std::sync::atomic::Ordering::SeqCst);
+    // Do NOT clear TEST_HANG_ACTOR_ON_SHUTDOWN here. Session::shutdown polls
+    // the flag, so a parallel test starting mid-wedge would un-wedge the
+    // #[serial] wedge test's actor and break its shutdown-bound assertion.
+    // The wedge test owns the flag and clears it via a panic-safe Drop guard.
     let mut c = Config::default();
     c.min_speech_ms = 0;
     c.silence_rms_threshold = 0.0;
