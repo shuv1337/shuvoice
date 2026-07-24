@@ -103,6 +103,30 @@ async fn elevenlabs_http_error_classification() {
 }
 
 #[tokio::test]
+async fn elevenlabs_rejects_non_pcm_output_format() {
+    // mp3 bytes mislabeled as PCM s16le would play as noise; the backend must
+    // refuse compressed formats up front instead of streaming them.
+    let env = "SHUVOICE_TEST_EL_KEY4";
+    unsafe { std::env::set_var(env, "k") };
+    for bad in ["mp3_44100_128", "ulaw_8000", "opus_48000_64", "pcm_abc", ""] {
+        let mut cfg = ElevenLabsConfig::default();
+        cfg.api_key_env = env.into();
+        cfg.output_format = bad.into();
+        let backend = ElevenLabsTtsBackend::new(cfg).unwrap();
+        let err = backend
+            .synthesize_stream(pcm_request(1.0), CancellationToken::new())
+            .await
+            .err()
+            .unwrap_or_else(|| panic!("format {bad:?} must be rejected"));
+        assert!(
+            err.to_string().contains("pcm_"),
+            "unexpected error for {bad:?}: {err}"
+        );
+    }
+    unsafe { std::env::remove_var(env) };
+}
+
+#[tokio::test]
 async fn openai_shapes_request_and_clamps_speed() {
     let server = MockServer::start();
     let mock = server.mock(|when, then| {

@@ -83,6 +83,23 @@ impl ElevenLabsTtsBackend {
     fn native_speed(request: &SynthesisRequest) -> Result<f64, TtsError> {
         positive_finite_speed(request.playback_speed, "ElevenLabs")
     }
+
+    /// The playback path treats the response body as raw PCM s16le, so only
+    /// `pcm_<rate>` output formats are valid; compressed formats (mp3, opus,
+    /// ulaw) would be reinterpreted as samples and play as noise.
+    fn pcm_output_format(&self) -> Result<&str, TtsError> {
+        let format = self.config.output_format.trim();
+        let is_pcm = format
+            .strip_prefix("pcm_")
+            .is_some_and(|rate| rate.parse::<u32>().is_ok());
+        if !is_pcm {
+            return Err(TtsError::config(format!(
+                "ElevenLabs backend streams raw PCM only; set [tts].tts_output_format to a \
+                 pcm_* format such as \"pcm_24000\", got {format:?}"
+            )));
+        }
+        Ok(format)
+    }
 }
 
 #[async_trait]
@@ -140,6 +157,7 @@ impl TtsBackend for ElevenLabsTtsBackend {
         };
         let api_key = self.api_key()?;
         let native_speed = Self::native_speed(&request)?;
+        let output_format = self.pcm_output_format()?;
 
         tracing::info!(
             voice = %voice,
@@ -153,7 +171,7 @@ impl TtsBackend for ElevenLabsTtsBackend {
             "{}/text-to-speech/{}/stream?output_format={}",
             self.config.base_url.trim_end_matches('/'),
             urlencoding_encode(&voice),
-            self.config.output_format
+            output_format
         );
 
         let body = json!({
