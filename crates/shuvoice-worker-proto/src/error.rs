@@ -66,6 +66,9 @@ pub enum ProtocolError {
     #[error("TTS audio stream produced no PCM samples")]
     EmptyAudio,
 
+    #[error("TTS audio stream exceeded {limit} bytes before audio_end")]
+    AudioTooLarge { limit: usize },
+
     #[error("audio encoding mismatch: {0}")]
     EncodingMismatch(&'static str),
 

@@ -11,7 +11,8 @@ use crate::codec::FramedConnection;
 use crate::error::ProtocolError;
 use crate::frame::{Frame, FrameKind};
 use crate::limits::{
-    DEFAULT_LOAD_TIMEOUT, DEFAULT_MAX_IGNORED_MESSAGES, DEFAULT_RPC_TIMEOUT, PROTOCOL_VERSION,
+    DEFAULT_LOAD_TIMEOUT, DEFAULT_MAX_IGNORED_MESSAGES, DEFAULT_MAX_SYNTHESIS_AUDIO_BYTES,
+    DEFAULT_RPC_TIMEOUT, PROTOCOL_VERSION,
 };
 use crate::manifest::WorkerManifest;
 use crate::messages::{
@@ -29,6 +30,8 @@ pub struct ClientOptions {
     pub load_timeout: Duration,
     /// Max unrelated frames/messages skipped while awaiting a correlated reply.
     pub max_ignored_messages: u32,
+    /// Cap on total PCM bytes accumulated during one `synthesize` call.
+    pub max_synthesis_audio_bytes: usize,
 }
 
 impl Default for ClientOptions {
@@ -37,6 +40,7 @@ impl Default for ClientOptions {
             rpc_timeout: DEFAULT_RPC_TIMEOUT,
             load_timeout: DEFAULT_LOAD_TIMEOUT,
             max_ignored_messages: DEFAULT_MAX_IGNORED_MESSAGES,
+            max_synthesis_audio_bytes: DEFAULT_MAX_SYNTHESIS_AUDIO_BYTES,
         }
     }
 }
@@ -361,6 +365,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> WorkerClient<R, W> {
         let request_id = Uuid::now_v7();
         let timeout = self.options.rpc_timeout;
         let max_ignored = self.options.max_ignored_messages;
+        let max_audio_bytes = self.options.max_synthesis_audio_bytes;
         let fut = async {
             self.conn
                 .write_message(&ControlMessage::Synthesize(SynthesizeRequest {
@@ -459,6 +464,15 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> WorkerClient<R, W> {
                         }
                         if encoding.is_none() {
                             encoding = frame_enc;
+                        }
+                        // Per-frame size is bounded by MAX_FRAME_LEN, but the
+                        // aggregate must be capped too: a worker that streams
+                        // matching frames without audio_end must not be able
+                        // to exhaust supervisor memory.
+                        if audio.len().saturating_add(body.len()) > max_audio_bytes {
+                            return Err(ProtocolError::AudioTooLarge {
+                                limit: max_audio_bytes,
+                            });
                         }
                         audio.extend_from_slice(&body);
                     }

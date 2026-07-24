@@ -34,3 +34,11 @@ pub const DEFAULT_LOAD_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Default max unrelated control/binary messages skipped while awaiting a reply.
 pub const DEFAULT_MAX_IGNORED_MESSAGES: u32 = 64;
+
+/// Default cap on total PCM bytes accumulated for one `synthesize` call.
+///
+/// Individual frames are bounded by [`MAX_FRAME_LEN`], but a hostile or buggy
+/// worker could stream matching frames without ever sending `audio_end` and
+/// exhaust supervisor memory within the RPC deadline. 256 MiB is ≳20 minutes
+/// of 48 kHz mono f32 — far beyond any legitimate utterance.
+pub const DEFAULT_MAX_SYNTHESIS_AUDIO_BYTES: usize = 256 * 1024 * 1024;

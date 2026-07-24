@@ -840,6 +840,7 @@ async fn synthesize_requires_audio_end_and_nonempty_pcm() {
             rpc_timeout: std::time::Duration::from_secs(5),
             load_timeout: std::time::Duration::from_secs(5),
             max_ignored_messages: 8,
+            ..Default::default()
         },
     );
     client.handshake("tts-empty").await.unwrap();
@@ -864,6 +865,7 @@ async fn rpc_timeout_on_hanging_worker() {
             rpc_timeout: std::time::Duration::from_millis(80),
             load_timeout: std::time::Duration::from_millis(80),
             max_ignored_messages: 4,
+            ..Default::default()
         },
     );
     // load writes and waits for ack with rpc/load timeout.
@@ -953,4 +955,57 @@ async fn synthesize_encoding_mismatch_errors() {
         "got {err:?}"
     );
     server.await.unwrap();
+}
+
+#[tokio::test]
+async fn synthesize_rejects_unbounded_audio_stream() {
+    // A worker streaming matching-request frames without audio_end must hit
+    // the aggregate cap instead of growing supervisor memory until OOM.
+    let (client_side, server_side) = duplex(64 * 1024);
+    let (cr, cw) = tokio::io::split(client_side);
+    let (sr, sw) = tokio::io::split(server_side);
+
+    let server = tokio::spawn(async move {
+        let mut conn = FramedConnection::new(sr, sw);
+        accept_handshake(&mut conn, tts_manifest()).await.unwrap();
+        match conn.read_message().await.unwrap() {
+            ControlMessage::Synthesize(req) => {
+                conn.write_message(&ControlMessage::AudioStart(AudioStreamEvent {
+                    request_id: req.request_id,
+                    sample_rate_hz: Some(24_000),
+                    channels: Some(1),
+                    encoding: Some(PcmEncoding::F32Le),
+                    extra: Default::default(),
+                }))
+                .await
+                .unwrap();
+                // Never send audio_end; keep streaming until the client bails.
+                let samples = vec![0.0f32; 256];
+                loop {
+                    let pcm = Frame::pcm_f32le(req.request_id, &samples).unwrap();
+                    if conn.write_frame(&pcm).await.is_err() {
+                        break;
+                    }
+                }
+            }
+            other => panic!("{other:?}"),
+        }
+    });
+
+    let mut client = WorkerClient::with_options(
+        cr,
+        cw,
+        shuvoice_worker_proto::ClientOptions {
+            rpc_timeout: std::time::Duration::from_secs(5),
+            max_synthesis_audio_bytes: 8 * 1024,
+            ..Default::default()
+        },
+    );
+    client.handshake("tts-flood").await.unwrap();
+    let err = client.synthesize("x", None, None).await.unwrap_err();
+    assert!(
+        matches!(err, ProtocolError::AudioTooLarge { limit: 8192 }),
+        "got {err:?}"
+    );
+    server.abort();
 }
