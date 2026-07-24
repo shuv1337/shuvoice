@@ -3,8 +3,10 @@
 //! Multiple tests in this crate touch `XDG_*` / `HOME` / branding overrides.
 //! Without serialization they race and flake (e.g. one test clears XDG while
 //! another still expects it).
-
-#![cfg(test)]
+//!
+//! The module is already `#[cfg(test)]`-gated at its declaration in `lib.rs`;
+//! an inner `#![cfg(test)]` here would trip `clippy::duplicated_attributes`
+//! on the MSRV toolchain.
 
 use std::ffi::{OsStr, OsString};
 use std::sync::{Mutex, MutexGuard, OnceLock};
