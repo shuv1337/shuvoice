@@ -173,6 +173,7 @@ class RealNemoEngine:
         model.to(config.device)
         model.encoder.set_default_att_context_size([70, config.right_context])
         model.encoder.setup_streaming_params()
+        self._configure_decoding_strategy(model, config)
 
         state = SimpleNamespace(
             model=model,
@@ -192,6 +193,28 @@ class RealNemoEngine:
         self._cfg = config
         self._reset_standalone(state)
         self._last = ""
+
+    @staticmethod
+    def _configure_decoding_strategy(model: Any, config: NemoLoadConfig) -> None:
+        """Apply runtime decoding overrides (RNNT greedy CUDA graph decoder)."""
+        try:
+            from omegaconf import OmegaConf
+
+            decoding_cfg = OmegaConf.to_container(model.cfg.decoding, resolve=True)
+            if not isinstance(decoding_cfg, dict):
+                return
+
+            greedy_cfg = decoding_cfg.setdefault("greedy", {})
+            if isinstance(greedy_cfg, dict):
+                greedy_cfg["use_cuda_graph_decoder"] = bool(config.use_cuda_graph_decoder)
+
+            model.change_decoding_strategy(OmegaConf.create(decoding_cfg))
+            log.info(
+                "RNNT greedy CUDA graph decoder: %s",
+                "enabled" if config.use_cuda_graph_decoder else "disabled",
+            )
+        except Exception:
+            log.warning("Failed to apply decoding strategy overrides", exc_info=True)
 
     def _reset_standalone(self, state: Any) -> None:
         model = state.model
