@@ -1892,9 +1892,13 @@ where
     }
 
     pub async fn shutdown(&mut self) {
-        if TEST_HANG_ACTOR_ON_SHUTDOWN.load(std::sync::atomic::Ordering::SeqCst) {
-            // Async hang — abortable by JoinHandle::abort (unlike thread::sleep).
-            std::future::pending::<()>().await;
+        // Async hang — abortable by JoinHandle::abort (unlike thread::sleep).
+        // Polled, not pending(): the flag is process-global, so an unrelated
+        // parallel test whose shutdown races into the wedge window must
+        // resume once the wedge test clears the flag, instead of deadlocking
+        // the whole test binary (observed as a 6h CI hang on 2-core runners).
+        while TEST_HANG_ACTOR_ON_SHUTDOWN.load(std::sync::atomic::Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
         self.running = false;
         self.recording = false;
