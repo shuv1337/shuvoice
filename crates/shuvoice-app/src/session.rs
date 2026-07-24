@@ -1817,8 +1817,13 @@ where
             if is_recording && !self.was_recording {
                 self.begin_utterance().await;
             }
+            // Stop-edge window: recording just ended but finalize hasn't
+            // started yet (possibly deferred across ticks while an in-flight
+            // chunk job lands). Audio drained here is still tail-of-utterance
+            // — it must reach the finalize buffer, not the noise floor.
+            let capture_tail = self.was_recording && !is_recording;
             for chunk in chunks {
-                if is_recording {
+                if is_recording || capture_tail {
                     self.append_recording_chunk(&chunk);
                 } else {
                     self.noise_floor_rms =

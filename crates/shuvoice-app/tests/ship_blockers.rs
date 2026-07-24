@@ -285,6 +285,34 @@ async fn falling_edge_tail_grace_captures_late_audio() {
 }
 
 #[tokio::test]
+async fn stop_edge_tick_routes_ring_audio_into_finalize() {
+    // Audio sitting in the capture ring at key-up is drained by the stop-edge
+    // tick BEFORE finalize exists; it must reach the utterance buffer, not the
+    // noise-floor estimator.
+    let scripted = offline_asr("tail kept");
+    let mut h = TestHarness::basic(scripted, cfg()).await;
+    h.session.start_recording().await;
+    h.audio.try_push(vec![0.2; 8]);
+    assert!(h.session.tick().await); // arms was_recording
+    assert!(h.session.is_recording());
+    h.session.stop_recording();
+    // Tail of the last word: buffered at key-up, drained on the stop-edge tick.
+    h.audio.try_push(vec![0.35; 320]);
+    assert!(h.session.tick().await);
+    let _ = h
+        .session
+        .await_or_cancel_finalization(Duration::from_secs(5))
+        .await;
+    let last = h.scripted.lock().last_utterance.len();
+    assert!(
+        last > 8,
+        "stop-edge ring audio must reach finalize, not the noise floor; got {last} samples"
+    );
+    assert!(!h.injector.finals().is_empty());
+    h.shutdown().await;
+}
+
+#[tokio::test]
 async fn stale_finalize_after_rearm_does_not_commit() {
     let scripted = ScriptedAsrBackend::local_streaming(4);
     scripted.shared().lock().delay = Duration::from_millis(80);
