@@ -292,11 +292,19 @@ impl AsrBackend for OpenAiRealtimeBackend {
         self.ensure_live().await?;
         let b64 = pcm::encode_pcm16_le_b64(pcm_mono_f32);
         self.send_json(&append_audio_payload(&b64)).await?;
-        let guard = self.state.lock().await;
-        if let Some(err) = guard.session_error.as_ref()
-            && guard.transport_dead
-        {
-            return Err(AsrError::transport(err.clone()));
+        let mut guard = self.state.lock().await;
+        if guard.transport_dead {
+            let err = guard
+                .session_error
+                .clone()
+                .unwrap_or_else(|| "OpenAI Realtime transport died".into());
+            return Err(AsrError::transport(err));
+        }
+        // Server `error` events do not always kill the socket; surface them
+        // instead of silently returning a stale partial. Taken (not cloned) so
+        // one error does not poison every later call on a live session.
+        if let Some(err) = guard.session_error.take() {
+            return Err(AsrError::transport(err));
         }
         Ok(guard.protocol.latest_partial.clone())
     }
@@ -318,14 +326,23 @@ impl AsrBackend for OpenAiRealtimeBackend {
         loop {
             // Snapshot wait handles **then drop the mutex** before awaiting.
             let (notify, completed, latest_final, latest_partial, transport_dead, session_error) = {
-                let guard = self.state.lock().await;
+                let mut guard = self.state.lock().await;
+                // On a live socket, take (don't clone) the error so one server
+                // `error` event fails this commit without poisoning the next
+                // utterance. On a dead transport the error stays sticky until
+                // ensure_live reconnects.
+                let session_error = if guard.transport_dead {
+                    guard.session_error.clone()
+                } else {
+                    guard.session_error.take()
+                };
                 (
                     Arc::clone(&guard.notify),
                     guard.protocol.completed,
                     guard.protocol.latest_final.clone(),
                     guard.protocol.latest_partial.clone(),
                     guard.transport_dead,
-                    guard.session_error.clone(),
+                    session_error,
                 )
             };
 
@@ -339,6 +356,13 @@ impl AsrBackend for OpenAiRealtimeBackend {
                 return Err(AsrError::transport(
                     session_error.unwrap_or_else(|| "OpenAI Realtime transport died".into()),
                 ));
+            }
+            // The server rejected the commit (or the session) but kept the
+            // socket open — e.g. quota exhausted, revoked key, invalid model.
+            // Fail fast instead of stalling until the deadline and reporting
+            // an empty transcript as success.
+            if let Some(err) = session_error {
+                return Err(AsrError::transport(err));
             }
             if Instant::now() >= deadline {
                 tracing::warn!("OpenAI Realtime commit timed out; using best partial");
@@ -372,6 +396,61 @@ impl AsrBackend for OpenAiRealtimeBackend {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test]
+    async fn open_socket_error_event_fails_commit_fast() {
+        // Regression: a server `error` event that keeps the socket open must
+        // fail finish_utterance immediately (so it counts for the breaker),
+        // not stall the full deadline and return Ok("").
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            while let Some(Ok(msg)) = ws.next().await {
+                if let Message::Text(t) = msg {
+                    let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) else {
+                        continue;
+                    };
+                    if v.get("type").and_then(|s| s.as_str()) == Some("input_audio_buffer.commit") {
+                        let err = serde_json::json!({
+                            "type": "error",
+                            "error": {"type": "insufficient_quota", "code": "insufficient_quota"}
+                        });
+                        // Socket stays open after the error event.
+                        let _ = ws.send(Message::Text(err.to_string().into())).await;
+                    }
+                }
+            }
+        });
+
+        // SAFETY: test-local variable name; no concurrent env readers race it.
+        unsafe { env::set_var("SHUVOICE_TEST_OPENAI_ERR_EVT_KEY", "sk-test") };
+        let mut config = AsrConfig::default();
+        config.core.openai_realtime_api_key_env = "SHUVOICE_TEST_OPENAI_ERR_EVT_KEY".into();
+        config.connect.openai_realtime_ws_url = Some(format!("ws://{addr}"));
+        let mut backend = OpenAiRealtimeBackend::new(config);
+        let mut progress: Box<ProgressFn<'_>> = Box::new(|_, _| {});
+        backend.load(&mut progress).await.unwrap();
+
+        let t0 = Instant::now();
+        let res = backend.finish_utterance(Some(Duration::from_secs(5))).await;
+        assert!(res.is_err(), "open-socket error event must fail the commit");
+        assert!(
+            t0.elapsed() < Duration::from_secs(2),
+            "commit must fail fast, not stall the deadline"
+        );
+        // The socket never closed, so the transport must still be live and the
+        // surfaced error must not poison later utterances.
+        let guard = backend.state.lock().await;
+        assert!(!guard.transport_dead);
+        assert!(
+            guard.session_error.is_none(),
+            "error must be taken, not sticky"
+        );
+        drop(guard);
+        server.abort();
+    }
 
     #[tokio::test]
     async fn commit_waiter_does_not_hold_mutex_across_notify_await() {
