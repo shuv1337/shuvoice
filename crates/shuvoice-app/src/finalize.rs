@@ -16,7 +16,7 @@ use shuvoice_core::{
     observe_recording_chunk, prefer_transcript, sanitize_final_injection_text,
 };
 use tokio::sync::mpsc;
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::asr_owner::{AsrOwnerHandle, gen_is_current};
 use crate::types::UtteranceGen;
@@ -156,6 +156,19 @@ pub fn spawn_finalize_job(
         }
 
         if is_silent_utterance(&state, min_speech_samples) {
+            // Logged at info (not debug) on purpose: the service runs RUST_LOG=info,
+            // and a silently discarded utterance is indistinguishable from "nothing
+            // happened" without these numbers. peak_rms below threshold means the
+            // gate is misconfigured for this microphone, not that the user was quiet.
+            info!(
+                utt_gen,
+                peak_rms = state.peak_rms,
+                threshold = state.utterance_rms_threshold,
+                speech_samples = state.speech_samples,
+                min_speech_samples,
+                total_samples = state.total,
+                "utterance discarded as silent; nothing sent to ASR"
+            );
             let _ = result_tx.send(JobResult::Finalize {
                 utt_gen,
                 outcome: FinalizeOutcome::Silent,

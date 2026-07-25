@@ -176,6 +176,14 @@ impl MetricsCollector {
     pub fn observe_commit_failure(&self) {
         self.increment("commit_failures", 1);
     }
+    /// Utterance dropped by the silence gate before reaching the ASR.
+    ///
+    /// Counted so that "recorded N times, transcribed 0" is visible in
+    /// `control metrics` — success-only counters render a total failure as
+    /// missing data rather than as a signal.
+    pub fn observe_silent_discard(&self) {
+        self.increment("silent_discards", 1);
+    }
     pub fn observe_stall_flush(&self) {
         self.increment("stall_flushes", 1);
     }
@@ -305,12 +313,13 @@ impl MetricsCollector {
             .map(|t| t.avg)
             .unwrap_or(0.0);
         format!(
-            "metrics chunks={} starts={} stops={} partials={} commits={} tts_speaks={} tts_done={} tts_speed_changes={} tts_speed_restarts={} queue_max={} utt_avg={:.2}s",
+            "metrics chunks={} starts={} stops={} partials={} commits={} silent_discards={} tts_speaks={} tts_done={} tts_speed_changes={} tts_speed_restarts={} queue_max={} utt_avg={:.2}s",
             c("chunks_processed"),
             c("recording_start_count"),
             c("recording_stop_count"),
             c("partial_updates"),
             c("final_commits"),
+            c("silent_discards"),
             c("tts_speak_count"),
             c("tts_playback_completions"),
             c("tts_speed_change_count"),
@@ -342,12 +351,13 @@ pub fn metrics_to_human(snapshot: &MetricsSnapshot) -> String {
         .map(|t| t.avg)
         .unwrap_or(0.0);
     format!(
-        "chunks={} starts={} stops={} partials={} commits={} tts_speaks={} tts_done={} tts_speed_changes={} tts_speed_restarts={} queue_avg={:.2} utterance_avg_sec={:.2}",
+        "chunks={} starts={} stops={} partials={} commits={} silent_discards={} tts_speaks={} tts_done={} tts_speed_changes={} tts_speed_restarts={} queue_avg={:.2} utterance_avg_sec={:.2}",
         c("chunks_processed"),
         c("recording_start_count"),
         c("recording_stop_count"),
         c("partial_updates"),
         c("final_commits"),
+        c("silent_discards"),
         snapshot.tts.speak_count,
         snapshot.tts.playback_completions,
         snapshot.tts.speed_change_count,
