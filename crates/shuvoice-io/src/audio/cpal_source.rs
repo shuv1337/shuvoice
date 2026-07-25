@@ -144,18 +144,60 @@ impl CpalAudioCapture {
         }
     }
 
+    /// Open a capture stream, preferring a mono request over the device default.
+    ///
+    /// We downmix to mono regardless, so asking for the device's "default"
+    /// channel count buys nothing and can silently lose half the signal:
+    /// PipeWire grants a 2-channel stream on a 1-channel source and leaves the
+    /// right port unconnected, so `(FL + FR) / 2` halves every sample (-6 dB).
+    /// Falls back to the device default when a mono request will not open.
     fn open_stream(
         &self,
         device: &cpal::Device,
         sample_rate: u32,
         resample: bool,
     ) -> Result<Stream, AudioError> {
-        let channels = device
+        let default_channels = device
             .default_input_config()
             .map(|c| c.channels().max(1))
             .unwrap_or(1);
 
-        // Prefer device native channel count; we downmix to mono in the callback.
+        // Try mono first regardless of what the device advertises. PipeWire's
+        // `input_default` advertises only stereo @ 48 kHz yet happily grants
+        // 16 kHz, so the advertised config list is not authoritative about what
+        // will actually open — attempting the open is the only real test.
+        let mut candidates = Vec::with_capacity(2);
+        candidates.push(1u16);
+        if default_channels != 1 {
+            candidates.push(default_channels);
+        }
+
+        let mut last_err = None;
+        for channels in candidates {
+            match self.open_stream_with_channels(device, sample_rate, resample, channels) {
+                Ok(stream) => {
+                    tracing::info!(
+                        "Capture stream opened channels={channels} (device default={default_channels}, rate={sample_rate})"
+                    );
+                    return Ok(stream);
+                }
+                Err(err) => {
+                    tracing::warn!("Capture open failed at channels={channels}: {err}");
+                    last_err = Some(err);
+                }
+            }
+        }
+        Err(last_err
+            .unwrap_or_else(|| AudioError::Stream("no capture channel layout available".into())))
+    }
+
+    fn open_stream_with_channels(
+        &self,
+        device: &cpal::Device,
+        sample_rate: u32,
+        resample: bool,
+        channels: u16,
+    ) -> Result<Stream, AudioError> {
         let config = StreamConfig {
             channels,
             sample_rate,
