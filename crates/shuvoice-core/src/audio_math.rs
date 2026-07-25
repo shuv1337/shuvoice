@@ -37,20 +37,40 @@ pub fn update_noise_floor(noise_floor_rms: f32, chunk_rms: f32) -> f32 {
     }
 }
 
+/// Upper bound on the adaptive gate, as a multiple of `speech_rms_threshold`.
+pub const ADAPTIVE_CEIL_FACTOR: f32 = 3.0;
+/// Lower bound on the adaptive gate, as a divisor of `speech_rms_threshold`.
+pub const ADAPTIVE_FLOOR_DIVISOR: f32 = 8.0;
+
 /// Compute per-utterance RMS threshold used at recording start.
 ///
-/// `threshold = max(speech_floor, min(noise*mult, speech_floor*3))` when speech_floor > 0,
-/// else `max(speech_floor, noise*mult)`.
+/// Speech must exceed `noise_floor_rms * speech_rms_multiplier`. The configured
+/// `speech_rms_threshold` is a *reference* level that bounds how far that
+/// adaptive value may roam, to
+/// `[speech_rms_threshold / ADAPTIVE_FLOOR_DIVISOR, speech_rms_threshold * ADAPTIVE_CEIL_FACTOR]`.
+///
+/// It is deliberately **not** a hard lower bound. Clamping the gate up to the
+/// configured level lets the adaptive term only ever *raise* the gate, so a
+/// microphone quieter than the reference is silenced outright: every chunk
+/// falls under the gate, `speech_samples` stays 0, and the utterance is
+/// discarded as silence before reaching the ASR.
+///
+/// A zero/negative `speech_rms_threshold` disables the bounds and runs the gate
+/// purely adaptively.
 pub fn compute_utterance_rms_threshold(
     noise_floor_rms: f32,
     speech_rms_threshold: f32,
     speech_rms_multiplier: f32,
 ) -> f32 {
-    let mut dynamic_threshold = noise_floor_rms * speech_rms_multiplier;
-    if speech_rms_threshold > 0.0 {
-        dynamic_threshold = dynamic_threshold.min(speech_rms_threshold * 3.0);
+    let dynamic_threshold = (noise_floor_rms * speech_rms_multiplier).max(0.0);
+    if speech_rms_threshold <= 0.0 {
+        return dynamic_threshold;
     }
-    speech_rms_threshold.max(dynamic_threshold)
+    // Floor keeps a silent/DC input from producing a zero gate that everything trips.
+    dynamic_threshold.clamp(
+        speech_rms_threshold / ADAPTIVE_FLOOR_DIVISOR,
+        speech_rms_threshold * ADAPTIVE_CEIL_FACTOR,
+    )
 }
 
 /// Update peak / speech counters and optional auto-gain on a newly appended chunk.
@@ -137,6 +157,34 @@ mod tests {
     fn begin_threshold_caps_inflated_dynamic_noise_gate() {
         let thr = compute_utterance_rms_threshold(0.150, 0.008, 1.8);
         assert!((thr - 0.024).abs() < 1e-6);
+    }
+
+    /// Regression: a quiet mic must lower the gate, not be gated into silence.
+    ///
+    /// Measured from a TONOR G11 that produced zero transcripts: noise floor
+    /// 0.00086, loudest 100 ms speech chunk 0.00472. The old `max(floor, dyn)`
+    /// pinned the gate at 0.008, so no chunk ever counted as speech.
+    #[test]
+    fn begin_threshold_adapts_below_reference_for_quiet_input() {
+        let thr = compute_utterance_rms_threshold(0.000_86, 0.008, 1.8);
+        assert!((thr - 0.001_548).abs() < 1e-6, "got {thr}");
+        assert!(
+            thr < 0.004_72,
+            "quiet speech must clear the gate, got {thr}"
+        );
+    }
+
+    #[test]
+    fn begin_threshold_floors_silent_input() {
+        // Zero noise floor must not yield a zero gate that any DC offset trips.
+        let thr = compute_utterance_rms_threshold(0.0, 0.008, 1.8);
+        assert!((thr - 0.001).abs() < 1e-6, "got {thr}");
+    }
+
+    #[test]
+    fn begin_threshold_pure_adaptive_when_reference_disabled() {
+        let thr = compute_utterance_rms_threshold(0.002, 0.0, 1.8);
+        assert!((thr - 0.0036).abs() < 1e-6, "got {thr}");
     }
 
     #[test]
