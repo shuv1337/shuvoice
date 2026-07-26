@@ -11,6 +11,11 @@ repository.workspace = true
 default = ["audio"]
 audio = ["dep:cpal"]
 
+# Diagnostic: dumps the capture configs cpal advertises. Needs the cpal dep.
+[[example]]
+name = "list_input_configs"
+required-features = ["audio"]
+
 [dependencies]
 cpal = { workspace = true, optional = true }
 libc.workspace = true

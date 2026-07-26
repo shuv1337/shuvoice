@@ -1259,6 +1259,7 @@ where
 
                 match outcome {
                     FinalizeOutcome::Silent => {
+                        self.deps.metrics.observe_silent_discard();
                         self.debug_current_transcript.clear();
                         self.deps.overlay.hide();
                         self.emit(SessionEvent::OverlayHide);
@@ -2265,6 +2266,12 @@ where
                 "dropped": self.deps.audio.dropped(),
                 "contention_drops": self.deps.audio.contention_drops(),
                 "noise_floor_rms": self.noise_floor_rms,
+                // Silence-gate inputs: last_peak_rms below utterance_rms_threshold
+                // means utterances are being discarded before reaching the ASR.
+                "utterance_rms_threshold": self.state.utterance_rms_threshold,
+                "last_peak_rms": self.state.peak_rms,
+                "last_chunk_rms": self.state.last_chunk_rms,
+                "speech_rms_threshold": self.speech_rms_threshold,
                 "asr_op_in_flight": self.deps.asr.op_in_flight(),
                 "effective_sample_rate": self.sample_rate,
                 "config_sample_rate": self.config.sample_rate,
