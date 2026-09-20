@@ -85,6 +85,8 @@ struct WizardInner {
 }
 
 /// First-run guided setup wizard (`Gtk.Application`).
+/// Clones are shared handles; shutdown (or explicit `detach_sources`) owns timer
+/// cleanup, never the destruction of an individual handle.
 #[derive(Clone)]
 pub struct WelcomeWizard {
     app: Application,
@@ -1422,11 +1424,9 @@ impl WelcomeWizard {
     /// Attach a non-blocking command pump for external finish/download updates.
     pub fn attach_cmd_pump(&self, cmd_rx: UiCmdReceiver) {
         // Replace any existing pump.
-        {
-            let mut inner = self.inner.borrow_mut();
-            if let Some(id) = inner.cmd_pump.take() {
-                id.remove();
-            }
+        let old_pump = self.inner.borrow_mut().cmd_pump.take();
+        if let Some(id) = old_pump {
+            id.remove();
         }
         let this = self.clone();
         let id = glib::timeout_add_local(Duration::from_millis(16), move || {
@@ -1435,6 +1435,9 @@ impl WelcomeWizard {
                     Ok(cmd) => this.apply_cmd(cmd),
                     Err(std::sync::mpsc::TryRecvError::Empty) => break,
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        // GLib removes this source on Break. Forget its ID so
+                        // later shutdown/replacement cannot remove it again.
+                        this.inner.borrow_mut().cmd_pump.take();
                         return ControlFlow::Break;
                     }
                 }
@@ -1446,11 +1449,16 @@ impl WelcomeWizard {
 
     /// Detach pumps/timers (also called on shutdown).
     pub fn detach_sources(&self) {
-        let mut inner = self.inner.borrow_mut();
-        if let Some(id) = inner.download_pulse.take() {
+        // Source removal destroys callbacks synchronously. Release the state
+        // borrow before dropping anything captured by those callbacks.
+        let (download_pulse, cmd_pump) = {
+            let mut inner = self.inner.borrow_mut();
+            (inner.download_pulse.take(), inner.cmd_pump.take())
+        };
+        if let Some(id) = download_pulse {
             id.remove();
         }
-        if let Some(id) = inner.cmd_pump.take() {
+        if let Some(id) = cmd_pump {
             id.remove();
         }
     }
@@ -1461,21 +1469,17 @@ impl WelcomeWizard {
         if !self.completed() {
             self.emit_closed_once(false);
         }
-        let mut inner = self.inner.borrow_mut();
-        if let Some(widgets) = inner.widgets.as_mut()
-            && let Some(window) = widgets.window.take()
-        {
+        let window = self
+            .inner
+            .borrow_mut()
+            .widgets
+            .as_mut()
+            .and_then(|widgets| widgets.window.take());
+        if let Some(window) = window {
             release_wizard_keyboard(&window);
             window.set_visible(false);
             window.destroy();
         }
-    }
-}
-
-impl Drop for WelcomeWizard {
-    fn drop(&mut self) {
-        // Best-effort source cleanup if the app never shut down cleanly.
-        self.detach_sources();
     }
 }
 
@@ -1518,4 +1522,93 @@ fn discover_repo_root() -> Option<std::path::PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::channel::UiBus;
+
+    // One test keeps all GTK objects on the same thread. Run under Xvfb with
+    // GDK_BACKEND=x11 cargo test -p shuvoice-ui --features gtk wizard_source_lifecycle -- --ignored.
+    #[test]
+    #[ignore = "requires a GTK display (use xvfb-run)"]
+    fn wizard_source_lifecycle() {
+        gtk4::init().expect("GTK display");
+        for scenario in ["launch", "cancel", "window-close", "disconnect"] {
+            let wizard = WelcomeWizard::new(false);
+            wizard.app.set_flags(gio::ApplicationFlags::NON_UNIQUE);
+            let (cmd_tx, cmd_rx, event_tx, event_rx) = UiBus::new().split();
+            wizard.set_event_sender(event_tx);
+            wizard.attach_cmd_pump(cmd_rx);
+
+            // Dropping a handle must not tear down the shared command pump.
+            drop(wizard.clone());
+            assert!(wizard.inner.borrow().cmd_pump.is_some());
+
+            // Replacing a live pump must safely destroy its captured handle.
+            let (replacement_tx, replacement_rx, _, _) = UiBus::new().split();
+            wizard.attach_cmd_pump(replacement_rx);
+            drop(cmd_tx);
+            let this = wizard.clone();
+            wizard.app.connect_activate(move |_| {
+                this.set_download_progress(None, "Testing cleanup");
+                let this = this.clone();
+                let tx = replacement_tx.clone();
+                glib::idle_add_local_once(move || match scenario {
+                    "launch" => {
+                        let button = this
+                            .inner
+                            .borrow()
+                            .widgets
+                            .as_ref()
+                            .unwrap()
+                            .launch_btn
+                            .clone();
+                        button.emit_clicked();
+                    }
+                    "cancel" => tx.send(UiCmd::WizardClose).unwrap(),
+                    "window-close" => {
+                        let window = this
+                            .inner
+                            .borrow()
+                            .widgets
+                            .as_ref()
+                            .unwrap()
+                            .window
+                            .clone()
+                            .unwrap();
+                        window.close();
+                    }
+                    "disconnect" => {
+                        let (tx, rx, _, _) = UiBus::new().split();
+                        this.attach_cmd_pump(rx);
+                        drop(tx);
+                        glib::timeout_add_local_once(Duration::from_millis(60), move || {
+                            assert!(this.inner.borrow().cmd_pump.is_none());
+                            this.app.quit();
+                        });
+                    }
+                    _ => unreachable!(),
+                });
+            });
+            assert_eq!(wizard.run(), 0, "{scenario}");
+            wizard.detach_sources(); // repeated cleanup is harmless
+            let inner = wizard.inner.borrow();
+            assert!(inner.cmd_pump.is_none(), "{scenario}");
+            assert!(inner.download_pulse.is_none(), "{scenario}");
+            assert!(
+                inner.widgets.as_ref().unwrap().window.is_none(),
+                "{scenario}"
+            );
+            drop(inner);
+            let mut closed = Vec::new();
+            while let Ok(event) = event_rx.try_recv() {
+                if let UiEvent::WizardClosed { completed } = event {
+                    closed.push(completed);
+                }
+            }
+            assert_eq!(closed, vec![scenario == "launch"], "{scenario}");
+        }
+    }
 }
