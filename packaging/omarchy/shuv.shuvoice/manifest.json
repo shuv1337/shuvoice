@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "shuv.shuvoice",
+  "name": "ShuVoice",
+  "version": "1.0.0",
+  "author": "ShuVoice",
+  "description": "Dictation status and controls",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "Widget.qml" },
+  "barWidget": {
+    "displayName": "ShuVoice",
+    "category": "Audio",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

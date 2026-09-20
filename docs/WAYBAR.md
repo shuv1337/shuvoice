@@ -6,6 +6,31 @@ state, service state, configured TTS provider, default voice, and keybind hints.
 
 ## Module
 
+### Omarchy Quickshell bar
+
+Recent Omarchy desktops use Quickshell instead of Waybar. Install the bundled
+widget to display ShuVoice in that bar (both `shuvoice` and `shuvoice-waybar`
+must be on the shell's `PATH`):
+
+```bash
+mkdir -p ~/.config/omarchy/plugins/shuv.shuvoice
+cp packaging/omarchy/shuv.shuvoice/{manifest.json,Widget.qml} ~/.config/omarchy/plugins/shuv.shuvoice/
+omarchy-shell shell rescanPlugins
+```
+
+Discovery is asynchronous. Once `omarchy plugin list` shows `shuv.shuvoice`,
+enable it:
+
+```bash
+omarchy plugin enable shuv.shuvoice
+```
+
+The widget uses the same live status helper. Left-click toggles recording,
+middle-click toggles the service, and right-click opens setup. Hover for status
+and configured backend details. It follows the active Omarchy bar theme.
+
+### Waybar
+
 Prefer the installed binary on `PATH` (AUR / packaging):
 
 ```jsonc
