@@ -228,6 +228,13 @@ impl StreamingTyper {
         let attempts = attempts.unwrap_or(self.cfg.retry_attempts).max(1);
         let mut opts = self.run_opts();
         opts.stdin_data = stdin;
+        if args.first().is_some_and(|program| program == "wl-copy") {
+            // wl-copy forks a clipboard owner that retains stderr until the
+            // selection changes. Capturing it waits for EOF forever after the
+            // parent has already succeeded. Only its exit status is needed.
+            opts.capture_stdout = false;
+            opts.capture_stderr = false;
+        }
         for attempt in 1..=attempts {
             match self.runner.run(&args, &opts) {
                 Ok(_) => return true,
@@ -985,6 +992,37 @@ mod tests {
     }
 
     // --- retries ---
+
+    #[test]
+    fn clipboard_owner_does_not_hold_injection_open() {
+        struct ForkingClipboard;
+        impl CommandRunner for ForkingClipboard {
+            fn run(&self, args: &[String], opts: &RunOptions) -> Result<RunOutput, ProcessError> {
+                assert_eq!(args[0], "wl-copy");
+                // Like wl-copy: read stdin, fork a persistent clipboard owner,
+                // then exit successfully while that owner retains stderr.
+                crate::process::StdCommandRunner.run(
+                    &argv(["sh", "-c", "cat >/dev/null; sleep 2 >&2 & exit 0"]),
+                    opts,
+                )
+            }
+        }
+        let mut typer = StreamingTyper::new_with_sleeper(
+            TyperConfig {
+                preserve_clipboard: true,
+                ..TyperConfig::default()
+            },
+            Arc::new(ForkingClipboard),
+            Arc::new(RecordingSleeper::new()),
+        );
+        let start = Instant::now();
+        assert!(typer.wl_copy_set("test transcript", "test copy"));
+        assert!(typer.restore_clipboard(Some("previous clipboard")));
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "waited for clipboard owner"
+        );
+    }
 
     #[test]
     fn run_retries_until_success() {
