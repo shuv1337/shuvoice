@@ -147,6 +147,11 @@ Source installs override `ExecStart` to `target/release/shuvoice`.
 After successful wizard completion the CLI may start/restart the user service
 when `systemctl --user` is available.
 
+Wizard handoff validates/imports the current desktop display environment and
+waits for `debug_status.ui_ready` (GTK host constructed). GTK display/layer-shell
+preflight runs before model/audio/control startup and fails with exit 78. See
+`commands/wizard_service.rs` and `docs/TROUBLESHOOTING.md` for stale-display recovery.
+
 Never treat exit 78 as a flake — fix composition (features, config, workers,
 layer-shell), then restart once.
 

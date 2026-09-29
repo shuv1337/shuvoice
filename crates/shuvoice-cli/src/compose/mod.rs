@@ -812,6 +812,19 @@ async fn abort_live_startup(
 
 async fn compose_and_run(config: Config) -> Result<(), ComposeError> {
     validate_composition_config(&config).map_err(ComposeError::dep)?;
+    // Initialize on the main thread before model/audio/socket startup. GTK's
+    // implicit initialization in Application::run exits the process with code 1.
+    #[cfg(feature = "ui")]
+    {
+        gtk4::init().map_err(|err| ComposeError::dep(format!(
+            "cannot initialize GTK display: {err}; refresh the user service's WAYLAND_DISPLAY from the current desktop session"
+        )))?;
+        if !shuvoice_ui::layer_shell_supported() {
+            return Err(ComposeError::dep(
+                "the current display does not support Wayland layer-shell",
+            ));
+        }
+    }
     if !cfg!(feature = "audio") {
         return Err(ComposeError::dep(
             "audio capture support not built into this binary (missing feature audio). \
@@ -961,7 +974,10 @@ async fn compose_and_run(config: Config) -> Result<(), ComposeError> {
 
     // ── Control server ────────────────────────────────────────────────────
     let control_adapter = runtime.control.clone();
-    let handlers = ControlBridge::arc(control_adapter.clone());
+    let ui_ready = Arc::new(AtomicBool::new(!cfg!(feature = "ui")));
+    let handlers = ControlBridge::new(control_adapter.clone())
+        .with_ui_readiness(Arc::clone(&ui_ready))
+        .into_arc();
     let mut control_server = match ControlServer::new(config.control_socket.as_deref(), handlers) {
         Ok(s) => s,
         Err(e) => {
@@ -1148,7 +1164,11 @@ async fn compose_and_run(config: Config) -> Result<(), ComposeError> {
         forwarders.push(tokio::spawn(async move {
             loop {
                 match life_rx.try_recv() {
+                    Ok(ui_bridge::GtkHostLifecycle::Ready) => {
+                        ui_ready.store(true, Ordering::Release);
+                    }
                     Ok(ui_bridge::GtkHostLifecycle::Exiting) => {
+                        ui_ready.store(false, Ordering::Release);
                         req();
                         break;
                     }

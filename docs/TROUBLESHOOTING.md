@@ -35,6 +35,30 @@ systemctl --user show -p ExecMainStatus -p NRestarts shuvoice.service
 # Expect ExecMainStatus=78 and restarts blocked
 ```
 
+## Service fails after the wizard: display unavailable
+
+If the journal shows `Failed to open display` (older builds) or `cannot initialize
+GTK display`, compare `echo "$WAYLAND_DISPLAY"` in a desktop terminal with
+`systemctl --user show-environment | grep '^WAYLAND_DISPLAY='`. A user manager can
+retain a display name from an earlier graphical session.
+
+Recover from a terminal in the current desktop:
+
+```bash
+systemctl --user import-environment WAYLAND_DISPLAY DISPLAY
+systemctl --user restart shuvoice.service
+```
+
+Wizard completion now validates the current Wayland socket and refreshes the
+service manager's display environment before starting/restarting ShuVoice. It
+waits up to 30 seconds for `debug_status` to report `ui_ready: true`, rather than
+treating systemd's early `active` state as readiness. The diagnostic field becomes
+true only after the GTK overlay host and command pump are constructed. A readiness
+failure is reported without claiming that setup successfully started the service.
+
+Display and layer-shell checks run before loading models or opening audio/control
+sockets; failure exits **78** to prevent a restart loop.
+
 ## Native Sherpa (static CPU)
 
 | Error / symptom | Fix |
