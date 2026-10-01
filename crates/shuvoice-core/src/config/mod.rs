@@ -18,4 +18,4 @@ pub use io::{
     write_atomic,
 };
 pub use migrate::{MigrationReport, migrate_to_latest};
-pub use model::{Config, ConfigLoadReport};
+pub use model::{Config, ConfigLoadReport, ResolvedRaw};

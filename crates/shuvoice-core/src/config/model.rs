@@ -52,6 +52,17 @@ pub struct ConfigLoadReport {
     pub persist_error: Option<String>,
 }
 
+/// Result of [`Config::resolve_raw`]: validated config plus migrated raw data.
+#[derive(Debug, Clone)]
+pub struct ResolvedRaw {
+    pub config: Config,
+    /// Raw config after migration and legacy mapping (unknown keys preserved).
+    pub migrated: Map<String, Value>,
+    pub migration: crate::config::MigrationReport,
+    pub derived_mode_from_legacy: bool,
+    pub ignored_keys: Vec<String>,
+}
+
 /// Fully validated runtime configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -708,7 +719,51 @@ impl Config {
         let path_buf = super::io::expand_user_path(path);
         let path = path_buf.as_path();
         let raw = load_raw(path)?;
-        let (mut migrated, migration) = migrate_to_latest(&raw)?;
+        let ResolvedRaw {
+            config: cfg,
+            mut migrated,
+            migration,
+            derived_mode_from_legacy,
+            ignored_keys,
+        } = Self::resolve_raw(&raw)?;
+
+        let should_persist =
+            migration.to_version != migration.from_version || derived_mode_from_legacy;
+        let mut persist_attempted = false;
+        let mut persist_error = None;
+        if path.exists() && should_persist {
+            persist_attempted = true;
+            migrated.insert("config_version".into(), Value::from(CURRENT_CONFIG_VERSION));
+            match write_atomic(path, &migrated) {
+                Ok(_) => {}
+                Err(err) => {
+                    let msg = err.to_string();
+                    tracing::warn!(
+                        error = %msg,
+                        path = %path.display(),
+                        "Failed to persist migrated config file"
+                    );
+                    persist_error = Some(msg);
+                }
+            }
+        }
+
+        Ok((
+            cfg,
+            ConfigLoadReport {
+                migration,
+                derived_mode_from_legacy,
+                ignored_keys,
+                persist_attempted,
+                persist_error,
+            },
+        ))
+    }
+
+    /// Migrate, apply and validate raw (`load_raw`-shaped) config data without
+    /// touching disk. Returns the validated config and the migrated raw map.
+    pub fn resolve_raw(raw: &Map<String, Value>) -> CoreResult<ResolvedRaw> {
+        let (mut migrated, migration) = migrate_to_latest(raw)?;
 
         let mut flat = flatten_raw(&migrated);
         let known = known_config_keys();
@@ -748,41 +803,17 @@ impl Config {
             }
         }
 
-        let mut cfg = Config::default();
-        apply_flat_overrides(&mut cfg, &flat)?;
-        cfg.validate()?;
+        let mut config = Config::default();
+        apply_flat_overrides(&mut config, &flat)?;
+        config.validate()?;
 
-        let should_persist =
-            migration.to_version != migration.from_version || derived_mode_from_legacy;
-        let mut persist_attempted = false;
-        let mut persist_error = None;
-        if path.exists() && should_persist {
-            persist_attempted = true;
-            migrated.insert("config_version".into(), Value::from(CURRENT_CONFIG_VERSION));
-            match write_atomic(path, &migrated) {
-                Ok(_) => {}
-                Err(err) => {
-                    let msg = err.to_string();
-                    tracing::warn!(
-                        error = %msg,
-                        path = %path.display(),
-                        "Failed to persist migrated config file"
-                    );
-                    persist_error = Some(msg);
-                }
-            }
-        }
-
-        Ok((
-            cfg,
-            ConfigLoadReport {
-                migration,
-                derived_mode_from_legacy,
-                ignored_keys,
-                persist_attempted,
-                persist_error,
-            },
-        ))
+        Ok(ResolvedRaw {
+            config,
+            migrated,
+            migration,
+            derived_mode_from_legacy,
+            ignored_keys,
+        })
     }
 
     /// Validate a default config after applying a mutation closure (test/helper ergonomics).
@@ -828,7 +859,7 @@ impl Config {
         )
     }
 
-    fn field_to_value(&self, key: &str) -> Option<Value> {
+    pub(crate) fn field_to_value(&self, key: &str) -> Option<Value> {
         Some(match key {
             "sample_rate" => Value::from(self.sample_rate),
             "chunk_ms" => Value::from(self.chunk_ms),

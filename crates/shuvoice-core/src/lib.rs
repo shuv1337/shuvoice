@@ -16,6 +16,7 @@ pub mod flush;
 pub mod metrics;
 pub mod postprocess;
 pub mod runtime;
+pub mod settings;
 pub mod streaming_health;
 pub mod transcript;
 pub mod tts_speed;
