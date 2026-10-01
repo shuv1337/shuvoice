@@ -1122,7 +1122,10 @@ pub fn run_gtk_main_host(boot: GtkMainHostBootstrap) -> i32 {
         });
     });
 
-    let code = app.run();
+    // `run()` would hand the CLI's own argv (e.g. `shuvoice run`) to
+    // GApplication, which treats `run` as a file to open and exits at once.
+    let argv0: Vec<String> = std::env::args().take(1).collect();
+    let code = app.run_with_args(&argv0);
     // Best-effort second notify if shutdown signal raced.
     if let Some(life_tx) = lifecycle_tx {
         let _ = life_tx.try_send(GtkHostLifecycle::Exiting);
