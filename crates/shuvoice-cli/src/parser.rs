@@ -236,6 +236,9 @@ pub enum Command {
     },
     /// Launch the setup wizard
     Wizard,
+    /// Settings app bridge (JSON lines on stdio; started by the settings app)
+    #[command(hide = true)]
+    SettingsBridge,
     /// Inspect and validate config
     Config {
         #[command(subcommand)]
@@ -362,6 +365,7 @@ pub enum ResolvedCommand {
         non_interactive: bool,
     },
     Wizard,
+    SettingsBridge,
     ConfigPath,
     ConfigValidate,
     ConfigEffective,
@@ -447,6 +451,7 @@ pub fn resolve_command(cli: &Cli) -> Result<(ResolvedCommand, Vec<String>), Stri
                 ));
             }
             Command::Wizard => return Ok((ResolvedCommand::Wizard, warnings)),
+            Command::SettingsBridge => return Ok((ResolvedCommand::SettingsBridge, warnings)),
             Command::Config { command } => {
                 let resolved = match command {
                     ConfigCommand::Effective => ResolvedCommand::ConfigEffective,

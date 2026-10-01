@@ -114,10 +114,17 @@ pub fn run_welcome_wizard_completed(force_reconfigure: bool) -> bool {
 /// readiness failed; a healthy service that is still loading returns
 /// `"starting"`.
 pub fn maybe_restart_running_service(service: &str) -> &'static str {
+    report(service, &restart_live(service))
+}
+
+/// Start/restart `service` from the current desktop session: validate and
+/// import its display environment, then wait for overlay readiness. Prints
+/// nothing (the settings bridge uses stdout for its protocol).
+pub fn restart_live(service: &str) -> RestartOutcome {
     let control_socket = crate::config::load_config()
         .ok()
         .and_then(|config| config.control_socket);
-    restart_with_checks(
+    restart_service(
         service,
         None,
         || {
@@ -137,35 +144,124 @@ pub fn maybe_restart_running_service_with(
     restart_with_checks(service, runner, || Ok(()), || Readiness::Ready)
 }
 
+/// Result of [`restart_service`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum RestartOutcome {
+    /// Overlay reported ready.
+    Ready { action: &'static str },
+    /// Unit healthy but not ready within the budget (e.g. slow model load).
+    Starting {
+        action: &'static str,
+        message: String,
+    },
+    /// The current desktop's display could not be handed to the service.
+    HandoffFailed {
+        action: &'static str,
+        message: String,
+    },
+    ActionFailed {
+        action: &'static str,
+        message: String,
+    },
+    ReadinessFailed {
+        action: &'static str,
+        message: String,
+    },
+    /// `systemctl --user` is not available.
+    Unavailable,
+    /// The unit is in a state we do not start/restart from.
+    NotActive { state: String },
+}
+
+impl RestartOutcome {
+    /// Stable status word used by the wizard's exit-code policy.
+    pub fn status(&self) -> &'static str {
+        match self {
+            Self::Ready { action: "start" } => "started",
+            Self::Ready { .. } => "restarted",
+            Self::Starting { .. } => "starting",
+            Self::HandoffFailed { .. }
+            | Self::ActionFailed { .. }
+            | Self::ReadinessFailed { .. } => "failed",
+            Self::Unavailable => "unavailable",
+            Self::NotActive { .. } => "not_active",
+        }
+    }
+}
+
+fn past_tense(action: &str) -> &'static str {
+    if action == "start" {
+        "Started"
+    } else {
+        "Restarted"
+    }
+}
+
+/// Print the wizard's human-readable result and return its status word.
+fn report(service: &str, outcome: &RestartOutcome) -> &'static str {
+    match outcome {
+        RestartOutcome::Ready { action } => {
+            println!(
+                "✓ {} {service} so wizard changes take effect.",
+                past_tense(action)
+            );
+        }
+        RestartOutcome::Starting { action, message } => {
+            println!(
+                "✓ {} {service}; overlay not ready yet: {message}",
+                past_tense(action)
+            );
+        }
+        RestartOutcome::HandoffFailed { action, message } => eprintln!(
+            "WARNING: did not {action} {service}: {message}\n         Run `shuvoice wizard` from a terminal in the current desktop session, or see \"Service fails after the wizard\" in docs/TROUBLESHOOTING.md."
+        ),
+        RestartOutcome::ActionFailed { action, message } => eprintln!(
+            "WARNING: failed to {action} {service} automatically: {message}\n         Run `systemctl --user {action} {service}` manually for wizard changes to take effect."
+        ),
+        RestartOutcome::ReadinessFailed { action, message } => eprintln!(
+            "WARNING: {} {service}, but the overlay did not become ready: {message}",
+            past_tense(action)
+        ),
+        RestartOutcome::Unavailable | RestartOutcome::NotActive { .. } => {}
+    }
+    outcome.status()
+}
+
 fn restart_with_checks(
     service: &str,
     runner: Option<Arc<dyn CommandRunner>>,
     prepare: impl FnOnce() -> Result<(), String>,
     ready: impl FnOnce() -> Readiness,
 ) -> &'static str {
+    report(service, &restart_service(service, runner, prepare, ready))
+}
+
+/// Start (stopped/failed unit) or restart (running unit) `service`.
+fn restart_service(
+    service: &str,
+    runner: Option<Arc<dyn CommandRunner>>,
+    prepare: impl FnOnce() -> Result<(), String>,
+    ready: impl FnOnce() -> Readiness,
+) -> RestartOutcome {
     let runner: Arc<dyn CommandRunner> = runner.unwrap_or_else(|| Arc::new(StdCommandRunner));
     let state = service_active_state(service, Some(Arc::clone(&runner)));
     if state == "unknown" {
-        return "unavailable";
+        return RestartOutcome::Unavailable;
     }
+    let action = if matches!(state.as_str(), "active" | "activating" | "reloading") {
+        "restart"
+    } else if matches!(
+        state.as_str(),
+        "inactive" | "failed" | "dead" | "deactivating"
+    ) {
+        "start"
+    } else {
+        return RestartOutcome::NotActive { state };
+    };
 
-    let (action, success_status, success_verb) =
-        if matches!(state.as_str(), "active" | "activating" | "reloading") {
-            ("restart", "restarted", "Restarted")
-        } else if matches!(
-            state.as_str(),
-            "inactive" | "failed" | "dead" | "deactivating"
-        ) {
-            ("start", "started", "Started")
-        } else {
-            return "not_active";
-        };
-
-    if let Err(err) = prepare() {
-        eprintln!(
-            "WARNING: did not {action} {service}: {err}\n         Run `shuvoice wizard` from a terminal in the current desktop session, or see \"Service fails after the wizard\" in docs/TROUBLESHOOTING.md."
-        );
-        return "failed";
+    if let Err(message) = prepare() {
+        return RestartOutcome::HandoffFailed { action, message };
     }
     if action == "start" && state == "failed" {
         // A unit that hit its start limit refuses an explicit start until reset.
@@ -175,27 +271,13 @@ fn restart_with_checks(
             Duration::from_secs(3),
         );
     }
-    if let Err(err) = service_action(service, action, Some(runner)) {
-        eprintln!(
-            "WARNING: failed to {action} {service} automatically: {err}\n         Run `systemctl --user {action} {service}` manually for wizard changes to take effect."
-        );
-        return "failed";
+    if let Err(message) = service_action(service, action, Some(runner)) {
+        return RestartOutcome::ActionFailed { action, message };
     }
     match ready() {
-        Readiness::Ready => {
-            println!("✓ {success_verb} {service} so wizard changes take effect.");
-            success_status
-        }
-        Readiness::StillStarting(msg) => {
-            println!("✓ {success_verb} {service}; overlay not ready yet: {msg}");
-            "starting"
-        }
-        Readiness::Failed(msg) => {
-            eprintln!(
-                "WARNING: {success_verb} {service}, but the overlay did not become ready: {msg}"
-            );
-            "failed"
-        }
+        Readiness::Ready => RestartOutcome::Ready { action },
+        Readiness::StillStarting(message) => RestartOutcome::Starting { action, message },
+        Readiness::Failed(message) => RestartOutcome::ReadinessFailed { action, message },
     }
 }
 

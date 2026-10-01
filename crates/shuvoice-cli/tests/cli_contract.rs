@@ -204,3 +204,54 @@ fn unavailable_display_fails_fast_and_retryable_before_model_or_control_startup(
         );
     });
 }
+
+#[test]
+#[serial]
+fn settings_bridge_speaks_json_lines_and_saves_patches() {
+    with_xdg(|config_home| {
+        let cfg = config_home.join("shuvoice/config.toml");
+        fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        fs::write(
+            &cfg,
+            "config_version = 1\n[overlay]\nfont_size = 20\nmy_note = \"keep\"\n",
+        )
+        .unwrap();
+        let snapshot = r#"{"v":1,"id":1,"op":"snapshot"}"#;
+        let mut cmd = cargo_bin_cmd!("shuvoice");
+        let out = cmd
+            .arg("settings-bridge")
+            .write_stdin(format!("{snapshot}\n"))
+            .timeout(std::time::Duration::from_secs(10))
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let first: serde_json::Value =
+            serde_json::from_slice(out.stdout.split(|b| *b == b'\n').next().unwrap()).unwrap();
+        assert_eq!(first["result"]["values"]["overlay.font_size"], 20);
+        let revision = first["result"]["revision"].as_str().unwrap().to_string();
+
+        let save = format!(
+            r#"{{"v":1,"id":2,"op":"save","params":{{"revision":"{revision}","changes":{{"overlay.font_size":28}}}}}}"#
+        );
+        let mut cmd = cargo_bin_cmd!("shuvoice");
+        let out = cmd
+            .arg("settings-bridge")
+            .write_stdin(format!("{save}\n{{\"v\":1,\"id\":3,\"op\":\"nope\"}}\n"))
+            .timeout(std::time::Duration::from_secs(10))
+            .output()
+            .unwrap();
+        let lines: Vec<serde_json::Value> = String::from_utf8(out.stdout)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("stdout carries protocol lines only"))
+            .collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0]["ok"], true, "{}", lines[0]);
+        assert_eq!(lines[1]["error"]["kind"], "unknown_op");
+        let text = fs::read_to_string(&cfg).unwrap();
+        assert!(
+            text.contains("font_size = 28") && text.contains("my_note = \"keep\""),
+            "{text}"
+        );
+    });
+}

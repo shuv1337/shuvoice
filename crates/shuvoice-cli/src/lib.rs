@@ -9,6 +9,7 @@ pub mod env_loader;
 pub mod error;
 pub mod logging;
 pub mod parser;
+pub mod settings_bridge;
 pub mod setup;
 pub mod waybar;
 
@@ -120,6 +121,9 @@ async fn dispatch(resolved: ResolvedCommand) -> ExitStatus {
     match resolved {
         ResolvedCommand::Run { overrides } => run::run_app(&overrides).await,
         ResolvedCommand::Wizard => wizard::run_wizard_command(),
+        ResolvedCommand::SettingsBridge => tokio::task::spawn_blocking(settings_bridge::run_stdio)
+            .await
+            .unwrap_or_else(|_| ExitStatus::code(EXIT_FAILURE)),
         ResolvedCommand::AudioListDevices => audio::list_devices(),
         ResolvedCommand::ConfigPath => cmd_path(),
         ResolvedCommand::ConfigValidate => cmd_validate(),

@@ -53,8 +53,29 @@ pub fn validate_configured_input(device: &Option<DeviceRef>) -> Result<String, S
     }
 }
 
+/// One usable capture device; `index` matches `audio_device = <index>` in config.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct InputDevice {
+    pub index: usize,
+    pub name: String,
+    pub channels: u16,
+    pub default_sample_rate: f64,
+}
+
+/// Enumerate input devices that report at least one input channel.
+pub fn input_devices() -> Result<Vec<InputDevice>, String> {
+    #[cfg(feature = "audio")]
+    {
+        input_devices_cpal()
+    }
+    #[cfg(not(feature = "audio"))]
+    {
+        Err("audio feature disabled (rebuild with --features audio / default features)".into())
+    }
+}
+
 #[cfg(feature = "audio")]
-fn list_devices_cpal() -> Result<Vec<String>, String> {
+fn input_devices_cpal() -> Result<Vec<InputDevice>, String> {
     use cpal::traits::{DeviceTrait, HostTrait};
 
     let host = cpal::default_host();
@@ -62,24 +83,41 @@ fn list_devices_cpal() -> Result<Vec<String>, String> {
         .input_devices()
         .map_err(|e| format!("query input devices: {e}"))?;
 
-    let mut lines = Vec::new();
-    for (idx, device) in devices.enumerate() {
+    let mut found = Vec::new();
+    for (index, device) in devices.enumerate() {
         let name = device
             .description()
             .ok()
             .map(|d| d.name().to_string())
             .unwrap_or_else(|| device.to_string());
-        let (channels, default_sr) = match device.default_input_config() {
+        let (channels, default_sample_rate) = match device.default_input_config() {
             Ok(cfg) => (cfg.channels(), f64::from(cfg.sample_rate())),
             Err(_) => (0, 0.0),
         };
         if channels == 0 {
             continue;
         }
-        lines.push(format!(
-            "[{idx}] {name} (in={channels}, default_sr={default_sr})"
-        ));
+        found.push(InputDevice {
+            index,
+            name,
+            channels,
+            default_sample_rate,
+        });
     }
+    Ok(found)
+}
+
+#[cfg(feature = "audio")]
+fn list_devices_cpal() -> Result<Vec<String>, String> {
+    let lines: Vec<String> = input_devices_cpal()?
+        .into_iter()
+        .map(|d| {
+            format!(
+                "[{}] {} (in={}, default_sr={})",
+                d.index, d.name, d.channels, d.default_sample_rate
+            )
+        })
+        .collect();
     if lines.is_empty() {
         return Err("no input devices found".into());
     }
