@@ -25,6 +25,7 @@
 #![allow(clippy::double_must_use)]
 #![allow(clippy::result_unit_err)]
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use shuvoice_app::{ControlHandlerSurface, EnqueueControlAdapter};
 use shuvoice_control::{ControlCommand, ControlHandlers};
@@ -33,13 +34,14 @@ use shuvoice_control::{ControlCommand, ControlHandlers};
 #[derive(Clone)]
 pub struct ControlBridge<S = EnqueueControlAdapter> {
     surface: S,
+    ui_ready: Option<Arc<AtomicBool>>,
 }
 
 impl ControlBridge<EnqueueControlAdapter> {
     /// Wrap the production enqueue adapter.
     #[must_use]
     pub fn new(adapter: EnqueueControlAdapter) -> Self {
-        Self { surface: adapter }
+        Self::from_surface(adapter)
     }
 
     /// Wrap and erase to `Arc<dyn ControlHandlers>` for [`ControlServer`].
@@ -53,7 +55,16 @@ impl<S> ControlBridge<S> {
     /// Wrap any [`ControlHandlerSurface`] (tests / alternate adapters).
     #[must_use]
     pub fn from_surface(surface: S) -> Self {
-        Self { surface }
+        Self {
+            surface,
+            ui_ready: None,
+        }
+    }
+
+    /// Add desktop readiness to the existing diagnostic JSON contract.
+    pub fn with_ui_readiness(mut self, ready: Arc<AtomicBool>) -> Self {
+        self.ui_ready = Some(ready);
+        self
     }
 
     /// Borrow the inner surface.
@@ -99,7 +110,14 @@ where
     }
 
     fn on_debug_status(&self) -> String {
-        self.surface.on_debug_status()
+        let status = self.surface.on_debug_status();
+        if let Some(ready) = &self.ui_ready {
+            if let Ok(serde_json::Value::Object(mut fields)) = serde_json::from_str(&status) {
+                fields.insert("ui_ready".into(), ready.load(Ordering::Acquire).into());
+                return serde_json::Value::Object(fields).to_string();
+            }
+        }
+        status
     }
 
     fn on_tts_command(&self, command: ControlCommand) -> String {
@@ -128,6 +146,23 @@ mod tests {
         tts_calls: Arc<Mutex<Vec<String>>>,
         tts_enabled: bool,
         queue_full: bool,
+    }
+
+    #[test]
+    fn debug_readiness_tracks_gtk_lifecycle_without_changing_other_fields() {
+        let surface = FakeSurface::default();
+        *surface.debug.lock().unwrap() = "{\"state\":\"idle\",\"audio\":{\"dropped\":2}}".into();
+        let ready = Arc::new(AtomicBool::new(false));
+        let bridge = ControlBridge::from_surface(surface).with_ui_readiness(ready.clone());
+        assert_eq!(
+            bridge.on_debug_status(),
+            "{\"state\":\"idle\",\"audio\":{\"dropped\":2},\"ui_ready\":false}"
+        );
+        ready.store(true, Ordering::Release);
+        assert_eq!(
+            bridge.on_debug_status(),
+            "{\"state\":\"idle\",\"audio\":{\"dropped\":2},\"ui_ready\":true}"
+        );
     }
 
     impl ControlHandlerSurface for FakeSurface {

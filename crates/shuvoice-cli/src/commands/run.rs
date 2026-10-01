@@ -52,12 +52,10 @@ pub async fn run_app(overrides: &RuntimeOverrides) -> ExitStatus {
         }
     };
 
+    // run_production already printed any error message.
     let status = app.run().await;
     if status.code == 0 || status.code == EXIT_DEPENDENCY {
         return status;
-    }
-    if let Some(msg) = status.message {
-        eprintln!("ERROR: {msg}");
     }
     ExitStatus::code(EXIT_FAILURE)
 }

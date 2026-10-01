@@ -164,3 +164,43 @@ fn waybar_status_prints_json() {
     );
     assert!(stdout.contains("\"class\""));
 }
+
+#[cfg(all(feature = "ui", feature = "asr-openai"))]
+#[test]
+#[serial]
+fn unavailable_display_fails_fast_and_retryable_before_model_or_control_startup() {
+    with_xdg(|config_home| {
+        let cfg = config_home.join("shuvoice/config.toml");
+        fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        // OpenAI Realtime constructs without I/O, so the display check is reached.
+        fs::write(
+            &cfg,
+            "config_version = 1\n[asr]\nasr_backend = \"openai_realtime\"\n\
+             [tts]\ntts_enabled = false\n[feedback]\naudio_feedback = false\n",
+        )
+        .unwrap();
+        let data = PathBuf::from(std::env::var_os("XDG_DATA_HOME").unwrap());
+        fs::create_dir_all(data.join("shuvoice")).unwrap();
+        fs::write(data.join("shuvoice/.wizard-done"), "1").unwrap();
+        let socket = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR").unwrap())
+            .join("shuvoice/control.sock");
+        let mut cmd = cargo_bin_cmd!("shuvoice");
+        cmd.arg("run")
+            .env("OPENAI_API_KEY", "sk-test-not-used")
+            .env("WAYLAND_DISPLAY", "wayland-missing")
+            .env("GDK_BACKEND", "wayland")
+            .env_remove("WAYLAND_SOCKET")
+            .env_remove("DISPLAY")
+            .timeout(std::time::Duration::from_secs(5));
+        // Not 78: the display may appear later (unit started before the
+        // compositor), so systemd must be allowed to retry.
+        cmd.assert()
+            .code(1)
+            .stderr(predicate::str::contains("cannot initialize GTK display"))
+            .stderr(predicate::str::contains("WAYLAND_DISPLAY=wayland-missing"));
+        assert!(
+            !socket.exists(),
+            "display failure must precede control socket creation"
+        );
+    });
+}

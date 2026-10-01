@@ -147,6 +147,15 @@ Source installs override `ExecStart` to `target/release/shuvoice`.
 After successful wizard completion the CLI may start/restart the user service
 when `systemctl --user` is available.
 
+Wizard handoff validates the wizard's own Wayland socket, imports the present
+`SESSION_ENV` names (never unsets manager variables), and waits up to 30 s for
+`debug_status.ui_ready` (GTK host constructed). A healthy unit that is still
+loading is reported as starting, not failed; a crash/restart during the wait is
+a failure. GTK display preflight runs before model/audio/control startup: an
+unreachable display (or X11 fallback) exits **1** fast so systemd can retry
+(with `RestartSteps` backoff in the packaged unit) after the compositor appears;
+a Wayland compositor without layer-shell exits **78**. See `commands/wizard_service.rs` and `docs/TROUBLESHOOTING.md`.
+
 Never treat exit 78 as a flake — fix composition (features, config, workers,
 layer-shell), then restart once.
 

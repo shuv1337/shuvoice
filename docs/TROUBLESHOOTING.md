@@ -35,6 +35,46 @@ systemctl --user show -p ExecMainStatus -p NRestarts shuvoice.service
 # Expect ExecMainStatus=78 and restarts blocked
 ```
 
+## Service fails after the wizard: display unavailable
+
+If the journal shows `Failed to open display` (older builds), `cannot initialize
+GTK display`, or `GTK fell back to a non-Wayland display`, compare
+`echo "$WAYLAND_DISPLAY"` in a desktop terminal with
+`systemctl --user show-environment | grep '^WAYLAND_DISPLAY='`. A user manager can
+retain a display name from an earlier graphical session, or start the unit before
+the compositor has exported one.
+
+Recover from a terminal in the current desktop (the same names the wizard imports):
+
+```bash
+systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XAUTHORITY GDK_BACKEND \
+  HYPRLAND_INSTANCE_SIGNATURE XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
+systemctl --user reset-failed shuvoice.service
+systemctl --user restart shuvoice.service
+```
+
+`import-environment` skips names that are not set in your terminal; it never
+removes variables from the user manager.
+
+Wizard completion validates the current Wayland socket and imports those names
+before starting/restarting ShuVoice. It then waits up to 30 seconds for
+`debug_status` to report `ui_ready: true` (GTK overlay host and command pump
+constructed) instead of trusting systemd's early `active` state:
+
+- `✓ Restarted …` — the overlay is ready.
+- `overlay not ready yet` — the unit is healthy but still loading (worker
+  backends can take longer than 30 s); `shuvoice wizard` still exits 0.
+- `WARNING: … did not become ready` — the unit failed or was restarted by
+  systemd while starting; `shuvoice wizard` exits 1.
+
+The display check runs before loading models or opening audio/control sockets.
+An unreachable display exits **1** within a fraction of a second, so systemd
+retries and a unit started before the compositor recovers on the next attempt
+after the session environment is imported. The packaged unit backs off from 2 s
+to at most 60 s between attempts (`RestartSteps`/`RestartMaxDelaySec`, systemd
+254+). A Wayland compositor without wlr-layer-shell exits **78** and is not
+retried.
+
 ## Native Sherpa (static CPU)
 
 | Error / symptom | Fix |
@@ -116,7 +156,7 @@ App-side auto-gain applies when the ASR backend does **not** request raw audio
 | Error | Fix |
 |---|---|
 | `libgtk4-layer-shell.so not found` | Install `gtk4-layer-shell` (Arch) / `libgtk-4-layer-shell0` (Debian) |
-| Overlay missing on non-Hyprland | Compositor must support wlr-layer-shell; GTK4 stack required |
+| `compositor does not support wlr-layer-shell` (exit 78) | Use a wlroots-style compositor with wlr-layer-shell (Hyprland, Sway, …); GNOME/Mutter is not supported |
 | `wtype not found` | `sudo pacman -S wtype` |
 | Control socket not found | Start the service/app before `shuvoice control …` |
 | Socket path | Default `$XDG_RUNTIME_DIR/shuvoice/control.sock`; override `[control].control_socket` |
