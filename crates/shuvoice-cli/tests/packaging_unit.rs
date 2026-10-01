@@ -75,6 +75,10 @@ fn systemd_unit_preserves_exec_exit_78_and_rust_log() {
         content.contains("WantedBy=graphical-session.target"),
         "user graphical session install target required"
     );
+    assert!(
+        content.contains("RestartSteps=") && content.contains("RestartMaxDelaySec="),
+        "retryable display failures must back off instead of looping every RestartSec"
+    );
 }
 
 #[test]
