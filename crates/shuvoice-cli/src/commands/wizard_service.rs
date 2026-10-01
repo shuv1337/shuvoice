@@ -5,8 +5,27 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use shuvoice_control::{ControlCommand, send_control_command};
-use shuvoice_io::process::StdCommandRunner;
-use shuvoice_io::waybar::{run_systemctl_user, service_active_state};
+use shuvoice_io::process::CommandRunner;
+use shuvoice_io::waybar::run_systemctl_user;
+
+/// Desktop-session variables the user service needs from the current session.
+///
+/// Only names present in the wizard's environment are imported. Absent names
+/// are left untouched in the user manager, which other units share.
+pub(crate) const SESSION_ENV: [&str; 7] = [
+    "WAYLAND_DISPLAY",
+    "DISPLAY",
+    "XAUTHORITY",
+    "GDK_BACKEND",
+    "HYPRLAND_INSTANCE_SIGNATURE",
+    "XDG_CURRENT_DESKTOP",
+    "XDG_SESSION_TYPE",
+];
+
+/// How long the wizard waits for `debug_status.ui_ready` after start/restart.
+pub(super) const READY_BUDGET: Duration = Duration::from_secs(30);
+const POLL_INTERVAL: Duration = Duration::from_millis(100);
+const SYSTEMCTL_TIMEOUT: Duration = Duration::from_secs(3);
 
 fn validate_display(display: &str, runtime: &Path) -> Result<(), String> {
     if display.is_empty() {
@@ -15,92 +34,246 @@ fn validate_display(display: &str, runtime: &Path) -> Result<(), String> {
     let socket = runtime.join(display);
     UnixStream::connect(socket)
         .map(drop)
-        .map_err(|err| format!("current Wayland display is unavailable: {err}"))
+        .map_err(|err| format!("current Wayland display {display} is unavailable: {err}"))
 }
 
-pub(super) fn refresh_display_environment() -> Result<(), String> {
-    let display = std::env::var("WAYLAND_DISPLAY")
-        .map_err(|_| "wizard service startup requires WAYLAND_DISPLAY from the current desktop")?;
-    let runtime = std::env::var("XDG_RUNTIME_DIR")
-        .map_err(|_| "wizard service startup requires XDG_RUNTIME_DIR")?;
+/// Validate the wizard's own Wayland socket, then import the present
+/// [`SESSION_ENV`] names into the user manager.
+pub(super) fn refresh_display_environment(
+    runner: &dyn CommandRunner,
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<(), String> {
+    let display = env("WAYLAND_DISPLAY")
+        .ok_or("wizard service startup requires WAYLAND_DISPLAY from the current desktop")?;
+    let runtime =
+        env("XDG_RUNTIME_DIR").ok_or("wizard service startup requires XDG_RUNTIME_DIR")?;
     validate_display(&display, Path::new(&runtime))?;
 
-    // Import only graphical-session variables, never the whole environment
-    // (which can contain credentials). Clear absent optional values as well.
-    let names = ["WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY", "GDK_BACKEND"];
-    let (present, absent): (Vec<_>, Vec<_>) = names
-        .into_iter()
-        .partition(|name| std::env::var_os(name).is_some());
-    for (command, names) in [
-        ("import-environment", present),
-        ("unset-environment", absent),
-    ] {
-        if names.is_empty() {
-            continue;
-        }
-        let mut args = vec![command];
-        args.extend(names);
-        let out = run_systemctl_user(&StdCommandRunner, &args, Duration::from_secs(3))
-            .map_err(|err| format!("cannot refresh service display environment: {err}"))?;
-        if !out.success {
-            return Err("systemctl could not refresh the service display environment".into());
-        }
+    let mut args = vec!["import-environment"];
+    args.extend(SESSION_ENV.into_iter().filter(|name| env(name).is_some()));
+    let out = run_systemctl_user(runner, &args, SYSTEMCTL_TIMEOUT)
+        .map_err(|err| format!("cannot refresh service display environment: {err}"))?;
+    if !out.success {
+        return Err("systemctl could not refresh the service display environment".into());
     }
     Ok(())
 }
 
-fn response_is_ready(response: &str) -> bool {
-    response
-        .strip_prefix("OK ")
-        .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
-        .and_then(|json| json.get("ui_ready").and_then(serde_json::Value::as_bool))
-        == Some(true)
+/// Outcome of waiting for the restarted service's overlay host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Readiness {
+    Ready,
+    /// Unit is active and healthy so far but not ready within the budget
+    /// (e.g. a slow worker model load). Not a failure.
+    StillStarting(String),
+    Failed(String),
 }
 
-pub(super) fn wait_until_ready(service: &str) -> Result<(), String> {
-    let config = crate::config::load_config()?;
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        let state = service_active_state(service, None);
-        if matches!(state.as_str(), "failed" | "inactive" | "dead" | "unknown") {
-            return Err(format!(
-                "{service} is {state} before the overlay became ready; inspect journalctl --user -u {service}"
-            ));
+/// One `debug_status` probe result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Probe {
+    Ready,
+    NotReady,
+    /// The service answered with diagnostics that have no `ui_ready` field.
+    Legacy,
+    Unreachable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct UnitSnapshot {
+    pub state: String,
+    pub restarts: Option<u64>,
+}
+
+pub(super) fn probe_from_response(response: &str) -> Probe {
+    let Some(json) = response
+        .strip_prefix("OK ")
+        .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+        .filter(serde_json::Value::is_object)
+    else {
+        return Probe::NotReady;
+    };
+    match json.get("ui_ready") {
+        Some(serde_json::Value::Bool(true)) => Probe::Ready,
+        Some(_) => Probe::NotReady,
+        None => Probe::Legacy,
+    }
+}
+
+pub(super) fn unit_snapshot(runner: &dyn CommandRunner, service: &str) -> UnitSnapshot {
+    let unknown = UnitSnapshot {
+        state: "unknown".into(),
+        restarts: None,
+    };
+    let Ok(out) = run_systemctl_user(
+        runner,
+        &["show", "-p", "ActiveState", "-p", "NRestarts", service],
+        Duration::from_secs(2),
+    ) else {
+        return unknown;
+    };
+    if !out.success {
+        return unknown;
+    }
+    let mut snapshot = unknown;
+    for line in out.stdout_lossy().lines() {
+        if let Some(state) = line.strip_prefix("ActiveState=") {
+            if !state.trim().is_empty() {
+                snapshot.state = state.trim().to_ascii_lowercase();
+            }
+        } else if let Some(n) = line.strip_prefix("NRestarts=") {
+            snapshot.restarts = n.trim().parse().ok();
         }
-        if state == "active"
-            && send_control_command(
-                ControlCommand::DebugStatus,
-                config.control_socket.as_deref(),
-                Some(Duration::from_millis(500)),
-            )
-            .is_ok_and(|response| response_is_ready(&response))
+    }
+    snapshot
+}
+
+/// Real readiness wait: systemd state + control-socket `debug_status`.
+pub(super) fn wait_until_ready(
+    service: &str,
+    runner: &dyn CommandRunner,
+    control_socket: Option<&str>,
+) -> Readiness {
+    let deadline = Instant::now() + READY_BUDGET;
+    wait_until_ready_with(
+        service,
+        || unit_snapshot(runner, service),
+        || match send_control_command(
+            ControlCommand::DebugStatus,
+            control_socket,
+            Some(Duration::from_millis(500)),
+        ) {
+            Ok(response) => probe_from_response(&response),
+            Err(_) => Probe::Unreachable,
+        },
+        || Instant::now() >= deadline,
+        std::thread::sleep,
+    )
+}
+
+/// Readiness policy with injectable systemd/control/clock seams.
+pub(super) fn wait_until_ready_with(
+    service: &str,
+    mut snapshot: impl FnMut() -> UnitSnapshot,
+    mut probe: impl FnMut() -> Probe,
+    mut expired: impl FnMut() -> bool,
+    mut sleep: impl FnMut(Duration),
+) -> Readiness {
+    let journal = format!("journalctl --user -u {service} -b");
+    let mut baseline = None;
+    let mut saw_legacy = false;
+    let last_state = loop {
+        let snap = snapshot();
+        if baseline.is_none() {
+            baseline = snap.restarts;
+        }
+        if let (Some(before), Some(now)) = (baseline, snap.restarts)
+            && now > before
         {
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            return Err(format!(
-                "{service} did not report overlay readiness within 30 seconds; inspect journalctl --user -u {service}"
+            return Readiness::Failed(format!(
+                "{service} crashed and was restarted by systemd while starting; inspect {journal}"
             ));
         }
-        std::thread::sleep(Duration::from_millis(100));
+        match snap.state.as_str() {
+            "failed" | "inactive" | "dead" => {
+                return Readiness::Failed(format!(
+                    "{service} is {} before the overlay became ready; inspect {journal}",
+                    snap.state
+                ));
+            }
+            "active" => match probe() {
+                Probe::Ready => return Readiness::Ready,
+                Probe::Legacy => saw_legacy = true,
+                Probe::NotReady | Probe::Unreachable => {}
+            },
+            // activating / reloading / deactivating / transient `unknown`.
+            _ => {}
+        }
+        if expired() {
+            break snap.state;
+        }
+        sleep(POLL_INTERVAL);
+    };
+
+    let secs = READY_BUDGET.as_secs();
+    if last_state == "active" {
+        let why = if saw_legacy {
+            "the running binary does not report ui_ready; check the unit's ExecStart points at this build"
+        } else {
+            "it may still be loading the speech model"
+        };
+        Readiness::StillStarting(format!(
+            "{service} is running but the overlay was not ready after {secs}s ({why}). \
+             Check `shuvoice control debug_status` or {journal}"
+        ))
+    } else {
+        Readiness::Failed(format!(
+            "{service} did not become ready within {secs}s (state: {last_state}); inspect {journal}"
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shuvoice_io::process::{RunOutput, ScriptedRunner};
+    use std::cell::Cell;
+    use std::collections::HashMap;
+
+    fn ok(stdout: &str) -> Result<RunOutput, shuvoice_io::ProcessError> {
+        Ok(RunOutput {
+            status_code: Some(0),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: Vec::new(),
+            success: true,
+        })
+    }
+
+    fn snap(state: &str, restarts: u64) -> UnitSnapshot {
+        UnitSnapshot {
+            state: state.into(),
+            restarts: Some(restarts),
+        }
+    }
+
+    /// Run the policy over scripted snapshots/probes; expires after the last snapshot.
+    fn run(snaps: &[UnitSnapshot], probes: &[Probe]) -> (Readiness, usize) {
+        let i = Cell::new(0usize);
+        let p = Cell::new(0usize);
+        let result = wait_until_ready_with(
+            "shuvoice.service",
+            || {
+                let n = i.get();
+                i.set(n + 1);
+                snaps[n.min(snaps.len() - 1)].clone()
+            },
+            || {
+                let n = p.get();
+                p.set(n + 1);
+                probes[n.min(probes.len() - 1)]
+            },
+            || i.get() >= snaps.len(),
+            |_| {},
+        );
+        (result, p.get())
+    }
 
     #[test]
-    fn readiness_requires_explicit_ui_ready() {
+    fn probe_requires_explicit_ui_ready() {
         for response in [
             "OK pong",
-            "OK {}",
             "OK {\"ui_ready\":false}",
             "ERROR unavailable",
+            "OK [1]",
         ] {
-            assert!(!response_is_ready(response));
+            assert_eq!(probe_from_response(response), Probe::NotReady, "{response}");
         }
-        assert!(response_is_ready("OK {\"ui_ready\":true}"));
+        assert_eq!(probe_from_response("OK {}"), Probe::Legacy);
+        assert_eq!(probe_from_response("OK {\"app\":{}}"), Probe::Legacy);
+        assert_eq!(
+            probe_from_response("OK {\"app\":{},\"ui_ready\":true}"),
+            Probe::Ready
+        );
     }
 
     #[test]
@@ -113,5 +286,123 @@ mod tests {
         assert!(validate_display("", dir.path()).is_err());
         drop(listener);
         assert!(validate_display("wayland-1", dir.path()).is_err());
+    }
+
+    #[test]
+    fn refresh_imports_present_session_vars_and_never_unsets() {
+        let dir = tempfile::tempdir().unwrap();
+        let _listener =
+            std::os::unix::net::UnixListener::bind(dir.path().join("wayland-1")).unwrap();
+        let vars: HashMap<&str, String> = [
+            ("WAYLAND_DISPLAY", "wayland-1".to_string()),
+            ("XDG_RUNTIME_DIR", dir.path().display().to_string()),
+            ("DISPLAY", ":0".to_string()),
+            ("HYPRLAND_INSTANCE_SIGNATURE", "sig".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let runner = ScriptedRunner::new();
+        runner.set_dynamic(|_| ok(""));
+        refresh_display_environment(&runner, |name| vars.get(name).cloned()).unwrap();
+
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        assert_eq!(
+            calls[0],
+            [
+                "systemctl",
+                "--user",
+                "import-environment",
+                "WAYLAND_DISPLAY",
+                "DISPLAY",
+                "HYPRLAND_INSTANCE_SIGNATURE",
+            ]
+        );
+    }
+
+    #[test]
+    fn stale_wizard_display_never_touches_the_manager() {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = ScriptedRunner::new();
+        runner.set_dynamic(|_| ok(""));
+        let runtime = dir.path().display().to_string();
+        let err = refresh_display_environment(&runner, |name| match name {
+            "WAYLAND_DISPLAY" => Some("wayland-stale".into()),
+            "XDG_RUNTIME_DIR" => Some(runtime.clone()),
+            _ => None,
+        })
+        .unwrap_err();
+        assert!(err.contains("wayland-stale"), "{err}");
+        assert!(runner.calls().is_empty());
+    }
+
+    #[test]
+    fn unit_snapshot_parses_state_and_restart_count() {
+        let runner = ScriptedRunner::new();
+        runner.set_dynamic(|_| ok("ActiveState=active\nNRestarts=3\n"));
+        assert_eq!(
+            unit_snapshot(&runner, "shuvoice.service"),
+            snap("active", 3)
+        );
+    }
+
+    #[test]
+    fn ready_after_activating_and_transient_unknown() {
+        let unknown = UnitSnapshot {
+            state: "unknown".into(),
+            restarts: None,
+        };
+        let (result, _) = run(
+            &[
+                snap("activating", 0),
+                unknown,
+                snap("active", 0),
+                snap("active", 0),
+            ],
+            &[Probe::Unreachable, Probe::Ready],
+        );
+        assert_eq!(result, Readiness::Ready);
+    }
+
+    #[test]
+    fn terminal_unit_state_fails_without_probing() {
+        for state in ["failed", "inactive", "dead"] {
+            let (result, probes) = run(&[snap(state, 0)], &[Probe::Ready]);
+            assert!(matches!(result, Readiness::Failed(ref m) if m.contains(state)));
+            assert_eq!(probes, 0);
+        }
+    }
+
+    #[test]
+    fn crash_restart_during_wait_is_a_failure_even_if_active() {
+        let (result, _) = run(
+            &[snap("active", 0), snap("activating", 1), snap("active", 1)],
+            &[Probe::Unreachable],
+        );
+        assert!(matches!(result, Readiness::Failed(ref m) if m.contains("crashed")));
+    }
+
+    #[test]
+    fn slow_but_healthy_service_is_still_starting_not_failed() {
+        let (result, _) = run(&vec![snap("active", 0); 5], &[Probe::NotReady]);
+        assert!(
+            matches!(result, Readiness::StillStarting(ref m) if m.contains("loading")),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn legacy_binary_without_ui_ready_is_named_in_the_hint() {
+        let (result, _) = run(&vec![snap("active", 0); 3], &[Probe::Legacy]);
+        assert!(
+            matches!(result, Readiness::StillStarting(ref m) if m.contains("ExecStart")),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn not_active_at_deadline_is_a_failure() {
+        let (result, _) = run(&vec![snap("activating", 0); 4], &[Probe::Unreachable]);
+        assert!(matches!(result, Readiness::Failed(ref m) if m.contains("activating")));
     }
 }

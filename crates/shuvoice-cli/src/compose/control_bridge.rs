@@ -151,15 +151,18 @@ mod tests {
     #[test]
     fn debug_readiness_tracks_gtk_lifecycle_without_changing_other_fields() {
         let surface = FakeSurface::default();
-        *surface.debug.lock().unwrap() = "{\"state\":\"idle\"}".into();
+        *surface.debug.lock().unwrap() = "{\"state\":\"idle\",\"audio\":{\"dropped\":2}}".into();
         let ready = Arc::new(AtomicBool::new(false));
         let bridge = ControlBridge::from_surface(surface).with_ui_readiness(ready.clone());
-        let before: serde_json::Value = serde_json::from_str(&bridge.on_debug_status()).unwrap();
-        assert_eq!(before["ui_ready"], false);
-        assert_eq!(before["state"], "idle");
+        assert_eq!(
+            bridge.on_debug_status(),
+            "{\"state\":\"idle\",\"audio\":{\"dropped\":2},\"ui_ready\":false}"
+        );
         ready.store(true, Ordering::Release);
-        let after: serde_json::Value = serde_json::from_str(&bridge.on_debug_status()).unwrap();
-        assert_eq!(after["ui_ready"], true);
+        assert_eq!(
+            bridge.on_debug_status(),
+            "{\"state\":\"idle\",\"audio\":{\"dropped\":2},\"ui_ready\":true}"
+        );
     }
 
     impl ControlHandlerSurface for FakeSurface {

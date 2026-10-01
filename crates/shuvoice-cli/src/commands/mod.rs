@@ -8,3 +8,4 @@ pub mod preflight;
 pub mod run;
 pub mod setup;
 pub mod wizard;
+mod wizard_service;
