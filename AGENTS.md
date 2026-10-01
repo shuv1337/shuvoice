@@ -20,6 +20,15 @@ window. TTS speaks selection/clipboard. STT and TTS are mutually exclusive.
 | App shell, runtime, UI, control, setup, wizard, Waybar | **Rust** | `crates/*`, bins `shuvoice` / `shuvoice-waybar` |
 | Domain config + pure policy | **Rust** | `crates/shuvoice-core` |
 | Optional heavy ML engines | **Python workers** | `workers/` via `shuvoice-worker-proto` |
+| Settings window | **TypeScript (GPUIX/React)** | `apps/settings`, bin `shuvoice-settings` |
+
+The settings app owns no config logic: it talks to `shuvoice settings-bridge`
+(JSON lines on stdio) and Rust (`shuvoice_core::settings`) owns fields,
+validation and patch-style persistence. `shuvoice settings` opens it (falls back
+to the GTK wizard when not installed); first run and `shuvoice wizard` still use
+the GTK wizard. GPUIX needs `apps/settings/patches/gpui-primary-seat.patch`
+(stock GPUI ignores physical input when the compositor has extra seats); see
+`apps/settings/README.md`.
 
 Default desktop Cargo feature: **`desktop`** on `shuvoice-cli`
 (`audio` + `asr-sherpa` + `asr-openai` + `ui` + `tts` + `tts-worker`).
@@ -201,6 +210,8 @@ When adding/changing user-facing keys:
 ## What not to do
 
 - Do not import `workers/**` or Python ML stacks into the Rust app.
+- Do not put config defaults, validation or TOML editing in `apps/settings`;
+  add fields to `shuvoice_core::settings::FIELDS` and keep ids `section.key`.
 - Do not reintroduce Sherpa CUDA wheel/RUNPATH “repair” docs or code paths for
   the native static binding — CUDA is fail-closed; use CPU.
 - Do not document MeloTTS legacy helper scripts as the production path —

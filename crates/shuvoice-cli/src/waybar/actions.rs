@@ -158,7 +158,8 @@ fn action_stop_record(deps: &WaybarDeps, config: &Config, service: &str) -> Resu
 
 fn action_launch_wizard(deps: &WaybarDeps) -> Result<(), String> {
     let bin = resolve_shuvoice_bin();
-    deps.launcher.spawn_detached(&bin, &["wizard"])
+    // `settings` opens the settings app, or the wizard when it is not installed.
+    deps.launcher.spawn_detached(&bin, &["settings"])
 }
 
 fn action_service_start(deps: &WaybarDeps, config: &Config, service: &str) -> Result<(), String> {

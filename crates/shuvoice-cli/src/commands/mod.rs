@@ -6,6 +6,7 @@ pub mod diagnostics;
 pub mod model;
 pub mod preflight;
 pub mod run;
+pub mod settings;
 pub mod setup;
 pub mod wizard;
 mod wizard_service;

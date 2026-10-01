@@ -121,6 +121,11 @@ async fn dispatch(resolved: ResolvedCommand) -> ExitStatus {
     match resolved {
         ResolvedCommand::Run { overrides } => run::run_app(&overrides).await,
         ResolvedCommand::Wizard => wizard::run_wizard_command(),
+        ResolvedCommand::Settings => {
+            tokio::task::spawn_blocking(crate::commands::settings::run_settings_command)
+                .await
+                .unwrap_or_else(|_| ExitStatus::code(EXIT_FAILURE))
+        }
         ResolvedCommand::SettingsBridge => tokio::task::spawn_blocking(settings_bridge::run_stdio)
             .await
             .unwrap_or_else(|_| ExitStatus::code(EXIT_FAILURE)),
