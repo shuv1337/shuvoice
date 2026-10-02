@@ -41,7 +41,8 @@ export function progressText(phase: Extract<Phase, { kind: 'applying' }>): strin
   if (phase.unlocked) return 'Applying without lock (older service)'
   switch (phase.step) {
     case 'waiting_idle':
-      return busyText(phase.busy)
+      // The bridge announces this phase before its first idle check.
+      return phase.busy.length > 0 ? busyText(phase.busy) : 'Checking ShuVoice is idle…'
     case 'reserving':
       return 'Reserving ShuVoice…'
     case 'restarting':

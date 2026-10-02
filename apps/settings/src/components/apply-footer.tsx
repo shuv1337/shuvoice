@@ -28,7 +28,7 @@ export function ApplyFooter({
   if (phase.kind === 'loading') footerText = 'Loading…'
   else if (phase.kind === 'applying') {
     footerText = progressText(phase)
-    footerColor = phase.step === 'waiting_idle' ? C.warn : C.dim
+    footerColor = phase.step === 'waiting_idle' && phase.busy.length > 0 ? C.warn : C.dim
   } else if (phase.kind === 'done')
     [footerText, footerColor] = [phase.text, phase.tone === 'ok' ? C.ok : C.warn]
   else if (phase.kind === 'conflict') [footerText, footerColor] = ['Config changed on disk', C.warn]
