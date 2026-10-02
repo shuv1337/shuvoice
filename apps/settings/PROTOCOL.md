@@ -71,6 +71,18 @@ Result: `{ saved: Applied, restart: RestartOutcome }`.
 `RestartOutcome.outcome`: `ready` | `starting` | `handoff_failed` |
 `action_failed` | `readiness_failed` | `unavailable` | `not_active`.
 Readiness is satisfied only by a new service invocation reporting `ui_ready`.
+This confirms invocation/socket freshness, not the loaded config revision:
+`debug_status` does not yet expose a startup config revision. An external editor
+that ignores the writer lock can still change the config before startup loads it.
+
+The service uses additive control commands `maintenance_reserve` (returns
+`OK reserved token=<u64> ttl=120`) and `maintenance_release <token>`.
+Only the owning token releases a reservation; expired/stale tokens are rejected.
+The bridge cancels before saving and releases on disconnect/failure. After the
+atomic save begins, cancellation cannot undo the commit; restart completes.
+If saving consumes 60 seconds of the 120-second lease, it reports saved-but-not-
+restarted instead of risking an expired reservation. Readiness checks systemd's
+new InvocationID against the ID in `debug_status`, rejecting old sockets.
 
 `params.onboarding: true`: after a successful save, also writes the
 setup-complete marker, and starts (or restarts) the service.
@@ -86,6 +98,17 @@ setup-complete marker, and starts (or restarts) the service.
 | `shortcut_set` | `{ id, dry_run }` | `{ status: 'added' \| 'already_present' \| 'replaced' \| 'unsupported' \| 'error', message, conflicts: string[], backup: string \| null }` — edits only ShuVoice's managed binding in the Hyprland config; `dry_run` reports without writing. |
 | `models` | `{ changes }` | `{ required: { id, label, installed: boolean, size_hint: string \| null }[] }` — models the draft needs. |
 | `model_download` | `{ id }` | progress events `{phase:'downloading', fraction: number \| null, text}`; result `{ id, installed: true }`. Shares the worker slot with `apply` (concurrent → `busy`); `cancel` stops it. |
+
+Model IDs are opaque: call `models` for the current draft before `model_download`.
+The bridge keeps that validated inventory and destination for the download.
+Sherpa and curated Piper downloads reuse the setup downloaders. NeMo/Moonshine
+models remain worker-managed and return `unavailable` for standalone download;
+Piper requires its runtime already installed (this op never installs packages).
+Lua Hyprland configs and external includes that cannot be inspected safely
+return `unsupported` for shortcut edits; no Lua/config files are rewritten.
+For simultaneous raw Sherpa keys and `asr.sherpa_profile`, the preset is applied
+first and explicit raw key changes win. Null removes a key and restores its
+core default (including the virtual profile's mapped keys).
 
 ## App launch
 

@@ -237,7 +237,10 @@ pub enum Command {
     /// Launch the setup wizard
     Wizard,
     /// Open the settings app (falls back to the setup wizard)
-    Settings,
+    Settings {
+        #[arg(long)]
+        onboarding: bool,
+    },
     /// Settings app bridge (JSON lines on stdio; started by the settings app)
     #[command(hide = true)]
     SettingsBridge,
@@ -367,7 +370,9 @@ pub enum ResolvedCommand {
         non_interactive: bool,
     },
     Wizard,
-    Settings,
+    Settings {
+        onboarding: bool,
+    },
     SettingsBridge,
     ConfigPath,
     ConfigValidate,
@@ -454,7 +459,14 @@ pub fn resolve_command(cli: &Cli) -> Result<(ResolvedCommand, Vec<String>), Stri
                 ));
             }
             Command::Wizard => return Ok((ResolvedCommand::Wizard, warnings)),
-            Command::Settings => return Ok((ResolvedCommand::Settings, warnings)),
+            Command::Settings { onboarding } => {
+                return Ok((
+                    ResolvedCommand::Settings {
+                        onboarding: *onboarding,
+                    },
+                    warnings,
+                ));
+            }
             Command::SettingsBridge => return Ok((ResolvedCommand::SettingsBridge, warnings)),
             Command::Config { command } => {
                 let resolved = match command {

@@ -133,6 +133,7 @@ pub(super) fn wait_until_ready(
     service: &str,
     runner: &dyn CommandRunner,
     control_socket: Option<&str>,
+    previous_invocation: &str,
 ) -> Readiness {
     let deadline = Instant::now() + READY_BUDGET;
     wait_until_ready_with(
@@ -143,12 +144,44 @@ pub(super) fn wait_until_ready(
             control_socket,
             Some(Duration::from_millis(500)),
         ) {
-            Ok(response) => probe_from_response(&response),
+            Ok(response) => {
+                let current = service_invocation_id(runner, service);
+                if new_invocation_ready(&response, previous_invocation, &current) {
+                    Probe::Ready
+                } else {
+                    Probe::NotReady
+                }
+            }
             Err(_) => Probe::Unreachable,
         },
         || Instant::now() >= deadline,
         std::thread::sleep,
     )
+}
+
+pub(super) fn service_invocation_id(runner: &dyn CommandRunner, service: &str) -> String {
+    run_systemctl_user(
+        runner,
+        &["show", "--value", "-p", "InvocationID", service],
+        SYSTEMCTL_TIMEOUT,
+    )
+    .ok()
+    .filter(|out| out.success)
+    .map(|out| out.stdout_lossy().trim().to_string())
+    .unwrap_or_default()
+}
+
+fn new_invocation_ready(response: &str, previous: &str, current: &str) -> bool {
+    !previous.is_empty()
+        && !current.is_empty()
+        && current != previous
+        && probe_from_response(response) == Probe::Ready
+        && response
+            .strip_prefix("OK ")
+            .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+            .and_then(|v| v["invocation_id"].as_str().map(str::to_string))
+            .as_deref()
+            == Some(current)
 }
 
 /// Readiness policy with injectable systemd/control/clock seams.
@@ -274,6 +307,23 @@ mod tests {
             probe_from_response("OK {\"app\":{},\"ui_ready\":true}"),
             Probe::Ready
         );
+    }
+
+    #[test]
+    fn readiness_rejects_old_invocation_and_old_socket() {
+        let old = "OK {\"ui_ready\":true,\"invocation_id\":\"old\"}";
+        let new = "OK {\"ui_ready\":true,\"invocation_id\":\"new\"}";
+        assert!(!new_invocation_ready(old, "old", "old"));
+        assert!(!new_invocation_ready(old, "old", "new"));
+        assert!(!new_invocation_ready(new, "", "new"));
+        assert!(new_invocation_ready(new, "<stopped>", "new"));
+        assert!(!new_invocation_ready(new, "old", ""));
+        assert!(!new_invocation_ready(
+            "OK {\"ui_ready\":true}",
+            "old",
+            "new"
+        ));
+        assert!(new_invocation_ready(new, "old", "new"));
     }
 
     #[test]

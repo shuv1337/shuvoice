@@ -17,6 +17,10 @@ pub async fn run_app(overrides: &RuntimeOverrides) -> ExitStatus {
     }
 
     if needs_wizard() {
+        if let Some(bin) = super::settings::installed_settings_bin() {
+            let detached = std::env::var_os("INVOCATION_ID").is_some();
+            return super::settings::launch_onboarding(&bin, detached);
+        }
         // First-run is in-process only; only `shuvoice wizard` touches systemd.
         match run_welcome_wizard(false) {
             WizardLaunch::Completed => {

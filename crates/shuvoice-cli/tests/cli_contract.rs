@@ -255,3 +255,64 @@ fn settings_bridge_speaks_json_lines_and_saves_patches() {
         );
     });
 }
+
+#[test]
+#[serial]
+fn settings_and_wizard_pass_onboarding_to_the_installed_app() {
+    use std::os::unix::fs::PermissionsExt;
+    with_xdg(|config_home| {
+        let fake = config_home.join("fake-settings");
+        fs::write(&fake, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        for args in [
+            vec!["settings", "--onboarding"],
+            vec!["wizard"],
+            vec!["--wizard"],
+        ] {
+            let mut command = cargo_bin_cmd!("shuvoice");
+            command
+                .args(args)
+                .env("SHUVOICE_SETTINGS_BIN", &fake)
+                .timeout(std::time::Duration::from_secs(5));
+            command.assert().success().stdout("--onboarding\n");
+        }
+        assert!(!config_home.join("shuvoice/config.toml").exists());
+    });
+}
+
+#[test]
+#[serial]
+fn service_first_run_detaches_onboarding_and_exits_78_without_writing_config() {
+    use std::os::unix::fs::PermissionsExt;
+    with_xdg(|config_home| {
+        let bin_dir = config_home.join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        let fake = bin_dir.join("fake-settings");
+        fs::write(&fake, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        let systemd_run = bin_dir.join("systemd-run");
+        fs::write(
+            &systemd_run,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$XDG_CONFIG_HOME/launch-args\"\nexit 0\n",
+        )
+        .unwrap();
+        fs::set_permissions(&systemd_run, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut command = cargo_bin_cmd!("shuvoice");
+        command
+            .arg("run")
+            .env("SHUVOICE_SETTINGS_BIN", &fake)
+            .env("INVOCATION_ID", "fixture-service")
+            .env("PATH", &bin_dir)
+            .env("WAYLAND_DISPLAY", "fixture-wayland")
+            .timeout(std::time::Duration::from_secs(5));
+        command.assert().code(78);
+        let args = fs::read_to_string(config_home.join("launch-args")).unwrap();
+        assert!(args.contains("--user\n--collect\n--quiet\n"), "{args}");
+        assert!(
+            args.contains("--setenv=WAYLAND_DISPLAY=fixture-wayland\n"),
+            "{args}"
+        );
+        assert!(args.ends_with("--onboarding\n"), "{args}");
+        assert!(!config_home.join("shuvoice/config.toml").exists());
+    });
+}
