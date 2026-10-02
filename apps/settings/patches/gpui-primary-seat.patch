@@ -1,0 +1,58 @@
+From 945473d6d74d7a5e5ac5cee165a081cba70dbf2f Mon Sep 17 00:00:00 2001
+From: shuv <shuv@shuv.dev>
+Date: Thu, 1 Oct 2026 12:41:19 -0700
+Subject: [PATCH] gpui_linux(wayland): keep the primary seat instead of the
+ last one
+
+With several wl_seat globals (e.g. virtual seats from an automation
+plugin), the client bound every seat and kept the last, so physical
+pointer/keyboard input on the compositor's primary seat never arrived.
+Keep the first advertised seat at startup and ignore seats announced
+later.
+---
+ crates/gpui_linux/src/linux/wayland/client.rs | 22 +++++++------------
+ 1 file changed, 8 insertions(+), 14 deletions(-)
+
+diff --git a/crates/gpui_linux/src/linux/wayland/client.rs b/crates/gpui_linux/src/linux/wayland/client.rs
+index a5c6dc8..b7bd1e0 100644
+--- a/crates/gpui_linux/src/linux/wayland/client.rs
++++ b/crates/gpui_linux/src/linux/wayland/client.rs
+@@ -762,7 +762,11 @@ impl WaylandClient {
+         globals.contents().with_list(|list| {
+             for global in list {
+                 match &global.interface[..] {
+-                    "wl_seat" => {
++                    // Single-seat client: keep the first advertised seat (the
++                    // compositor's primary seat). Binding every seat and keeping
++                    // the last one routed input to virtual seats added by
++                    // automation plugins, so physical input never arrived.
++                    "wl_seat" if seat.is_none() => {
+                         seat = Some(globals.registry().bind::<wl_seat::WlSeat, _, _>(
+                             global.name,
+                             wl_seat_version(global.version),
+@@ -1378,19 +1382,9 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for WaylandClientStat
+                 version,
+             } => match &interface[..] {
+                 "wl_seat" => {
+-                    if let Some(wl_pointer) = state.wl_pointer.take() {
+-                        wl_pointer.release();
+-                    }
+-                    if let Some(wl_keyboard) = state.wl_keyboard.take() {
+-                        wl_keyboard.release();
+-                    }
+-                    state.wl_seat.release();
+-                    state.wl_seat = registry.bind::<wl_seat::WlSeat, _, _>(
+-                        name,
+-                        wl_seat_version(version),
+-                        qh,
+-                        (),
+-                    );
++                    // A seat already exists from startup; switching to a seat
++                    // announced later would drop the primary seat's input.
++                    log::info!("ignoring additional wl_seat global {name}");
+                 }
+                 "wl_output" => {
+                     let output = registry.bind::<wl_output::WlOutput, _, _>(
+-- 
+2.56.0
+

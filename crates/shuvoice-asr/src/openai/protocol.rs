@@ -10,19 +10,35 @@ pub const OPENAI_REALTIME_SAMPLE_RATE: u32 = 24_000;
 pub const OPENAI_REALTIME_WS_URL_DEFAULT: &str =
     "wss://api.openai.com/v1/realtime?intent=transcription";
 
-/// Build `transcription_session.update` payload.
+/// Build the GA `session.update` transcription payload (24 kHz PCM).
+/// See OpenAI's Realtime client-secrets / AudioTranscription reference.
+#[cfg(test)]
 pub fn session_update_payload(model: &str, language: &str) -> Value {
+    session_update_payload_with_hints(model, language, &[])
+}
+
+pub fn session_update_payload_with_hints(model: &str, language: &str, hints: &[String]) -> Value {
     let mut transcription = json!({ "model": model });
     if !language.trim().is_empty() {
         transcription["language"] = json!(language);
     }
+    if !hints.is_empty() && shuvoice_core::settings::openai_hint_model_supported(model) {
+        transcription["prompt"] = json!(if model == "whisper-1" {
+            hints.join(", ")
+        } else {
+            format!("Expected vocabulary: {}.", hints.join(", "))
+        });
+    }
     json!({
-        "type": "transcription_session.update",
+        "type": "session.update",
         "session": {
-            "input_audio_format": "pcm16",
-            "input_audio_transcription": transcription,
-            "turn_detection": Value::Null,
-            "input_audio_noise_reduction": { "type": "near_field" },
+            "type": "transcription",
+            "audio": { "input": {
+                "format": { "type": "audio/pcm", "rate": OPENAI_REALTIME_SAMPLE_RATE },
+                "transcription": transcription,
+                "turn_detection": Value::Null,
+                "noise_reduction": { "type": "near_field" },
+            } },
         }
     })
 }
@@ -197,9 +213,45 @@ mod tests {
     #[test]
     fn session_update_shape() {
         let v = session_update_payload("gpt-4o-transcribe", "en");
-        assert_eq!(v["type"], "transcription_session.update");
-        assert_eq!(v["session"]["input_audio_format"], "pcm16");
-        assert!(v["session"]["turn_detection"].is_null());
+        assert_eq!(v["type"], "session.update");
+        assert_eq!(
+            v.pointer("/session/audio/input/format/type").unwrap(),
+            "audio/pcm"
+        );
+        assert!(
+            v.pointer("/session/audio/input/turn_detection")
+                .unwrap()
+                .is_null()
+        );
+    }
+
+    #[test]
+    fn actual_payload_hints_and_empty_compatibility() {
+        for model in [
+            "gpt-4o-transcribe",
+            "gpt-4o-mini-transcribe",
+            "whisper-1",
+            "gpt-4o-transcribe-latest",
+        ] {
+            let baseline = session_update_payload(model, "en");
+            assert_eq!(
+                baseline,
+                session_update_payload_with_hints(model, "en", &[])
+            );
+            let hinted = session_update_payload_with_hints(model, "en", &["ShuVoice".into()]);
+            if model.ends_with("-latest") {
+                assert_eq!(baseline, hinted);
+            } else {
+                assert!(
+                    hinted
+                        .pointer("/session/audio/input/transcription/prompt")
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .contains("ShuVoice")
+                );
+            }
+        }
     }
 
     #[test]

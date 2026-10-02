@@ -25,7 +25,10 @@ Installed artifacts:
 |------|----------|
 | `/usr/bin/shuvoice` | Desktop application / CLI |
 | `/usr/bin/shuvoice-waybar` | Waybar helper |
+| `/usr/bin/shuvoice-settings` | Standalone GPUIX settings app with embedded patched native addon |
 | `/usr/lib/systemd/user/shuvoice.service` | User unit (`ExecStart=/usr/bin/shuvoice`, `RestartPreventExitStatus=78`, `RUST_LOG=info`) |
+| `/usr/share/applications/shuvoice.desktop` | Launcher entry: `shuvoice settings`; actions for setup and service control |
+| `/usr/share/icons/hicolor/*/apps/shuvoice.png` | App icon, 16–512 px (mic mark from `docs/assets/branding/shuvoice-variant-dark-badge.png`, wordmark removed) |
 | `/usr/lib/shuvoice/workers/` | Optional worker packages (`shuvoice_worker_proto`, `nemo_asr`, `moonshine_asr`, `melotts`) — `.py` source only |
 | `/usr/share/doc/shuvoice-git/` | README, example config, branding/screenshot assets |
 | `/usr/share/licenses/shuvoice-git/LICENSE` | MIT license |
@@ -33,11 +36,18 @@ Installed artifacts:
 Worker discovery matches the runtime contract: env `SHUVOICE_WORKERS_DIR`, then
 `/usr/lib/shuvoice/workers`, then `/usr/libexec/shuvoice/workers`.
 
+The settings build uses Bun, GPUIX tag `@gpuix/react@0.10.0`, and the Zed fork at
+`81c99f816b4a5f69d3c014774068034c24d1d7af`. `prepare()` applies the primary-seat
+patch; `build()` runs `apps/settings/scripts/build-addon.sh` with that source
+tree, then `bun run build`. Bun is a build dependency, not a runtime dependency.
+Do not substitute the stock npm addon: it loses physical input on multi-seat
+Wayland desktops. GTK remains required for the speech overlays.
+
 ### Dependencies
 
 - **depends**: GTK4 + layer-shell, ALSA/PipeWire audio stack, `wtype`, `wl-clipboard`
 - **optdepends**: `python` (worker interpreter), `uv` (preferred for isolated worker venvs via setup), `piper-tts`, `xdotool`, `ydotool`
-- **makedepends**: `git`, `cargo`/`rust`, `pkgconf`, `clang`, GTK/layer-shell, `alsa-lib`, `pipewire` (static sherpa-onnx uses upstream prebuilts; no system `sherpa-onnx` package required)
+- **makedepends**: `bun`, `git`, `cargo`/`rust`, `pkgconf`, `clang`, GTK/layer-shell, `alsa-lib`, `pipewire` (static sherpa-onnx uses upstream prebuilts; no system `sherpa-onnx` package required)
 
 Python is **not** a hard dependency of the application shell. Native Sherpa is
 linked statically into the Rust binary. Optional NeMo/Moonshine/MeloTTS engines

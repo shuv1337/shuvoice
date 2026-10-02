@@ -49,6 +49,70 @@ fn help_lists_required_subcommands() {
 }
 
 #[test]
+fn settings_save_only_env_skips_service_processes_and_control_socket() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::{fs::PermissionsExt, net::UnixListener};
+    use std::process::Stdio;
+
+    let dir = tempdir().unwrap();
+    let runtime = dir.path().join("runtime");
+    fs::create_dir_all(runtime.join("shuvoice")).unwrap();
+    let listener = UnixListener::bind(runtime.join("shuvoice/control.sock")).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let bin = dir.path().join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let systemctl = bin.join("systemctl");
+    fs::write(
+        &systemctl,
+        "#!/bin/sh\necho called >> \"$PROBE_LOG\"\nexit 1\n",
+    )
+    .unwrap();
+    fs::set_permissions(&systemctl, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_shuvoice"));
+    command
+        .arg("settings-bridge")
+        .env("SHUVOICE_SETTINGS_NO_RESTART", "1")
+        .env("XDG_CONFIG_HOME", dir.path().join("config"))
+        .env("XDG_DATA_HOME", dir.path().join("data"))
+        .env("XDG_RUNTIME_DIR", &runtime)
+        .env("PATH", &bin)
+        .env("PROBE_LOG", dir.path().join("probes"));
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let mut output = BufReader::new(child.stdout.take().unwrap());
+    writeln!(input, "{}", serde_json::json!({"v":1,"id":1,"op":"status"})).unwrap();
+    let mut line = String::new();
+    output.read_line(&mut line).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&line).unwrap()["result"]["state"],
+        "restart disabled"
+    );
+    writeln!(input, "{}", serde_json::json!({"v":1,"id":2,"op":"apply","params":{"revision":"absent","changes":{"overlay.font_size":30}}})).unwrap();
+    loop {
+        line.clear();
+        assert!(output.read_line(&mut line).unwrap() > 0);
+        let response: serde_json::Value = serde_json::from_str(&line).unwrap();
+        if response.get("ok").is_some() {
+            assert_eq!(response["ok"], true, "{response}");
+            assert_eq!(
+                response["result"]["restart"],
+                serde_json::json!({"outcome":"not_active","state":"restart disabled"})
+            );
+            break;
+        }
+        assert_ne!(response["phase"], "restarting");
+    }
+    drop(input);
+    assert!(child.wait().unwrap().success());
+    assert!(!dir.path().join("probes").exists());
+    assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
+}
+
+#[test]
 fn control_help_lists_tts_speak_clipboard() {
     let mut cmd = cargo_bin_cmd!("shuvoice");
     cmd.args(["control", "--help"]);
@@ -163,4 +227,156 @@ fn waybar_status_prints_json() {
         "expected waybar json, got: {stdout}"
     );
     assert!(stdout.contains("\"class\""));
+}
+
+#[cfg(all(feature = "ui", feature = "asr-openai"))]
+#[test]
+#[serial]
+fn unavailable_display_fails_fast_and_retryable_before_model_or_control_startup() {
+    with_xdg(|config_home| {
+        let cfg = config_home.join("shuvoice/config.toml");
+        fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        // OpenAI Realtime constructs without I/O, so the display check is reached.
+        fs::write(
+            &cfg,
+            "config_version = 1\n[asr]\nasr_backend = \"openai_realtime\"\n\
+             [tts]\ntts_enabled = false\n[feedback]\naudio_feedback = false\n",
+        )
+        .unwrap();
+        let data = PathBuf::from(std::env::var_os("XDG_DATA_HOME").unwrap());
+        fs::create_dir_all(data.join("shuvoice")).unwrap();
+        fs::write(data.join("shuvoice/.wizard-done"), "1").unwrap();
+        let socket = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR").unwrap())
+            .join("shuvoice/control.sock");
+        let mut cmd = cargo_bin_cmd!("shuvoice");
+        cmd.arg("run")
+            .env("OPENAI_API_KEY", "sk-test-not-used")
+            .env("WAYLAND_DISPLAY", "wayland-missing")
+            .env("GDK_BACKEND", "wayland")
+            .env_remove("WAYLAND_SOCKET")
+            .env_remove("DISPLAY")
+            .timeout(std::time::Duration::from_secs(5));
+        // Not 78: the display may appear later (unit started before the
+        // compositor), so systemd must be allowed to retry.
+        cmd.assert()
+            .code(1)
+            .stderr(predicate::str::contains("cannot initialize GTK display"))
+            .stderr(predicate::str::contains("WAYLAND_DISPLAY=wayland-missing"));
+        assert!(
+            !socket.exists(),
+            "display failure must precede control socket creation"
+        );
+    });
+}
+
+#[test]
+#[serial]
+fn settings_bridge_speaks_json_lines_and_saves_patches() {
+    with_xdg(|config_home| {
+        let cfg = config_home.join("shuvoice/config.toml");
+        fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        fs::write(
+            &cfg,
+            "config_version = 1\n[overlay]\nfont_size = 20\nmy_note = \"keep\"\n",
+        )
+        .unwrap();
+        let snapshot = r#"{"v":1,"id":1,"op":"snapshot"}"#;
+        let mut cmd = cargo_bin_cmd!("shuvoice");
+        let out = cmd
+            .arg("settings-bridge")
+            .write_stdin(format!("{snapshot}\n"))
+            .timeout(std::time::Duration::from_secs(10))
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let first: serde_json::Value =
+            serde_json::from_slice(out.stdout.split(|b| *b == b'\n').next().unwrap()).unwrap();
+        assert_eq!(first["result"]["values"]["overlay.font_size"], 20);
+        let revision = first["result"]["revision"].as_str().unwrap().to_string();
+
+        let save = format!(
+            r#"{{"v":1,"id":2,"op":"save","params":{{"revision":"{revision}","changes":{{"overlay.font_size":28}}}}}}"#
+        );
+        let mut cmd = cargo_bin_cmd!("shuvoice");
+        let out = cmd
+            .arg("settings-bridge")
+            .write_stdin(format!("{save}\n{{\"v\":1,\"id\":3,\"op\":\"nope\"}}\n"))
+            .timeout(std::time::Duration::from_secs(10))
+            .output()
+            .unwrap();
+        let lines: Vec<serde_json::Value> = String::from_utf8(out.stdout)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("stdout carries protocol lines only"))
+            .collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0]["ok"], true, "{}", lines[0]);
+        assert_eq!(lines[1]["error"]["kind"], "unknown_op");
+        let text = fs::read_to_string(&cfg).unwrap();
+        assert!(
+            text.contains("font_size = 28") && text.contains("my_note = \"keep\""),
+            "{text}"
+        );
+    });
+}
+
+#[test]
+#[serial]
+fn settings_and_wizard_pass_onboarding_to_the_installed_app() {
+    use std::os::unix::fs::PermissionsExt;
+    with_xdg(|config_home| {
+        let fake = config_home.join("fake-settings");
+        fs::write(&fake, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        for args in [
+            vec!["settings", "--onboarding"],
+            vec!["wizard"],
+            vec!["--wizard"],
+        ] {
+            let mut command = cargo_bin_cmd!("shuvoice");
+            command
+                .args(args)
+                .env("SHUVOICE_SETTINGS_BIN", &fake)
+                .timeout(std::time::Duration::from_secs(5));
+            command.assert().success().stdout("--onboarding\n");
+        }
+        assert!(!config_home.join("shuvoice/config.toml").exists());
+    });
+}
+
+#[test]
+#[serial]
+fn service_first_run_detaches_onboarding_and_exits_78_without_writing_config() {
+    use std::os::unix::fs::PermissionsExt;
+    with_xdg(|config_home| {
+        let bin_dir = config_home.join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        let fake = bin_dir.join("fake-settings");
+        fs::write(&fake, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        let systemd_run = bin_dir.join("systemd-run");
+        fs::write(
+            &systemd_run,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$XDG_CONFIG_HOME/launch-args\"\nexit 0\n",
+        )
+        .unwrap();
+        fs::set_permissions(&systemd_run, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut command = cargo_bin_cmd!("shuvoice");
+        command
+            .arg("run")
+            .env("SHUVOICE_SETTINGS_BIN", &fake)
+            .env("INVOCATION_ID", "fixture-service")
+            .env("PATH", &bin_dir)
+            .env("WAYLAND_DISPLAY", "fixture-wayland")
+            .timeout(std::time::Duration::from_secs(5));
+        command.assert().code(78);
+        let args = fs::read_to_string(config_home.join("launch-args")).unwrap();
+        assert!(args.contains("--user\n--collect\n--quiet\n"), "{args}");
+        assert!(
+            args.contains("--setenv=WAYLAND_DISPLAY=fixture-wayland\n"),
+            "{args}"
+        );
+        assert!(args.ends_with("--onboarding\n"), "{args}");
+        assert!(!config_home.join("shuvoice/config.toml").exists());
+    });
 }

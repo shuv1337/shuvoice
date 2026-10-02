@@ -1,0 +1,29 @@
+[Desktop Entry]
+Type=Application
+Name=ShuVoice
+GenericName=Speech-to-text overlay
+Comment=Speech engine, typing, read-aloud and service settings
+Exec=shuvoice settings
+Icon=shuvoice
+Terminal=false
+StartupNotify=true
+StartupWMClass=shuvoice-settings
+Categories=Utility;Accessibility;
+Keywords=speech;voice;dictation;transcription;stt;tts;settings;shuvoice;
+Actions=Wizard;Start;Restart;Stop;
+
+[Desktop Action Wizard]
+Name=Setup wizard
+Exec=shuvoice wizard
+
+[Desktop Action Start]
+Name=Start ShuVoice service
+Exec=systemctl --user start shuvoice.service
+
+[Desktop Action Restart]
+Name=Restart ShuVoice service
+Exec=systemctl --user restart shuvoice.service
+
+[Desktop Action Stop]
+Name=Stop ShuVoice service
+Exec=systemctl --user stop shuvoice.service

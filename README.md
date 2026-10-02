@@ -43,7 +43,15 @@ imports Python ML code into its process.
 - TTS: ElevenLabs, OpenAI, local Piper, Kokoro (HTTP), and MeloTTS (worker-proto only).
 - Native GTK4 layer-shell overlays with live status and transcription feedback.
 - Waybar helper (`shuvoice-waybar`) with recording, service, setup, and TTS actions.
-- Guided setup wizard for backend selection, model download, keybinds, and service setup.
+- Native settings window with search, vocabulary/corrections, model downloads,
+  shortcut previews, diagnostics, and guided setup.
+
+Open **ShuVoice** from the desktop launcher or run `shuvoice settings`.
+`shuvoice wizard` opens setup; `shuvoice-settings --onboarding` selects guided
+setup directly. **Apply & Restart** validates the draft, waits until speech is
+idle, reserves the service, then saves and restarts. Shortcut changes apply
+immediately after preview and confirmation. Source-build instructions:
+[`apps/settings/README.md`](apps/settings/README.md).
 - User systemd service with dependency failures exiting **78** (no restart storms).
 
 ## Quick Start

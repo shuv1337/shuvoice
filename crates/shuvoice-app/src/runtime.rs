@@ -34,6 +34,9 @@ const ASR_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 /// Production control surface: enqueue-only + cached snapshot reads.
 pub trait ControlHandlerSurface: Send + Sync {
+    fn on_serialized_command(&self, _command: &str) -> Option<String> {
+        None
+    }
     fn on_start(&self);
     fn on_stop(&self);
     fn on_toggle(&self);
@@ -86,6 +89,37 @@ impl EnqueueControlAdapter {
 }
 
 impl ControlHandlerSurface for EnqueueControlAdapter {
+    fn on_serialized_command(&self, command: &str) -> Option<String> {
+        let release = command
+            .strip_prefix("maintenance_release ")
+            .and_then(|token| token.parse::<u64>().ok());
+        let cmd = match command {
+            "maintenance_reserve" => SessionCommand::MaintenanceReserve,
+            _ if release.is_some() => {
+                SessionCommand::MaintenanceRelease(release.unwrap_or_default())
+            }
+            "start" => SessionCommand::Start,
+            "toggle" => SessionCommand::Toggle,
+            "tts_speak" if self.tts_enabled => SessionCommand::TtsSpeakSelection,
+            "tts_speak_clipboard" if self.tts_enabled => SessionCommand::TtsSpeakClipboard,
+            "tts_resume" if self.tts_enabled => SessionCommand::TtsResume,
+            "tts_toggle_pause" if self.tts_enabled => SessionCommand::TtsTogglePause,
+            "tts_restart" if self.tts_enabled => SessionCommand::TtsRestart,
+            _ => return None,
+        };
+        let (reply, receiver) = std::sync::mpsc::channel();
+        if let Err(err) = self.enqueue(SessionCommand::ControlRequest {
+            command: Box::new(cmd),
+            reply,
+        }) {
+            return Some(format!("ERROR {err}"));
+        }
+        Some(
+            receiver
+                .recv_timeout(Duration::from_millis(400))
+                .unwrap_or_else(|_| "ERROR session acknowledgment timed out".into()),
+        )
+    }
     fn on_start(&self) {
         if let Err(err) = self.enqueue(SessionCommand::Start) {
             error!(%err, "control start enqueue failed");

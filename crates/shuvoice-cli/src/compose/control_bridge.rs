@@ -25,6 +25,7 @@
 #![allow(clippy::double_must_use)]
 #![allow(clippy::result_unit_err)]
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use shuvoice_app::{ControlHandlerSurface, EnqueueControlAdapter};
 use shuvoice_control::{ControlCommand, ControlHandlers};
@@ -33,13 +34,16 @@ use shuvoice_control::{ControlCommand, ControlHandlers};
 #[derive(Clone)]
 pub struct ControlBridge<S = EnqueueControlAdapter> {
     surface: S,
+    ui_ready: Option<Arc<AtomicBool>>,
+    config_revision: Option<String>,
+    invocation_id: Option<String>,
 }
 
 impl ControlBridge<EnqueueControlAdapter> {
     /// Wrap the production enqueue adapter.
     #[must_use]
     pub fn new(adapter: EnqueueControlAdapter) -> Self {
-        Self { surface: adapter }
+        Self::from_surface(adapter)
     }
 
     /// Wrap and erase to `Arc<dyn ControlHandlers>` for [`ControlServer`].
@@ -53,7 +57,36 @@ impl<S> ControlBridge<S> {
     /// Wrap any [`ControlHandlerSurface`] (tests / alternate adapters).
     #[must_use]
     pub fn from_surface(surface: S) -> Self {
-        Self { surface }
+        Self {
+            surface,
+            ui_ready: None,
+            config_revision: None,
+            invocation_id: None,
+        }
+    }
+
+    /// Add desktop readiness to the existing diagnostic JSON contract.
+    pub fn with_ui_readiness(mut self, ready: Arc<AtomicBool>) -> Self {
+        self.ui_ready = Some(ready);
+        self
+    }
+
+    pub fn with_config_revision(mut self, revision: Option<String>) -> Self {
+        self.config_revision = revision.filter(|value| {
+            value == shuvoice_core::settings::ABSENT_REVISION
+                || (value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit()))
+        });
+        self
+    }
+
+    /// systemd invocation of this process (`INVOCATION_ID`), reported so a
+    /// restart can prove readiness came from the new process. IDs are 32
+    /// ASCII hex digits; anything else is dropped so it cannot defeat the
+    /// JSON byte cap.
+    pub fn with_invocation_id(mut self, invocation: Option<String>) -> Self {
+        self.invocation_id = invocation
+            .filter(|value| value.len() <= 64 && value.chars().all(|c| c.is_ascii_hexdigit()));
+        self
     }
 
     /// Borrow the inner surface.
@@ -78,6 +111,14 @@ impl<S> ControlHandlers for ControlBridge<S>
 where
     S: ControlHandlerSurface + Send + Sync + 'static,
 {
+    fn on_serialized_command(&self, command: ControlCommand) -> Option<String> {
+        if let ControlCommand::MaintenanceRelease(token) = command {
+            return self
+                .surface
+                .on_serialized_command(&format!("maintenance_release {token}"));
+        }
+        self.surface.on_serialized_command(command.as_str())
+    }
     fn on_start(&self) {
         self.surface.on_start();
     }
@@ -99,7 +140,20 @@ where
     }
 
     fn on_debug_status(&self) -> String {
-        self.surface.on_debug_status()
+        let status = self.surface.on_debug_status();
+        if let Some(ready) = &self.ui_ready {
+            if let Ok(serde_json::Value::Object(mut fields)) = serde_json::from_str(&status) {
+                fields.insert("ui_ready".into(), ready.load(Ordering::Acquire).into());
+                if let Some(revision) = &self.config_revision {
+                    fields.insert("config_revision".into(), revision.clone().into());
+                }
+                if let Some(invocation) = &self.invocation_id {
+                    fields.insert("invocation_id".into(), invocation.clone().into());
+                }
+                return serde_json::Value::Object(fields).to_string();
+            }
+        }
+        status
     }
 
     fn on_tts_command(&self, command: ControlCommand) -> String {
@@ -128,6 +182,61 @@ mod tests {
         tts_calls: Arc<Mutex<Vec<String>>>,
         tts_enabled: bool,
         queue_full: bool,
+    }
+
+    #[test]
+    fn debug_readiness_tracks_gtk_lifecycle_without_changing_other_fields() {
+        let surface = FakeSurface::default();
+        *surface.debug.lock().unwrap() = "{\"state\":\"idle\",\"audio\":{\"dropped\":2}}".into();
+        let ready = Arc::new(AtomicBool::new(false));
+        let bridge = ControlBridge::from_surface(surface).with_ui_readiness(ready.clone());
+        assert_eq!(
+            bridge.on_debug_status(),
+            "{\"state\":\"idle\",\"audio\":{\"dropped\":2},\"ui_ready\":false}"
+        );
+        ready.store(true, Ordering::Release);
+        assert_eq!(
+            bridge.on_debug_status(),
+            "{\"state\":\"idle\",\"audio\":{\"dropped\":2},\"ui_ready\":true}"
+        );
+    }
+
+    #[test]
+    fn debug_reports_only_a_valid_injected_invocation_id() {
+        let id = "8e7f14be52cb4c4c9ce7dfd733a6843e".to_string();
+        for (given, expected) in [(id.clone(), Some(id)), ("not hex; \"x\"".into(), None)] {
+            let surface = FakeSurface::default();
+            *surface.debug.lock().unwrap() = "{}".into();
+            let bridge = ControlBridge::from_surface(surface)
+                .with_ui_readiness(Arc::new(AtomicBool::new(true)))
+                .with_invocation_id(Some(given));
+            let debug: serde_json::Value = serde_json::from_str(&bridge.on_debug_status()).unwrap();
+            assert_eq!(
+                debug.get("invocation_id").and_then(|v| v.as_str()),
+                expected.as_deref()
+            );
+        }
+    }
+
+    #[test]
+    fn debug_reports_startup_revision_within_wire_byte_budget() {
+        let surface = FakeSurface::default();
+        *surface.debug.lock().unwrap() =
+            serde_json::json!({"padding":"x".repeat(3286)}).to_string();
+        let revision = "a".repeat(64);
+        let bridge = ControlBridge::from_surface(surface)
+            .with_ui_readiness(Arc::new(AtomicBool::new(true)))
+            .with_config_revision(Some(revision.clone()));
+        let debug = bridge.on_debug_status();
+        assert!(
+            debug.len() + 90 <= 3500,
+            "reserve bytes for the invocation ID: {}",
+            debug.len()
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&debug).unwrap()["config_revision"],
+            revision
+        );
     }
 
     impl ControlHandlerSurface for FakeSurface {

@@ -13,6 +13,10 @@ use crate::protocol::{fixed, sanitize_response_line};
 /// **Contract:** implementations must be panic-safe and preferably non-blocking.
 /// The server isolates panics, but a blocked handler still stalls the accept loop.
 pub trait ControlHandlers: Send + Sync + 'static {
+    /// Optional serialized response path; legacy handlers keep their behavior.
+    fn on_serialized_command(&self, _command: ControlCommand) -> Option<String> {
+        None
+    }
     fn on_start(&self);
     fn on_stop(&self);
     fn on_toggle(&self);
@@ -113,6 +117,13 @@ where
 /// Panics in handlers are caught and converted to `ERROR internal error`.
 /// Response bodies are sanitized (no newlines) and size-capped.
 pub fn dispatch(handlers: &Arc<dyn ControlHandlers>, command: ControlCommand) -> String {
+    match run_catch("on_serialized_command", || {
+        handlers.on_serialized_command(command)
+    }) {
+        Ok(Some(response)) => return sanitize_response_line(&response),
+        Err(()) => return fixed::INTERNAL.to_string(),
+        Ok(None) => {}
+    }
     let raw = match command {
         ControlCommand::Start => {
             if run_catch("on_start", || handlers.on_start()).is_err() {

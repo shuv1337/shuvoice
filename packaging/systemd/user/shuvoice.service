@@ -15,6 +15,10 @@ Type=simple
 ExecStart=/usr/bin/shuvoice
 Restart=on-failure
 RestartSec=2
+# Back off retryable failures (e.g. display not reachable yet) up to 60 s
+# instead of retrying every 2 s indefinitely (systemd >= 254).
+RestartSteps=5
+RestartMaxDelaySec=60
 # Do not restart-loop when backend dependencies are missing.
 RestartPreventExitStatus=78
 # Optional tracing defaults for journald.
