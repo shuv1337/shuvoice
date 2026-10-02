@@ -16,15 +16,38 @@ never via `PATH`), then open it with `shuvoice settings`.
 
 ## Develop
 
+`shuvoice settings` opens the full settings window. Run
+`shuvoice-settings --onboarding` for Engine → Microphone → Read-aloud → Shortcut
+→ Finish, or skip directly to settings. `shuvoice wizard` remains the setup
+entry point. The desktop launcher uses `shuvoice settings`.
+
+Search finds fields across sections; less common fields live under Advanced.
+Apply & Restart validates and waits for dictation/read-aloud to finish, reserves
+the service, saves a patch with a backup, then restarts. Cancel is available
+while waiting. A changed file requires Reload; saved-but-not-ready results are
+shown separately. Missing models warn without blocking Apply. Shortcut changes
+use Preview → Confirm and apply immediately, outside the settings draft.
+
+Optional pages feature-detect the bridge; older binaries omit model downloads,
+hint capability/preview and shortcut editing. Setup completion needs the new
+bridge. No defaults or config validation are duplicated in TypeScript.
+
 ```bash
 cargo build -p shuvoice-cli                 # bridge used by the app
 SHUVOICE_BIN=../../target/debug/shuvoice bun run dev
 bun run typecheck && bun run test
 bun src/e2e/smoke.ts                        # real window + bridge, isolated config
+bun src/e2e/features.ts                     # contract fixture: no system writes
 ```
 
 `SHUVOICE_SETTINGS_NO_RESTART=1` makes Apply save without restarting the
 service (used by the smoke test).
+Set `SHUVOICE_SETTINGS_SHOTS=/tmp/shuvcode/frontend-shots` on the smoke test to
+capture each page with `grim`. The contract fixture also captures onboarding
+and the new features; its simulated outcomes are not integration evidence for
+the Rust bridge. Both screenshot paths use `hyprctl` window geometry and
+`HYPRLAND_INSTANCE_SIGNATURE` (falling back to the test desktop signature in
+`/tmp/shuvcode/pr69/live/hypr.sig`).
 
 ## GPUI patch
 
@@ -33,6 +56,15 @@ seats (e.g. `cua-hyprland-plugin`'s `Cua-Agent`), the window never receives
 physical input. `patches/gpui-primary-seat.patch` keeps the first (primary)
 seat; `scripts/build-addon.sh` applies it and builds the addon. Upgrade GPUIX
 and the addon together, and re-check the patch on upgrade.
+
+For a pre-fetched source tree, run `bash scripts/build-addon.sh /path/to/gpuix`.
+It requires tag `@gpuix/react@0.10.0` and Zed commit
+`81c99f816b4a5f69d3c014774068034c24d1d7af`. The Arch recipe fetches both sources
+and applies the same patch; the compiled executable embeds the addon.
+
+If the bridge cannot be found, set `SHUVOICE_BIN=/absolute/path/to/shuvoice`.
+If the window ignores physical input on a multi-seat desktop, rebuild the
+patched addon and executable rather than using the stock npm native binary.
 
 ## Branding
 
