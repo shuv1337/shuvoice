@@ -254,6 +254,116 @@ const BASIC_FIELDS: &[FieldMeta] = &[
     },
 ];
 
+/// Display label and unit for fields generated from `config_section_fields()`.
+const GENERATED_LABELS: &[(&str, &str, &str)] = &[
+    ("recognition_hints", "Preferred terms", ""),
+    ("sample_rate", "Sample rate", "Hz"),
+    ("chunk_ms", "Chunk length", "ms"),
+    ("fallback_sample_rate", "Fallback sample rate", "Hz"),
+    ("audio_queue_max_size", "Audio queue size", "chunks"),
+    ("recording_preroll_ms", "Pre-roll", "ms"),
+    ("silence_rms_threshold", "Silence threshold (RMS)", ""),
+    ("silence_rms_multiplier", "Silence multiplier", "×"),
+    ("min_speech_ms", "Minimum speech", "ms"),
+    ("auto_gain_target_peak", "Auto-gain target peak", ""),
+    ("auto_gain_max", "Auto-gain maximum", "×"),
+    ("auto_gain_settle_chunks", "Auto-gain settle", "chunks"),
+    ("instant_mode", "Instant mode", ""),
+    ("model_name", "NeMo model", ""),
+    ("right_context", "NeMo right context", "frames"),
+    ("device", "NeMo device", ""),
+    ("use_cuda_graph_decoder", "NeMo CUDA graph decoder", ""),
+    ("sherpa_model_name", "Sherpa model", ""),
+    ("sherpa_model_dir", "Sherpa model folder", ""),
+    ("sherpa_decode_mode", "Sherpa decode mode", ""),
+    ("sherpa_enable_parakeet_streaming", "Parakeet streaming", ""),
+    ("sherpa_provider", "Sherpa compute", ""),
+    ("sherpa_num_threads", "Sherpa threads", ""),
+    ("sherpa_chunk_ms", "Sherpa chunk length", "ms"),
+    (
+        "sherpa_offline_max_utterance_sec",
+        "Sherpa max utterance",
+        "s",
+    ),
+    ("moonshine_model_name", "Moonshine model", ""),
+    ("moonshine_model_dir", "Moonshine model folder", ""),
+    ("moonshine_model_precision", "Moonshine precision", ""),
+    ("moonshine_chunk_ms", "Moonshine chunk length", "ms"),
+    ("moonshine_max_window_sec", "Moonshine max window", "s"),
+    ("moonshine_max_tokens", "Moonshine max tokens", ""),
+    ("moonshine_provider", "Moonshine compute", ""),
+    ("moonshine_onnx_threads", "Moonshine threads", ""),
+    ("openai_realtime_model", "OpenAI model", ""),
+    ("openai_realtime_api_key_env", "OpenAI API key variable", ""),
+    ("openai_realtime_language", "OpenAI language", ""),
+    (
+        "openai_realtime_latency_target_sec",
+        "OpenAI latency target",
+        "s",
+    ),
+    (
+        "openai_realtime_turn_detection",
+        "OpenAI turn detection",
+        "",
+    ),
+    ("openai_realtime_vad_eagerness", "OpenAI VAD eagerness", ""),
+    (
+        "openai_realtime_request_timeout_sec",
+        "OpenAI request timeout",
+        "s",
+    ),
+    (
+        "openai_realtime_commit_timeout_sec",
+        "OpenAI commit timeout",
+        "s",
+    ),
+    ("font_family", "Caption font", ""),
+    ("bg_opacity", "Background opacity", ""),
+    ("border_radius", "Corner radius", "px"),
+    ("overlay_debug_mode", "Debug overlay", ""),
+    ("overlay_debug_max_lines", "Debug overlay lines", ""),
+    ("control_socket", "Control socket path", ""),
+    ("tts_model_id", "TTS model", ""),
+    ("tts_api_key_env", "TTS API key variable", ""),
+    ("tts_output_format", "Audio format", ""),
+    ("tts_max_chars", "Max characters", ""),
+    ("tts_request_timeout_sec", "Request timeout", "s"),
+    ("tts_playback_device", "Speaker", ""),
+    ("tts_overlay_auto_hide_sec", "Hide overlay after", "s"),
+    ("tts_local_model_path", "Piper model path", ""),
+    ("tts_local_voice", "Piper voice", ""),
+    ("tts_local_device", "Piper output device", ""),
+    ("tts_melotts_device", "MeloTTS compute", ""),
+    ("tts_melotts_venv_path", "MeloTTS environment", ""),
+    ("output_mode", "Output mode", ""),
+    ("preserve_clipboard", "Restore clipboard after paste", ""),
+    (
+        "typing_clipboard_settle_delay_ms",
+        "Clipboard settle delay",
+        "ms",
+    ),
+    ("typing_retry_attempts", "Typing retries", ""),
+    ("typing_retry_delay_ms", "Retry delay", "ms"),
+    ("typing_subprocess_timeout", "Typing command timeout", "s"),
+    ("auto_capitalize", "Capitalize first letter", ""),
+    ("text_replacements", "Corrections", ""),
+    ("streaming_stall_guard", "Stall guard", ""),
+    ("streaming_stall_chunks", "Stall detection window", "chunks"),
+    ("streaming_stall_rms_ratio", "Stall RMS ratio", ""),
+    ("streaming_stall_flush_chunks", "Stall flush", "chunks"),
+    ("feedback_start_freq", "Start tone", "Hz"),
+    ("feedback_stop_freq", "Stop tone", "Hz"),
+    ("feedback_duration_ms", "Tone length", "ms"),
+    ("feedback_volume", "Tone volume", ""),
+];
+
+fn generated_label(key: &'static str) -> (&'static str, &'static str) {
+    GENERATED_LABELS
+        .iter()
+        .find(|(k, _, _)| *k == key)
+        .map_or((key, ""), |(_, label, unit)| (*label, *unit))
+}
+
 /// Legacy compatibility switch is derived from the injection-mode field.
 pub const EXCLUDED: &[(&str, &str)] = &[(
     "typing.use_clipboard_for_final",
@@ -352,12 +462,14 @@ pub static FIELDS: once_cell::sync::Lazy<Vec<FieldMeta>> = once_cell::sync::Lazy
                 "overlay" => Section::Appearance,
                 _ => Section::Advanced,
             };
+            let (label, unit) = generated_label(key);
             fields.push(FieldMeta {
                 advanced: !matches!(
                     *key,
                     "recognition_hints" | "text_replacements" | "tts_playback_device"
                 ),
-                ..field(id, group, key, kind)
+                unit,
+                ..field(id, group, label, kind)
             });
         }
     }
@@ -977,6 +1089,14 @@ pub fn apply(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn every_field_has_a_human_label() {
+        for meta in FIELDS.iter() {
+            let key = split_id(meta.id).1;
+            assert_ne!(meta.label, key, "{} has no display label", meta.id);
+        }
+    }
     use super::*;
     use crate::config::config_section_fields;
     use serde_json::json;
