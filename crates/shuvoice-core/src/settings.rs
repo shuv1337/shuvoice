@@ -27,10 +27,12 @@ pub const ABSENT_REVISION: &str = "absent";
 #[serde(rename_all = "snake_case")]
 pub enum Section {
     Speech,
+    Vocabulary,
     Typing,
     TextToSpeech,
     Audio,
     Appearance,
+    Advanced,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -59,11 +61,25 @@ pub enum FieldKind {
     Text {
         max_len: usize,
     },
+    OptionalText {
+        max_len: usize,
+    },
+    StringList {
+        item_max_len: usize,
+        max_items: usize,
+    },
+    StringMap {
+        key_max_len: usize,
+        value_max_len: usize,
+        max_entries: usize,
+    },
     Choice {
         choices: &'static [Choice],
     },
     /// `null` (system default), a device name, or a device index.
-    AudioDevice,
+    AudioDevice {
+        direction: &'static str,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -74,6 +90,7 @@ pub struct FieldMeta {
     /// Empty unless the label alone would plausibly cause a mistake.
     pub help: &'static str,
     pub unit: &'static str,
+    pub advanced: bool,
     pub kind: FieldKind,
 }
 
@@ -89,13 +106,14 @@ const fn field(
         label,
         help: "",
         unit: "",
+        advanced: false,
         kind,
     }
 }
 
 /// Fields shown by the settings app (v1). Every non-virtual id is a real
 /// `section.key` from [`crate::config::config_section_fields`].
-pub static FIELDS: &[FieldMeta] = &[
+const BASIC_FIELDS: &[FieldMeta] = &[
     field(
         "asr.asr_backend",
         Section::Speech,
@@ -195,7 +213,7 @@ pub static FIELDS: &[FieldMeta] = &[
         "audio.audio_device",
         Section::Audio,
         "Microphone",
-        FieldKind::AudioDevice,
+        FieldKind::AudioDevice { direction: "input" },
     ),
     FieldMeta {
         unit: "×",
@@ -235,6 +253,164 @@ pub static FIELDS: &[FieldMeta] = &[
         )
     },
 ];
+
+/// Legacy compatibility switch is derived from the injection-mode field.
+pub const EXCLUDED: &[(&str, &str)] = &[(
+    "typing.use_clipboard_for_final",
+    "Legacy alias; use typing.typing_final_injection_mode",
+)];
+
+/// All real config fields are discoverable. More specialized metadata above
+/// takes precedence over the type inferred from the core default.
+pub static FIELDS: once_cell::sync::Lazy<Vec<FieldMeta>> = once_cell::sync::Lazy::new(|| {
+    const DECODE: &[Choice] = &[
+        choice("auto", "Automatic"),
+        choice("streaming", "Streaming"),
+        choice("offline_instant", "Offline instant"),
+    ];
+    const PROVIDER: &[Choice] = &[choice("cpu", "CPU"), choice("cuda", "CUDA")];
+    const MELO: &[Choice] = &[
+        choice("auto", "Automatic"),
+        choice("cpu", "CPU"),
+        choice("cuda", "CUDA"),
+    ];
+    const OUTPUT: &[Choice] = &[
+        choice("final_only", "Final only"),
+        choice("streaming_partial", "Streaming partial"),
+    ];
+    const MODELS: &[Choice] = &[
+        choice("gpt-4o-transcribe", "GPT-4o Transcribe"),
+        choice("gpt-4o-mini-transcribe", "GPT-4o Mini Transcribe"),
+        choice("gpt-4o-transcribe-latest", "GPT-4o Transcribe latest"),
+        choice("whisper-1", "Whisper"),
+    ];
+    const TURN: &[Choice] = &[
+        choice("manual", "Manual"),
+        choice("server_vad", "Server VAD"),
+        choice("semantic_vad", "Semantic VAD"),
+    ];
+    const EAGER: &[Choice] = &[
+        choice("auto", "Automatic"),
+        choice("low", "Low"),
+        choice("medium", "Medium"),
+        choice("high", "High"),
+    ];
+    let defaults = Config::default();
+    let mut fields = BASIC_FIELDS.to_vec();
+    for (section, keys) in crate::config::config_section_fields() {
+        for key in *keys {
+            let id = format!("{section}.{key}");
+            if fields.iter().any(|f| f.id == id)
+                || EXCLUDED.iter().any(|(excluded, _)| *excluded == id)
+            {
+                continue;
+            }
+            // One allocation per field for the process-lifetime schema.
+            let id: &'static str = Box::leak(id.into_boxed_str());
+            let kind = match *key {
+                "sherpa_decode_mode" => FieldKind::Choice { choices: DECODE },
+                "sherpa_provider" | "moonshine_provider" => FieldKind::Choice { choices: PROVIDER },
+                "tts_melotts_device" => FieldKind::Choice { choices: MELO },
+                "output_mode" => FieldKind::Choice { choices: OUTPUT },
+                "openai_realtime_model" => FieldKind::Choice { choices: MODELS },
+                "openai_realtime_turn_detection" => FieldKind::Choice { choices: TURN },
+                "openai_realtime_vad_eagerness" => FieldKind::Choice { choices: EAGER },
+                "text_replacements" => FieldKind::StringMap {
+                    key_max_len: 256,
+                    value_max_len: 1024,
+                    max_entries: 1024,
+                },
+                "recognition_hints" => FieldKind::StringList {
+                    item_max_len: 100,
+                    max_items: 100,
+                },
+                "tts_playback_device" | "tts_local_device" => FieldKind::AudioDevice {
+                    direction: "output",
+                },
+                _ => match defaults.field_to_value(key).unwrap_or(Value::Null) {
+                    Value::Bool(_) => FieldKind::Bool,
+                    Value::Number(n) if n.is_u64() || n.is_i64() => FieldKind::Int {
+                        min: 0,
+                        max: u32::MAX.into(),
+                    },
+                    Value::Number(_) => FieldKind::Float {
+                        min: 0.0,
+                        max: 1e9,
+                        step: 0.01,
+                    },
+                    Value::Null => FieldKind::OptionalText { max_len: 4096 },
+                    _ => FieldKind::Text { max_len: 4096 },
+                },
+            };
+            let group = match *section {
+                "asr" => Section::Speech,
+                "vocabulary" => Section::Vocabulary,
+                "typing" if *key == "text_replacements" => Section::Vocabulary,
+                "typing" => Section::Typing,
+                "tts" => Section::TextToSpeech,
+                "audio" | "feedback" => Section::Audio,
+                "overlay" => Section::Appearance,
+                _ => Section::Advanced,
+            };
+            fields.push(FieldMeta {
+                advanced: !matches!(
+                    *key,
+                    "recognition_hints" | "text_replacements" | "tts_playback_device"
+                ),
+                ..field(id, group, key, kind)
+            });
+        }
+    }
+    fields
+});
+
+pub fn schema_fields() -> Vec<Value> {
+    let defaults = Config::default();
+    FIELDS
+        .iter()
+        .map(|meta| {
+            let mut value = serde_json::to_value(meta).expect("field metadata serializes");
+            value["default"] = read_field(&defaults, meta.id);
+            value
+        })
+        .collect()
+}
+
+/// Conservative allowlist: aliases and unimplemented local/worker adapters
+/// remain unsupported even if their native libraries expose hotword knobs.
+pub fn openai_hint_model_supported(model: &str) -> bool {
+    matches!(
+        model,
+        "gpt-4o-transcribe" | "gpt-4o-mini-transcribe" | "whisper-1"
+    )
+}
+
+pub fn vocabulary_capability(config: &Config) -> Value {
+    let supported = config.asr_backend == crate::types::AsrBackendKind::OpenaiRealtime
+        && openai_hint_model_supported(&config.openai_realtime_model);
+    serde_json::json!({ "supported": supported, "detail": if supported { "Recognition hints are sent as OpenAI transcription prompt context; they are not guaranteed output." } else { "This backend/model/decode mode has no tested recognition-hint adapter. Correction rules still apply after transcription." } })
+}
+
+pub fn draft(
+    path: impl AsRef<Path>,
+    changes: &BTreeMap<String, Value>,
+) -> Result<Config, ApplyError> {
+    let path = path.as_ref();
+    let raw = load_raw(path).map_err(|e| ApplyError::Io {
+        message: e.to_string(),
+    })?;
+    let (migrated, _) = migrate_to_latest(&raw).map_err(|e| ApplyError::Io {
+        message: e.to_string(),
+    })?;
+    let current = profile_current_value(&migrated);
+    let patched = patch_changes(&migrated, &current, changes)
+        .map_err(|errors| ApplyError::Invalid { errors })?;
+    Config::resolve_raw(&patched)
+        .map(|r| r.config)
+        .map_err(|e| ApplyError::Invalid {
+            errors: vec![attribute(e.to_string())],
+        })
+}
 
 pub fn field_meta(id: &str) -> Option<&'static FieldMeta> {
     FIELDS.iter().find(|f| f.id == id)
@@ -283,6 +459,7 @@ pub struct SecretPresence {
     pub env: String,
     pub present: bool,
     pub used_by: &'static str,
+    pub source: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -371,7 +548,7 @@ pub fn snapshot(
 
     let mut values = BTreeMap::new();
     let mut explicit = Vec::new();
-    for meta in FIELDS {
+    for meta in FIELDS.iter() {
         let present_key = if meta.id == SHERPA_PROFILE {
             "asr.sherpa_model_name"
         } else {
@@ -403,18 +580,33 @@ pub fn snapshot(
         );
     }
 
-    let secrets = vec![
+    let mut secrets = vec![
         SecretPresence {
             present: env_present(&config.openai_realtime_api_key_env),
             env: config.openai_realtime_api_key_env.clone(),
             used_by: "asr.asr_backend:openai_realtime",
+            source: env_present(&config.openai_realtime_api_key_env).then_some("env"),
         },
         SecretPresence {
             present: env_present(&config.tts_api_key_env),
             env: config.tts_api_key_env.clone(),
             used_by: "tts.tts_backend",
+            source: env_present(&config.tts_api_key_env).then_some("env"),
         },
     ];
+    for secret in &mut secrets {
+        if secret.present {
+            continue;
+        }
+        for file in ["local.dev", "local.env"] {
+            let local = path.parent().unwrap_or(Path::new(".")).join(file);
+            if secret_in_file(&local, &secret.env) {
+                secret.present = true;
+                secret.source = Some(file);
+                break;
+            }
+        }
+    }
 
     Ok(Snapshot {
         path: path.display().to_string(),
@@ -427,7 +619,75 @@ pub fn snapshot(
     })
 }
 
+fn secret_in_file(path: &Path, name: &str) -> bool {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    text.lines().any(|line| {
+        let line = line
+            .trim()
+            .strip_prefix("export ")
+            .unwrap_or(line.trim())
+            .trim();
+        let Some((key, value)) = line.split_once('=') else {
+            return false;
+        };
+        let value = value.trim();
+        let value = if value.len() >= 2
+            && ((value.starts_with('"') && value.ends_with('"'))
+                || (value.starts_with('\'') && value.ends_with('\'')))
+        {
+            &value[1..value.len() - 1]
+        } else {
+            value
+        };
+        key.trim() == name && !value.is_empty() && !key.trim().starts_with('#')
+    })
+}
+
+pub fn onboarding_defaults(snapshot: &Snapshot) -> BTreeMap<String, Value> {
+    use crate::config::wizard as w;
+    let mut values = snapshot.values.clone();
+    for (id, value) in [
+        ("asr.asr_backend", Value::from(w::ASR_BACKEND)),
+        ("asr.sherpa_model_name", Value::from(w::SHERPA_MODEL_NAME)),
+        ("asr.sherpa_provider", Value::from(w::SHERPA_PROVIDER)),
+        ("asr.instant_mode", Value::from(w::INSTANT_MODE)),
+        ("asr.sherpa_decode_mode", Value::from(w::SHERPA_DECODE_MODE)),
+        ("typing.output_mode", Value::from(w::OUTPUT_MODE)),
+        (
+            "typing.typing_final_injection_mode",
+            Value::from(w::TYPING_FINAL_INJECTION_MODE),
+        ),
+        ("typing.typing_text_case", Value::from(w::TYPING_TEXT_CASE)),
+        ("tts.tts_backend", Value::from(w::TTS_BACKEND)),
+        (
+            "tts.tts_default_voice_id",
+            Value::from(w::TTS_DEFAULT_VOICE_ID),
+        ),
+        (
+            "tts.tts_kokoro_base_url",
+            Value::from(w::TTS_KOKORO_BASE_URL),
+        ),
+        ("tts.tts_playback_speed", Value::from(w::TTS_PLAYBACK_SPEED)),
+    ] {
+        if !snapshot.explicit.iter().any(|explicit| explicit == id) {
+            values.insert(id.into(), value);
+        }
+    }
+    values.insert(
+        SHERPA_PROFILE.into(),
+        Value::from(sherpa_profile_of(
+            values["asr.sherpa_model_name"].as_str().unwrap_or_default(),
+        )),
+    );
+    values
+}
+
 fn check_kind(meta: &FieldMeta, value: &Value) -> Result<(), String> {
+    if value.is_null() {
+        return Ok(());
+    }
     match meta.kind {
         FieldKind::Bool => value
             .as_bool()
@@ -443,8 +703,10 @@ fn check_kind(meta: &FieldMeta, value: &Value) -> Result<(), String> {
             Some(_) => Err(format!("must be between {min} and {max}")),
             None => Err("must be a number".into()),
         },
-        FieldKind::Text { max_len } => match value.as_str() {
-            Some(s) if s.trim().is_empty() => Err("must not be empty".into()),
+        FieldKind::Text { max_len } | FieldKind::OptionalText { max_len } => match value.as_str() {
+            Some(s) if s.trim().is_empty() && meta.id != "asr.openai_realtime_language" => {
+                Err("must not be empty".into())
+            }
             Some(s) if s.chars().count() > max_len => {
                 Err(format!("must be at most {max_len} characters"))
             }
@@ -465,7 +727,48 @@ fn check_kind(meta: &FieldMeta, value: &Value) -> Result<(), String> {
                     .join(", ")
             )),
         },
-        FieldKind::AudioDevice => match value {
+        FieldKind::StringList {
+            item_max_len,
+            max_items,
+        } => match value.as_array() {
+            Some(items)
+                if items.len() <= max_items
+                    && items.iter().all(|v| {
+                        v.as_str().is_some_and(|s| {
+                            !s.trim().is_empty()
+                                && s.chars().count() <= item_max_len
+                                && !s.chars().any(char::is_control)
+                        })
+                    }) =>
+            {
+                Ok(())
+            }
+            _ => Err(format!(
+                "must be a list of at most {max_items} nonempty strings (at most {item_max_len} characters each)"
+            )),
+        },
+        FieldKind::StringMap {
+            key_max_len,
+            value_max_len,
+            max_entries,
+        } => match value.as_object() {
+            Some(items)
+                if items.len() <= max_entries
+                    && items.iter().all(|(k, v)| {
+                        !k.trim().is_empty()
+                            && k.chars().count() <= key_max_len
+                            && !k.chars().any(char::is_control)
+                            && v.as_str().is_some_and(|s| {
+                                s.chars().count() <= value_max_len
+                                    && !s.chars().any(char::is_control)
+                            })
+                    }) =>
+            {
+                Ok(())
+            }
+            _ => Err("must be a bounded map of nonempty keys to string values".into()),
+        },
+        FieldKind::AudioDevice { .. } => match value {
             Value::Null => Ok(()),
             Value::Number(n) if n.as_i64().is_some_and(|i| i >= 0) => Ok(()),
             Value::String(s) if !s.trim().is_empty() && !s.chars().any(char::is_control) => Ok(()),
@@ -487,6 +790,17 @@ fn table<'a>(raw: &'a mut Map<String, Value>, section: &str) -> &'a mut Map<Stri
 fn write_change(raw: &mut Map<String, Value>, id: &str, value: &Value) {
     if id == SHERPA_PROFILE {
         let asr = table(raw, "asr");
+        if value.is_null() {
+            for key in [
+                "sherpa_model_name",
+                "instant_mode",
+                "sherpa_decode_mode",
+                "sherpa_enable_parakeet_streaming",
+            ] {
+                asr.remove(key);
+            }
+            return;
+        }
         let (model, instant, mode) = match value.as_str() {
             Some("instant") => (PARAKEET_TDT_V3_INT8_MODEL_NAME, true, "offline_instant"),
             _ => (DEFAULT_SHERPA_MODEL_NAME, false, "auto"),
@@ -532,6 +846,23 @@ pub fn validate_changes(
     current_values: &BTreeMap<String, Value>,
     changes: &BTreeMap<String, Value>,
 ) -> Result<Map<String, Value>, Vec<FieldError>> {
+    let patched = patch_changes(migrated, current_values, changes)?;
+    Config::resolve_raw(&patched).map_err(|err| vec![attribute(err.to_string())])?;
+    Ok(patched)
+}
+
+fn profile_current_value(raw: &Map<String, Value>) -> BTreeMap<String, Value> {
+    let model = raw_get(raw, "asr.sherpa_model_name")
+        .and_then(Value::as_str)
+        .unwrap_or(DEFAULT_SHERPA_MODEL_NAME);
+    BTreeMap::from([(SHERPA_PROFILE.into(), Value::from(sherpa_profile_of(model)))])
+}
+
+fn patch_changes(
+    migrated: &Map<String, Value>,
+    current_values: &BTreeMap<String, Value>,
+    changes: &BTreeMap<String, Value>,
+) -> Result<Map<String, Value>, Vec<FieldError>> {
     let mut errors = Vec::new();
     for (id, value) in changes {
         let Some(meta) = field_meta(id) else {
@@ -554,14 +885,20 @@ pub fn validate_changes(
     }
 
     let mut patched = migrated.clone();
+    // Preset first, explicit raw keys second: raw draft overrides win,
+    // independently of lexical ordering of the request object.
+    if let Some(value) = changes.get(SHERPA_PROFILE)
+        && value.as_str() != Some("custom")
+    {
+        write_change(&mut patched, SHERPA_PROFILE, value);
+    }
     for (id, value) in changes {
-        if id == SHERPA_PROFILE && value.as_str() == Some("custom") {
+        if id == SHERPA_PROFILE {
             continue;
         }
         write_change(&mut patched, id, value);
     }
     patched.insert("config_version".into(), Value::from(CURRENT_CONFIG_VERSION));
-    Config::resolve_raw(&patched).map_err(|err| vec![attribute(err.to_string())])?;
     Ok(patched)
 }
 
@@ -573,6 +910,31 @@ pub fn apply(
 ) -> Result<Applied, ApplyError> {
     let path = expand_user_path(path);
     let io = |message: String| ApplyError::Io { message };
+    // Cooperating bridge writers serialize the revision check and rename.
+    // Editors ignoring this lock can still race the final filesystem rename.
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| io(e.to_string()))?;
+    }
+    use std::os::unix::fs::OpenOptionsExt;
+    let lock_path = path.with_extension("toml.settings-lock");
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .mode(0o600)
+        .open(lock_path)
+        .map_err(|e| io(e.to_string()))?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match lock.try_lock() {
+            Ok(()) => break,
+            Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(10))
+            }
+            Err(error) => return Err(io(format!("cannot acquire settings writer lock: {error}"))),
+        }
+    }
 
     let current = revision(&path).map_err(io)?;
     if current != expected_revision {
@@ -582,9 +944,7 @@ pub fn apply(
     }
     let raw = load_raw(&path).map_err(|e| io(e.to_string()))?;
     let (migrated, _) = migrate_to_latest(&raw).map_err(|e| io(e.to_string()))?;
-    let current_values = snapshot(&path, |_| false)
-        .map(|s| s.values)
-        .unwrap_or_default();
+    let current_values = profile_current_value(&migrated);
     let patched = validate_changes(&migrated, &current_values, changes)
         .map_err(|errors| ApplyError::Invalid { errors })?;
 
@@ -636,6 +996,176 @@ mod tests {
                 meta.id
             );
         }
+        for (section, key) in known {
+            let id = format!("{section}.{key}");
+            assert_eq!(
+                FIELDS.iter().filter(|f| f.id == id).count()
+                    + EXCLUDED
+                        .iter()
+                        .filter(|(excluded, reason)| *excluded == id && !reason.is_empty())
+                        .count(),
+                1,
+                "{id} must be covered exactly once"
+            );
+        }
+        let fields = schema_fields();
+        assert!(
+            fields
+                .iter()
+                .all(|f| f.get("default").is_some() && f["advanced"].is_boolean())
+        );
+    }
+
+    #[test]
+    fn raw_sherpa_changes_override_the_virtual_preset() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        apply(
+            &path,
+            ABSENT_REVISION,
+            &changes(&[
+                (SHERPA_PROFILE, json!("instant")),
+                ("asr.sherpa_decode_mode", json!("streaming")),
+                ("asr.instant_mode", json!(false)),
+            ]),
+        )
+        .unwrap();
+        let config = Config::load_from_path(path).unwrap();
+        assert!(!config.instant_mode);
+        assert_eq!(config.sherpa_decode_mode.as_str(), "streaming");
+    }
+
+    #[test]
+    fn recognition_hints_validate_roundtrip_and_unsupported_modes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        apply(
+            &path,
+            ABSENT_REVISION,
+            &changes(&[(
+                "vocabulary.recognition_hints",
+                json!([" ShuVoice ", "Hyprland"]),
+            )]),
+        )
+        .unwrap();
+        let config = Config::load_from_path(&path).unwrap();
+        assert_eq!(config.recognition_hints, ["ShuVoice", "Hyprland"]);
+        assert_eq!(vocabulary_capability(&config)["supported"], false);
+        for list in [
+            json!(["a", "A"]),
+            json!([""]),
+            json!(["x\ny"]),
+            json!(["<x>"]),
+            json!(["x".repeat(101)]),
+        ] {
+            assert!(draft(&path, &changes(&[("vocabulary.recognition_hints", list)])).is_err());
+        }
+        let cloud = draft(
+            &path,
+            &changes(&[("asr.asr_backend", json!("openai_realtime"))]),
+        )
+        .unwrap();
+        assert_eq!(vocabulary_capability(&cloud)["supported"], true);
+    }
+
+    #[test]
+    fn secrets_report_sources_and_never_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write(&dir, "config_version = 1\n");
+        std::fs::write(
+            dir.path().join("local.env"),
+            "export OPENAI_API_KEY='secret-value'\n",
+        )
+        .unwrap();
+        let snap = snapshot(&path, |_| false).unwrap();
+        assert_eq!(snap.secrets[0].source, Some("local.env"));
+        assert!(snap.secrets[0].present);
+        assert!(
+            !serde_json::to_string(&snap)
+                .unwrap()
+                .contains("secret-value")
+        );
+        std::fs::write(dir.path().join("local.dev"), "OPENAI_API_KEY=dev-value\n").unwrap();
+        assert_eq!(
+            snapshot(&path, |_| false).unwrap().secrets[0].source,
+            Some("local.dev")
+        );
+        assert_eq!(
+            snapshot(&path, |_| true).unwrap().secrets[0].source,
+            Some("env")
+        );
+    }
+
+    #[test]
+    fn onboarding_does_not_overwrite_explicit_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let fresh = snapshot(dir.path().join("config.toml"), |_| false).unwrap();
+        assert_eq!(onboarding_defaults(&fresh)["asr.sherpa_profile"], "instant");
+        assert_eq!(onboarding_defaults(&fresh)["tts.tts_playback_speed"], 1.25);
+        let path = write(
+            &dir,
+            "config_version=1\n[asr]\nsherpa_model_name='custom'\n[tts]\ntts_playback_speed=1.5\n",
+        );
+        let current = snapshot(&path, |_| false).unwrap();
+        let defaults = onboarding_defaults(&current);
+        assert_eq!(defaults["tts.tts_playback_speed"], 1.5);
+        assert_eq!(defaults["asr.sherpa_model_name"], "custom");
+    }
+
+    #[test]
+    fn parallel_writers_get_one_commit_and_one_conflict() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let handles: Vec<_> = [24, 30]
+            .into_iter()
+            .map(|size| {
+                let (path, barrier) = (path.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    apply(
+                        path,
+                        ABSENT_REVISION,
+                        &changes(&[("overlay.font_size", json!(size))]),
+                    )
+                })
+            })
+            .collect();
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|r| matches!(r, Err(ApplyError::Conflict { .. })))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn pre_save_validation_latency_measurement() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write(&dir, "config_version=1\n[overlay]\nfont_size=22\n");
+        let changes = changes(&[("overlay.font_size", json!(24))]);
+        let before = std::time::Instant::now();
+        for _ in 0..200 {
+            // Previous bridge validation: load + migrate + full snapshot
+            // (including revision hashing and another load/migration).
+            let raw = load_raw(&path).unwrap();
+            let (migrated, _) = migrate_to_latest(&raw).unwrap();
+            let values = snapshot(&path, |_| false).unwrap().values;
+            validate_changes(&migrated, &values, &changes).unwrap();
+        }
+        let before = before.elapsed();
+        let after = std::time::Instant::now();
+        for _ in 0..200 {
+            draft(&path, &changes).unwrap();
+        }
+        eprintln!(
+            "pre-save validation: before={:.1}us/op after={:.1}us/op (200 iterations, fixture config)",
+            before.as_secs_f64() * 1e6 / 200.0,
+            after.elapsed().as_secs_f64() * 1e6 / 200.0
+        );
     }
 
     #[test]

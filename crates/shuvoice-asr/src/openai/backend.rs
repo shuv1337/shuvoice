@@ -15,7 +15,7 @@ use tokio_tungstenite::tungstenite::http::HeaderValue;
 use super::protocol::{
     OPENAI_REALTIME_SAMPLE_RATE, OPENAI_REALTIME_WS_URL_DEFAULT, OpenAiProtocolState,
     append_audio_payload, clear_input_buffer_payload, commit_payload, redact_openai_error,
-    session_update_payload,
+    session_update_payload_with_hints,
 };
 use crate::backend::{AsrBackend, ProgressFn};
 use crate::caps::openai_realtime_caps;
@@ -128,7 +128,6 @@ impl OpenAiRealtimeBackend {
             HeaderValue::from_str(&format!("Bearer {api_key}"))
                 .map_err(|e| AsrError::internal(format!("invalid API key header: {e}")))?,
         );
-        headers.insert("OpenAI-Beta", HeaderValue::from_static("realtime=v1"));
 
         let connect_timeout = Duration::from_secs_f64(
             self.config
@@ -197,9 +196,10 @@ impl OpenAiRealtimeBackend {
             guard.notify.notify_waiters();
         }));
 
-        let update = session_update_payload(
+        let update = session_update_payload_with_hints(
             &self.config.core.openai_realtime_model,
             &self.config.core.openai_realtime_language,
+            &self.config.core.recognition_hints,
         );
         self.send_json(&update).await?;
         Ok(())
@@ -396,6 +396,72 @@ impl AsrBackend for OpenAiRealtimeBackend {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test]
+    async fn real_outbound_session_payload_uses_prompt_and_empty_hints_are_unchanged() {
+        const KEY: &str = "SHUVOICE_TEST_OPENAI_HINT_PAYLOAD_KEY";
+        // SAFETY: unique fixture variable; only this test reads/writes it.
+        unsafe {
+            env::set_var(KEY, "fixture-key");
+        }
+        for model in [
+            "gpt-4o-transcribe",
+            "gpt-4o-mini-transcribe",
+            "whisper-1",
+            "gpt-4o-transcribe-latest",
+        ] {
+            let mut empty_payload = None;
+            for hints in [vec![], vec!["ShuVoice".to_string(), "Hyprland".to_string()]] {
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let address = listener.local_addr().unwrap();
+                let server = tokio::spawn(async move {
+                    let (stream, _) = listener.accept().await.unwrap();
+                    let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+                    let message = socket.next().await.unwrap().unwrap();
+                    let Message::Text(text) = message else {
+                        panic!("expected session JSON frame");
+                    };
+                    serde_json::from_str::<serde_json::Value>(&text).unwrap()
+                });
+                let mut config = AsrConfig::default();
+                config.core.openai_realtime_api_key_env = KEY.into();
+                config.core.openai_realtime_model = model.into();
+                config.core.recognition_hints = hints.clone();
+                config.core.openai_realtime_request_timeout_sec = 2.0;
+                config.connect.openai_realtime_ws_url = Some(format!("ws://{address}"));
+                let mut backend = OpenAiRealtimeBackend::new(config);
+                let mut progress: Box<ProgressFn<'_>> = Box::new(|_, _| {});
+                backend.load(&mut progress).await.unwrap();
+                let payload = tokio::time::timeout(Duration::from_secs(2), server)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                backend.shutdown().await.unwrap();
+                if hints.is_empty() {
+                    assert_eq!(
+                        payload,
+                        serde_json::json!({"type":"session.update","session":{"type":"transcription","audio":{"input":{"format":{"type":"audio/pcm","rate":24000},"transcription":{"model":model,"language":"en"},"turn_detection":null,"noise_reduction":{"type":"near_field"}}}}})
+                    );
+                    empty_payload = Some(payload);
+                } else {
+                    let mut expected = empty_payload.clone().unwrap();
+                    if shuvoice_core::settings::openai_hint_model_supported(model) {
+                        expected["session"]["audio"]["input"]["transcription"]["prompt"] =
+                            serde_json::json!(if model == "whisper-1" {
+                                "ShuVoice, Hyprland"
+                            } else {
+                                "Expected vocabulary: ShuVoice, Hyprland."
+                            });
+                    }
+                    assert_eq!(payload, expected);
+                }
+            }
+        }
+        // SAFETY: cleanup of the same unique fixture variable.
+        unsafe {
+            env::remove_var(KEY);
+        }
+    }
 
     #[tokio::test]
     async fn open_socket_error_event_fails_commit_fast() {

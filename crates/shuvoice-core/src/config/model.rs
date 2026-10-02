@@ -67,6 +67,8 @@ pub struct ResolvedRaw {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub config_version: u32,
+    /// Recognition context, distinct from post-transcription replacements.
+    pub recognition_hints: Vec<String>,
 
     // Audio
     pub sample_rate: u32,
@@ -183,6 +185,10 @@ impl Default for Config {
         let compiled = compile_text_replacements(&text_replacements);
         Self {
             config_version: CURRENT_CONFIG_VERSION,
+            recognition_hints: super::defaults::DEFAULT_RECOGNITION_HINTS
+                .iter()
+                .map(|s| (*s).into())
+                .collect(),
             sample_rate: 16000,
             chunk_ms: 100,
             fallback_sample_rate: 48000,
@@ -324,6 +330,33 @@ impl Config {
 
     /// Validate and normalize in place (Python `__post_init__`).
     pub fn validate(&mut self) -> CoreResult<()> {
+        let mut seen = HashSet::new();
+        let mut total = 0;
+        if self.recognition_hints.len() > 100 {
+            return Err(CoreError::validation(
+                "recognition_hints must contain at most 100 terms",
+            ));
+        }
+        for hint in &mut self.recognition_hints {
+            *hint = hint.trim().to_string();
+            total += hint.chars().count();
+            if hint.is_empty()
+                || hint.chars().count() > 100
+                || hint
+                    .chars()
+                    .any(|c| c.is_control() || matches!(c, '<' | '>'))
+                || !seen.insert(hint.to_lowercase())
+            {
+                return Err(CoreError::validation(
+                    "recognition_hints must be unique nonempty terms of at most 100 characters, without control characters or angle brackets",
+                ));
+            }
+        }
+        if total > 1500 {
+            return Err(CoreError::validation(
+                "recognition_hints total length must be at most 1500 characters",
+            ));
+        }
         if self.config_version < 1 {
             return Err(CoreError::validation("config_version must be >= 1"));
         }
@@ -861,6 +894,7 @@ impl Config {
 
     pub(crate) fn field_to_value(&self, key: &str) -> Option<Value> {
         Some(match key {
+            "recognition_hints" => serde_json::json!(self.recognition_hints),
             "sample_rate" => Value::from(self.sample_rate),
             "chunk_ms" => Value::from(self.chunk_ms),
             "fallback_sample_rate" => Value::from(self.fallback_sample_rate),
@@ -1042,6 +1076,14 @@ fn flatten_raw(raw: &Map<String, Value>) -> Map<String, Value> {
 fn apply_flat_overrides(cfg: &mut Config, flat: &Map<String, Value>) -> CoreResult<()> {
     for (key, value) in flat {
         match key.as_str() {
+            "recognition_hints" => {
+                cfg.recognition_hints = value
+                    .as_array()
+                    .ok_or_else(|| CoreError::validation("recognition_hints must be a list"))?
+                    .iter()
+                    .map(|v| as_string(v, "recognition_hints"))
+                    .collect::<CoreResult<Vec<_>>>()?;
+            }
             "config_version" => cfg.config_version = as_u32(value, "config_version")?,
             "sample_rate" => cfg.sample_rate = as_u32(value, "sample_rate")?,
             "chunk_ms" => cfg.chunk_ms = as_u32(value, "chunk_ms")?,
