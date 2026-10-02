@@ -22,7 +22,9 @@ const C = {
   side: '#1c1c21',
   card: '#24242b',
   cardHover: '#2b2b33',
+  field: '#111114',
   line: '#2f2f38',
+  lineStrong: '#44444f',
   text: '#e6e6ea',
   dim: '#9a9aa6',
   faint: '#6d6d78',
@@ -123,6 +125,12 @@ function Button({ label, onClick, primary, disabled, testId }: {
   )
 }
 
+const CHEVRON = (color: string) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+const CHECK = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="${C.accent}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+
+const CONTROL_WIDTH = 320
+
 function ChoiceControl({ field, value, choices, onValue }: {
   field: FieldMeta
   value: Json
@@ -137,29 +145,86 @@ function ChoiceControl({ field, value, choices, onValue }: {
     >
       <SelectTrigger
         testId={`field-${field.id}`}
-        style={{ padding: 8, borderRadius: 6, backgroundColor: C.card, width: 320 }}
+        style={({ open }) => ({
+          display: 'flex',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          width: CONTROL_WIDTH,
+          paddingLeft: 10,
+          paddingRight: 8,
+          paddingTop: 8,
+          paddingBottom: 8,
+          borderRadius: 6,
+          borderWidth: 1,
+          borderColor: open ? C.accent : C.lineStrong,
+          backgroundColor: C.card,
+          cursor: 'pointer',
+          hover: { backgroundColor: C.cardHover },
+        })}
       >
-        <SelectValue style={{ color: C.text }} placeholder={<Text color={C.dim}>Choose…</Text>} />
+        <div style={{ flexGrow: 1, minWidth: 0 }}>
+          <SelectValue style={{ color: C.text }} placeholder={<Text color={C.dim}>Choose…</Text>} />
+        </div>
+        <svg source={CHEVRON(C.dim)} style={{ width: 16, height: 16, flexShrink: 0 }} />
       </SelectTrigger>
-      <SelectContent style={{ backgroundColor: C.card, borderRadius: 6, padding: 4 }}>
+      <SelectContent
+        sideOffset={4}
+        align="start"
+        style={{
+          width: CONTROL_WIDTH,
+          backgroundColor: C.card,
+          borderRadius: 6,
+          borderWidth: 1,
+          borderColor: C.lineStrong,
+          padding: 4,
+          boxShadow: { offsetX: 0, offsetY: 8, blurRadius: 24, spreadRadius: 0, color: '#00000099' },
+        }}
+      >
         {choices.map((c) => (
           <SelectItem
             key={c.value}
             value={c.value}
             testId={`option-${field.id}-${c.value}`}
             style={({ highlighted }) => ({
-              padding: 6,
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              paddingLeft: 8,
+              paddingRight: 8,
+              paddingTop: 6,
+              paddingBottom: 6,
               borderRadius: 4,
+              cursor: 'pointer',
               backgroundColor: highlighted ? C.line : C.card,
             })}
           >
-            <Text>{c.label}</Text>
+            {({ selected, highlighted }) => (
+              <>
+                <div style={{ flexGrow: 1, minWidth: 0 }}>
+                  <Text color={selected || highlighted ? C.text : C.dim}>{c.label}</Text>
+                </div>
+                <div style={{ width: 16, height: 16, flexShrink: 0 }}>
+                  {selected ? <svg source={CHECK} style={{ width: 16, height: 16 }} /> : null}
+                </div>
+              </>
+            )}
           </SelectItem>
         ))}
       </SelectContent>
     </Select>
   )
 }
+
+const INPUT_STYLE = {
+  padding: 8,
+  borderRadius: 6,
+  borderWidth: 1,
+  borderColor: C.line,
+  backgroundColor: C.field,
+  color: C.text,
+} as const
 
 function Switch({ field, value, onValue }: { field: FieldMeta; value: Json; onValue: (value: boolean) => void }) {
   const on = value === true
@@ -214,7 +279,7 @@ function NumberControl({ field, value, onValue, onInvalid }: {
           if (parsed.ok) onValue(parsed.value)
           else onInvalid(parsed.message)
         }}
-        style={{ padding: 8, borderRadius: 6, backgroundColor: C.card, color: C.text, width: 96 }}
+        style={{ ...INPUT_STYLE, width: 96 }}
       />
       <Button label="+" onClick={() => bump(1)} testId={`inc-${field.id}`} />
       {field.unit ? <Text color={C.dim}>{field.unit}</Text> : null}
@@ -228,7 +293,7 @@ function TextControl({ field, value, onValue }: { field: FieldMeta; value: Json;
       testId={`field-${field.id}`}
       value={typeof value === 'string' ? value : ''}
       onChange={(e) => onValue(e.value ?? '')}
-      style={{ padding: 8, borderRadius: 6, backgroundColor: C.card, color: C.text, width: 420 }}
+      style={{ ...INPUT_STYLE, width: 420 }}
     />
   )
 }
