@@ -2,12 +2,11 @@
 // Uses an isolated config; opens a window on the current desktop.
 //   SHUVOICE_BIN=../../target/debug/shuvoice bun src/e2e/smoke.ts
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launch } from '@gpuix/react/automation'
 
 const root = join(import.meta.dir, '..', '..')
-const config = mkdtempSync(join(tmpdir(), 'shuvoice-settings-e2e-'))
+const config = mkdtempSync('/tmp/shuvcode/shuvoice-settings-e2e-')
 const file = join(config, 'shuvoice', 'config.toml')
 mkdirSync(join(config, 'shuvoice'))
 writeFileSync(file, 'config_version = 1\n[overlay]\nfont_size = 20\nmy_note = "keep"\n')
@@ -25,6 +24,7 @@ const app = await launch({
     SHUVOICE_SETTINGS_AUTOMATION: '1',
     SHUVOICE_SETTINGS_NO_RESTART: '1',
     XDG_CONFIG_HOME: config,
+    XDG_DATA_HOME: join(config, 'data'),
     NAPI_RS_NATIVE_LIBRARY_PATH: join(root, 'vendor', 'gpuix-native.linux-x64-gnu.node'),
     SHUVOICE_BIN: process.env.SHUVOICE_BIN ?? join(root, '..', '..', 'target', 'debug', 'shuvoice'),
   },
@@ -79,6 +79,25 @@ try {
 
   await app.getByTestId('nav-service').click()
   check((await text('page-title')) === 'Service', 'service page opens')
+  await app.getByTestId('nav-shortcuts').click()
+  check((await text('page-title')) === 'Shortcuts', 'old bridge still opens degraded shortcuts page')
+  await app.getByTestId('global-search').fill('font size')
+  await app.getByTestId('result-overlay.font_size').click()
+  check((await text('page-title')) === 'Appearance', 'global search jumps across sections')
+  if (process.env.SHUVOICE_SETTINGS_SHOTS) {
+    const dir = process.env.SHUVOICE_SETTINGS_SHOTS
+    mkdirSync(dir, { recursive: true })
+    const sig = process.env.HYPRLAND_INSTANCE_SIGNATURE ?? readFileSync('/tmp/shuvcode/pr69/live/hypr.sig', 'utf8').trim()
+    for (const page of ['speech', 'vocabulary', 'typing', 'text_to_speech', 'audio', 'appearance', 'advanced', 'shortcuts', 'service']) {
+      await app.getByTestId(`nav-${page}`).click()
+      await Bun.sleep(200)
+      const clients = JSON.parse(await new Response(Bun.spawn(['hyprctl', 'clients', '-j'], { env: { ...process.env, HYPRLAND_INSTANCE_SIGNATURE: sig }, stdout: 'pipe' }).stdout).text())
+      const win = clients.find((w: { class: string }) => w.class === 'shuvoice-settings')
+      if (!win) throw new Error('settings window geometry missing')
+      const shot = Bun.spawn(['grim', '-g', `${win.at[0]},${win.at[1]} ${win.size[0]}x${win.size[1]}`, join(dir, `${page}.png`)])
+      check(await shot.exited === 0, `screenshot ${page}`)
+    }
+  }
   log('PASS')
 } catch (error) {
   log(`FAIL ${error instanceof Error ? error.message : String(error)}`)
