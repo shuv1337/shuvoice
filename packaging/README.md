@@ -26,6 +26,8 @@ Installed artifacts:
 | `/usr/bin/shuvoice` | Desktop application / CLI |
 | `/usr/bin/shuvoice-waybar` | Waybar helper |
 | `/usr/lib/systemd/user/shuvoice.service` | User unit (`ExecStart=/usr/bin/shuvoice`, `RestartPreventExitStatus=78`, `RUST_LOG=info`) |
+| `/usr/share/applications/shuvoice.desktop` | Launcher entry: `shuvoice settings` (opens the GTK wizard while `shuvoice-settings` is not packaged); actions for the wizard and service start/restart/stop |
+| `/usr/share/icons/hicolor/*/apps/shuvoice.png` | App icon, 16–512 px (mic mark from `docs/assets/branding/shuvoice-variant-dark-badge.png`, wordmark removed) |
 | `/usr/lib/shuvoice/workers/` | Optional worker packages (`shuvoice_worker_proto`, `nemo_asr`, `moonshine_asr`, `melotts`) — `.py` source only |
 | `/usr/share/doc/shuvoice-git/` | README, example config, branding/screenshot assets |
 | `/usr/share/licenses/shuvoice-git/LICENSE` | MIT license |

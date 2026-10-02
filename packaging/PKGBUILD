@@ -81,6 +81,14 @@ package() {
     "$pkgdir/usr/lib/systemd/user/shuvoice.service"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 
+  # Launcher entry (`shuvoice settings`, falls back to the wizard) and icons.
+  install -Dm644 packaging/desktop/shuvoice.desktop \
+    "$pkgdir/usr/share/applications/shuvoice.desktop"
+  local icon
+  for icon in packaging/icons/hicolor/*/apps/shuvoice.png; do
+    install -Dm644 "$icon" "$pkgdir/usr/share/${icon#packaging/}"
+  done
+
   install -d "$pkgdir/usr/share/doc/$pkgname/docs/assets/branding"
   install -d "$pkgdir/usr/share/doc/$pkgname/docs/assets/screenshots"
   if compgen -G "docs/assets/branding/*.png" > /dev/null; then
