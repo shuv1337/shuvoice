@@ -33,3 +33,10 @@ seats (e.g. `cua-hyprland-plugin`'s `Cua-Agent`), the window never receives
 physical input. `patches/gpui-primary-seat.patch` keeps the first (primary)
 seat; `scripts/build-addon.sh` applies it and builds the addon. Upgrade GPUIX
 and the addon together, and re-check the patch on upgrade.
+
+## Branding
+
+`assets/` holds images derived from `docs/assets/branding/`: `splash.png` is the
+dark lockup cropped with its edges faded to transparent, and `logo-lockup.png`
+is the transparent lockup cropped to its content. Both are embedded in the
+compiled binary (`src/branding.ts`).

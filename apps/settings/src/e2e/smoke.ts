@@ -41,7 +41,19 @@ const until = async (id: string, want: string, ms = 5000) => {
   throw new Error(`${id}: wanted "${want}", got "${got}"`)
 }
 
+const gone = async (id: string, ms = 5000) => {
+  const end = performance.now() + ms
+  while (performance.now() < end) {
+    if (!(await app.getByTestId(id).element().then(() => true, () => false))) return true
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  return false
+}
+
 try {
+  await app.getByTestId('splash').waitFor()
+  check(await gone('splash'), 'splash shows the logo, then clears once settings load')
+  await app.getByTestId('sidebar-logo').waitFor()
   await app.getByTestId('apply').waitFor()
   await app.getByTestId('field-asr.asr_backend').waitFor()
   check((await text('page-title')) === 'Speech', 'opens on Speech with the engine field')

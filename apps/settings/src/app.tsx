@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { AnimatePresence, motion } from '@gpuix/react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@gpuix/react/select'
 import { type Bridge, BridgeError, type BridgeEvent } from './bridge.ts'
+import type { Brand } from './branding.ts'
 import { diff, errorsByField, formatNumber, parseNumber, step, visible, type Values } from './draft.ts'
 import {
   SECTION_LABELS,
@@ -411,7 +413,41 @@ function serviceSummary(status: ServiceStatus | null): { text: string; color: st
   return { text: `Service ${status.active_state}`, color: C.dim }
 }
 
-export function App({ bridge }: { bridge: Bridge }) {
+/** Matches the edges of the splash art so it blends into the window. */
+const SPLASH_BG = '#050208'
+/** Keep the splash up at least this long so it reads as intentional, not a flash. */
+const SPLASH_MIN_MS = 1000
+
+function Splash({ src }: { src: string }) {
+  return (
+    <motion.div
+      initial={{ opacity: 1 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.3, ease: 'easeOut' }}
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        backgroundColor: SPLASH_BG,
+      }}
+    >
+      <div testId="splash" style={{ width: '80%', height: '50%', maxWidth: 760, maxHeight: 362 }}>
+        <img src={src} alt="ShuVoice" objectFit="contain" style={{ width: '100%', height: '100%' }} />
+      </div>
+      <Text color={C.dim}>Loading settings…</Text>
+    </motion.div>
+  )
+}
+
+export function App({ bridge, brand }: { bridge: Bridge; brand: Brand }) {
   const [schema, setSchema] = useState<Schema | null>(null)
   const [snap, setSnap] = useState<Snapshot | null>(null)
   const [draft, setDraft] = useState<Values>({})
@@ -422,6 +458,11 @@ export function App({ bridge }: { bridge: Bridge }) {
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' })
   // State updates land after the event; a ref blocks a second click in the same tick.
   const applying = useRef(false)
+  const [splashHeld, setSplashHeld] = useState(true)
+  useEffect(() => {
+    const timer = setTimeout(() => setSplashHeld(false), SPLASH_MIN_MS)
+    return () => clearTimeout(timer)
+  }, [])
 
   const load = useCallback(async () => {
     const [nextSchema, nextSnap] = await Promise.all([
@@ -546,13 +587,13 @@ export function App({ bridge }: { bridge: Bridge }) {
       : { text: `${secret.env} is not set — add it to ~/.config/shuvoice/local.dev`, bad: true }
   }
 
+  const showSplash = splashHeld || phase.kind === 'loading'
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'row', width: '100%', height: '100%', backgroundColor: C.bg }}>
+    <div style={{ position: 'relative', display: 'flex', flexDirection: 'row', width: '100%', height: '100%', backgroundColor: C.bg }}>
       <div style={{ width: 200, flexShrink: 0, backgroundColor: C.side, padding: 12, gap: 4, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: 8 }}>
-          <Text bold size={15}>
-            ShuVoice
-          </Text>
+        <div testId="sidebar-logo" style={{ paddingLeft: 4, paddingRight: 4, paddingTop: 4, paddingBottom: 12 }}>
+          <img src={brand.lockup} alt="ShuVoice" objectFit="contain" style={{ width: 168, height: 73 }} />
         </div>
         {pages.map((p) => {
           const label = p === 'service' ? 'Service' : SECTION_LABELS[p]
@@ -628,6 +669,7 @@ export function App({ bridge }: { bridge: Bridge }) {
           />
         </div>
       </div>
+      <AnimatePresence>{showSplash ? <Splash key="splash" src={brand.splash} /> : null}</AnimatePresence>
     </div>
   )
 }
