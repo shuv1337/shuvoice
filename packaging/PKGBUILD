@@ -20,6 +20,7 @@ depends=(
   'gtk4'
   'gtk4-layer-shell'
   'alsa-lib'
+  'libxkbcommon'
   'wtype'
   'wl-clipboard'
   'pipewire'
@@ -38,6 +39,7 @@ makedepends=(
   'git'
   'cargo'
   'rust'
+  'bun'
   'pkgconf'
   'clang'
   'gtk4'
@@ -45,8 +47,10 @@ makedepends=(
   'alsa-lib'
   'pipewire'
 )
-source=('git+https://github.com/shuv1337/shuvoice.git')
-sha256sums=('SKIP')
+source=('git+https://github.com/shuv1337/shuvoice.git'
+        'gpuix::git+https://github.com/remorses/gpuix.git#tag=@gpuix/react@0.10.0'
+        'zed::git+https://github.com/remorses/zed.git#commit=81c99f816b4a5f69d3c014774068034c24d1d7af')
+sha256sums=('SKIP' 'SKIP' 'SKIP')
 options=('!lto') # workspace release profile already sets LTO
 
 pkgver() {
@@ -59,6 +63,9 @@ prepare() {
   export CARGO_TERM_COLOR=always
   # Populate the cargo cache from the locked workspace (network allowed in AUR builds).
   cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
+  git -C "$srcdir/gpuix" config submodule.zed.url "$srcdir/zed"
+  git -C "$srcdir/gpuix" -c protocol.file.allow=always submodule update --init zed
+  git -C "$srcdir/gpuix/zed" apply "$srcdir/shuvoice/apps/settings/patches/gpui-primary-seat.patch"
 }
 
 build() {
@@ -67,6 +74,10 @@ build() {
   # Full packaged desktop feature set (audio + static Sherpa + OpenAI ASR + GTK UI + TTS).
   cargo build --release --locked -p shuvoice-cli --features desktop \
     --bin shuvoice --bin shuvoice-waybar
+  cd apps/settings
+  bun install --frozen-lockfile
+  bash scripts/build-addon.sh "$srcdir/gpuix"
+  bun run build
 }
 
 package() {
@@ -74,6 +85,7 @@ package() {
 
   install -Dm755 target/release/shuvoice "$pkgdir/usr/bin/shuvoice"
   install -Dm755 target/release/shuvoice-waybar "$pkgdir/usr/bin/shuvoice-waybar"
+  install -Dm755 apps/settings/dist/shuvoice-settings "$pkgdir/usr/bin/shuvoice-settings"
 
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   install -Dm644 examples/config.toml "$pkgdir/usr/share/doc/$pkgname/config.toml.example"
