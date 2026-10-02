@@ -551,42 +551,38 @@ pub fn resolve_shuvoice_command() -> String {
 
 /// Candidate Hyprland config files (first existing is preferred write target).
 pub fn hyprland_config_candidates() -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    // XDG wins over HOME; Lua must be detected before a stale .conf file.
-    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
-        let hypr = PathBuf::from(xdg).join("hypr");
-        out.extend([
-            hypr.join("hyprland.lua"),
-            hypr.join("bindings.lua"),
-            hypr.join("bindings.conf"),
-            hypr.join("hyprland.conf"),
-            hypr.join("keybinds.conf"),
-        ]);
-    }
-    if let Some(home) = std::env::var_os("HOME") {
-        let hypr = PathBuf::from(home).join(".config/hypr");
-        out.push(hypr.join("hyprland.lua"));
-        out.push(hypr.join("bindings.lua"));
-        out.push(hypr.join("bindings.conf"));
-        out.push(hypr.join("hyprland.conf"));
-        out.push(hypr.join("keybinds.conf"));
-    }
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        let hypr = PathBuf::from(xdg).join("hypr");
-        out.push(hypr.join("bindings.conf"));
-        out.push(hypr.join("hyprland.conf"));
-    }
-    let mut seen = Vec::new();
-    let mut unique = Vec::new();
-    for p in out {
-        let key = p.to_string_lossy().to_string();
-        if seen.contains(&key) {
-            continue;
-        }
-        seen.push(key);
-        unique.push(p);
-    }
-    unique
+    hyprland_config_candidates_from(
+        std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+        std::env::var_os("HOME").as_deref(),
+    )
+}
+
+/// Candidate Hyprland config files under the XDG config dir. A non-empty
+/// `XDG_CONFIG_HOME` replaces `~/.config` (XDG spec), so an isolated config
+/// never falls through to the user's real Hyprland files. Lua is listed
+/// before a stale `.conf`.
+pub fn hyprland_config_candidates_from(
+    xdg_config_home: Option<&std::ffi::OsStr>,
+    home: Option<&std::ffi::OsStr>,
+) -> Vec<PathBuf> {
+    let base = match xdg_config_home.filter(|v| !v.is_empty()) {
+        Some(xdg) => PathBuf::from(xdg),
+        None => match home {
+            Some(home) => PathBuf::from(home).join(".config"),
+            None => return Vec::new(),
+        },
+    };
+    let hypr = base.join("hypr");
+    [
+        "hyprland.lua",
+        "bindings.lua",
+        "bindings.conf",
+        "hyprland.conf",
+        "keybinds.conf",
+    ]
+    .iter()
+    .map(|name| hypr.join(name))
+    .collect()
 }
 
 fn shortcut_files(candidates: &[PathBuf]) -> Result<Vec<(PathBuf, String)>, String> {
@@ -1243,6 +1239,28 @@ fn _touch_control_exec() {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn hyprland_candidates_follow_xdg_and_never_mix_in_home() {
+        use std::ffi::OsStr;
+        let isolated = hyprland_config_candidates_from(
+            Some(OsStr::new("/tmp/x")),
+            Some(OsStr::new("/home/u")),
+        );
+        assert_eq!(isolated[0], PathBuf::from("/tmp/x/hypr/hyprland.lua"));
+        assert!(
+            isolated.iter().all(|p| p.starts_with("/tmp/x")),
+            "{isolated:?}"
+        );
+
+        let home =
+            hyprland_config_candidates_from(Some(OsStr::new("")), Some(OsStr::new("/home/u")));
+        assert!(
+            home.iter().all(|p| p.starts_with("/home/u/.config/hypr")),
+            "{home:?}"
+        );
+        assert!(hyprland_config_candidates_from(None, None).is_empty());
+    }
     use super::*;
 
     #[test]
