@@ -33,7 +33,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use shuvoice_control::{ControlCommand, send_control_command};
 use shuvoice_core::Config;
-use shuvoice_core::settings::{self, ApplyError, FIELDS, Section};
+use shuvoice_core::settings::{self, ApplyError, Section};
 
 use crate::error::{EXIT_SUCCESS, ExitStatus};
 
@@ -42,13 +42,37 @@ pub const PROTOCOL_VERSION: u64 = 1;
 pub const MAX_REQUEST_BYTES: usize = 256 * 1024;
 const SERVICE: &str = "shuvoice.service";
 
+fn supported_features() -> Vec<&'static str> {
+    let features = vec![
+        "capabilities",
+        "corrections_preview",
+        "onboarding_defaults",
+        "shortcut_get",
+        "shortcut_set",
+        "models",
+        "model_download",
+    ];
+    #[cfg(feature = "audio")]
+    {
+        let mut features = features;
+        features.push("output_devices");
+        features
+    }
+    #[cfg(not(feature = "audio"))]
+    {
+        features
+    }
+}
+
 /// Section order for the sidebar.
-const SECTIONS: [Section; 5] = [
+const SECTIONS: [Section; 7] = [
     Section::Speech,
+    Section::Vocabulary,
     Section::Typing,
     Section::TextToSpeech,
     Section::Audio,
     Section::Appearance,
+    Section::Advanced,
 ];
 
 #[derive(Debug, Deserialize)]
@@ -65,6 +89,8 @@ struct Request {
 #[serde(deny_unknown_fields)]
 struct ChangeParams {
     #[serde(default)]
+    onboarding: bool,
+    #[serde(default)]
     revision: Option<String>,
     #[serde(default)]
     changes: BTreeMap<String, Value>,
@@ -72,24 +98,78 @@ struct ChangeParams {
 
 /// Side-effect seams so the protocol is testable without the live service.
 pub struct Context {
+    /// Only validated inventories can authorize download destinations.
+    pub model_catalog: Mutex<BTreeMap<String, Config>>,
     pub config_path: PathBuf,
     pub env_present: Box<dyn Fn(&str) -> bool + Send + Sync>,
     pub status: Box<dyn Fn() -> Value + Send + Sync>,
     pub devices: Box<dyn Fn() -> Result<Value, String> + Send + Sync>,
     /// Start/restart the service and wait for readiness; returns the outcome.
     pub restart: Box<dyn Fn() -> Value + Send + Sync>,
+    pub reserve: Box<dyn Fn() -> Result<u64, String> + Send + Sync>,
+    pub release: Box<dyn Fn(u64) + Send + Sync>,
+    pub marker: Box<dyn Fn() -> Result<(), String> + Send + Sync>,
     pub idle_poll: Duration,
     pub idle_timeout: Duration,
 }
 
 impl Context {
     pub fn live() -> Self {
+        let leases = Arc::new(Mutex::new(BTreeMap::<u64, Option<String>>::new()));
+        let release_leases = leases.clone();
         Self {
+            model_catalog: Mutex::new(BTreeMap::new()),
             config_path: Config::config_path(),
             env_present: Box::new(|name| std::env::var_os(name).is_some_and(|v| !v.is_empty())),
             status: Box::new(live_status),
             devices: Box::new(|| {
-                crate::commands::audio::input_devices().map(|devices| json!({ "devices": devices }))
+                let devices = crate::commands::audio::input_devices()?;
+                let outputs = crate::commands::audio::output_devices()?;
+                Ok(json!({ "devices": devices, "outputs": outputs }))
+            }),
+            reserve: Box::new(move || {
+                let socket = saved_control_socket();
+                let response = send_control_command(
+                    ControlCommand::MaintenanceReserve,
+                    socket.as_deref(),
+                    Some(Duration::from_millis(600)),
+                )
+                .map_err(|e| e.to_string())?;
+                if response.starts_with("OK reserved") {
+                    let token = response
+                        .split_whitespace()
+                        .find_map(|part| {
+                            part.strip_prefix("token=")
+                                .and_then(|token| token.parse::<u64>().ok())
+                        })
+                        .filter(|token| *token > 0)
+                        .ok_or("service returned an invalid maintenance token")?;
+                    leases
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .insert(token, socket);
+                    Ok(token)
+                } else {
+                    Err(response)
+                }
+            }),
+            release: Box::new(move |token| {
+                if let Some(socket) = release_leases
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .remove(&token)
+                {
+                    let _ = send_control_command(
+                        ControlCommand::MaintenanceRelease(token),
+                        socket.as_deref(),
+                        Some(Duration::from_millis(600)),
+                    );
+                }
+            }),
+            marker: Box::new(|| {
+                shuvoice_ui::wizard_controller::write_wizard_marker()
+                    .map(drop)
+                    .map_err(|e| e.to_string())
             }),
             restart: Box::new(|| {
                 // Test/dev knob: save without touching the user service.
@@ -104,6 +184,24 @@ impl Context {
             idle_timeout: Duration::from_secs(120),
         }
     }
+}
+
+fn saved_control_socket() -> Option<String> {
+    settings::draft(Config::config_path(), &BTreeMap::new())
+        .ok()
+        .and_then(|config| config.control_socket)
+}
+
+fn context_snapshot(ctx: &Context) -> Result<settings::Snapshot, String> {
+    let mut snapshot = settings::snapshot(&ctx.config_path, &ctx.env_present)?;
+    for secret in &mut snapshot.secrets {
+        if secret.source == Some("env")
+            && let Some(source) = shuvoice_io::env_loader::loaded_env_source(&secret.env)
+        {
+            secret.source = Some(source);
+        }
+    }
+    Ok(snapshot)
 }
 
 /// Activities that block a restart: recording/processing dictation, or
@@ -127,23 +225,34 @@ fn busy_activities(status: &Value) -> Vec<String> {
 }
 
 fn live_status() -> Value {
-    let socket = crate::config::load_config()
-        .ok()
-        .and_then(|config| config.control_socket);
-    let probe = |command| {
-        send_control_command(command, socket.as_deref(), Some(Duration::from_millis(500)))
-            .ok()
-            .and_then(|line| line.strip_prefix("OK ").map(str::to_string))
+    let socket = saved_control_socket();
+    let debug = send_control_command(
+        ControlCommand::DebugStatus,
+        socket.as_deref(),
+        Some(Duration::from_millis(500)),
+    )
+    .ok()
+    .and_then(|line| {
+        line.strip_prefix("OK ")
+            .and_then(|body| serde_json::from_str::<Value>(body).ok())
+    })
+    .unwrap_or(Value::Null);
+    let app = &debug["app"];
+    let stt = if app["recording"] == true || app["start_pending"] == true {
+        "recording"
+    } else if app["processing"] == true || app["finalizing"] == true {
+        "processing"
+    } else if app.is_object() {
+        "idle"
+    } else {
+        "unknown"
     };
-    let ui_ready = probe(ControlCommand::DebugStatus)
-        .and_then(|body| serde_json::from_str::<Value>(&body).ok())
-        .and_then(|debug| debug.get("ui_ready").and_then(Value::as_bool));
     json!({
         "service": SERVICE,
         "active_state": shuvoice_io::waybar::service_active_state(SERVICE, None),
-        "ui_ready": ui_ready,
-        "stt": probe(ControlCommand::Status),
-        "tts": probe(ControlCommand::TtsStatus),
+        "ui_ready": debug["ui_ready"],
+        "stt": stt,
+        "tts": app["tts_player_state"],
     })
 }
 
@@ -202,10 +311,102 @@ pub fn handle(line: &str, ctx: &Context) -> Value {
                 "protocol": PROTOCOL_VERSION,
                 "version": env!("CARGO_PKG_VERSION"),
                 "config_path": ctx.config_path.display().to_string(),
+                "features": supported_features(),
             }),
         ),
-        "schema" => ok(id, json!({ "sections": SECTIONS, "fields": FIELDS })),
-        "snapshot" => match settings::snapshot(&ctx.config_path, &ctx.env_present) {
+        "schema" => ok(
+            id,
+            json!({ "sections": SECTIONS, "fields": settings::schema_fields(), "excluded": settings::EXCLUDED.iter().map(|(id, reason)| json!({"id":id,"reason":reason})).collect::<Vec<_>>() }),
+        ),
+        "onboarding_defaults" => match context_snapshot(ctx) {
+            Ok(snapshot) => ok(
+                id,
+                json!({"values": settings::onboarding_defaults(&snapshot)}),
+            ),
+            Err(message) => err(Some(id), "io", message, Value::Null),
+        },
+        "capabilities" | "models" => {
+            let p: ChangeParams = match params(request.params) {
+                Ok(p) => p,
+                Err(message) => return err(Some(id), "protocol", message, Value::Null),
+            };
+            match settings::draft(&ctx.config_path, &p.changes) {
+                Ok(config) if request.op == "capabilities" => ok(
+                    id,
+                    json!({"vocabulary_hints": settings::vocabulary_capability(&config)}),
+                ),
+                Ok(config) => {
+                    let inventory = model_inventory(&config);
+                    if let Some(required) = inventory["required"].as_array() {
+                        let mut catalog =
+                            ctx.model_catalog.lock().unwrap_or_else(|p| p.into_inner());
+                        catalog.clear();
+                        for item in required {
+                            if let Some(id) = item["id"].as_str() {
+                                catalog.insert(id.into(), config.clone());
+                            }
+                        }
+                    }
+                    ok(id, inventory)
+                }
+                Err(error) => apply_error(id, error),
+            }
+        }
+        "corrections_preview" => {
+            #[derive(Default, Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Preview {
+                text: String,
+                #[serde(default)]
+                changes: BTreeMap<String, Value>,
+            }
+            let p: Preview = match params(request.params) {
+                Ok(p) => p,
+                Err(message) => return err(Some(id), "protocol", message, Value::Null),
+            };
+            match settings::draft(&ctx.config_path, &p.changes) {
+                Ok(config) => {
+                    let options = shuvoice_core::postprocess::RenderOptions {
+                        text_case: config.typing_text_case,
+                        auto_capitalize: config.auto_capitalize,
+                        replacements: config.compiled_text_replacements,
+                    };
+                    ok(
+                        id,
+                        json!({"output": shuvoice_core::postprocess::render_transcript_text(&p.text, &options), "builtins": *shuvoice_core::config::DEFAULT_TEXT_REPLACEMENTS}),
+                    )
+                }
+                Err(error) => apply_error(id, error),
+            }
+        }
+        "shortcut_get" => ok(
+            id,
+            shuvoice_ui::wizard_controller::settings_shortcut_get(
+                &shuvoice_ui::wizard_controller::hyprland_config_candidates(),
+            ),
+        ),
+        "shortcut_set" => {
+            #[derive(Default, Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Shortcut {
+                id: String,
+                dry_run: bool,
+            }
+            let p: Shortcut = match params(request.params) {
+                Ok(p) => p,
+                Err(message) => return err(Some(id), "protocol", message, Value::Null),
+            };
+            ok(
+                id,
+                shuvoice_ui::wizard_controller::settings_shortcut_set(
+                    &shuvoice_ui::wizard_controller::hyprland_config_candidates(),
+                    &p.id,
+                    p.dry_run,
+                    &shuvoice_ui::wizard_controller::resolve_shuvoice_command(),
+                ),
+            )
+        }
+        "snapshot" => match context_snapshot(ctx) {
             Ok(snapshot) => ok(id, json!(snapshot)),
             Err(message) => err(Some(id), "io", message, Value::Null),
         },
@@ -275,27 +476,152 @@ fn validate(
     ctx: &Context,
     changes: &BTreeMap<String, Value>,
 ) -> Result<Vec<settings::FieldError>, String> {
-    let raw = shuvoice_core::config::load_raw(&ctx.config_path).map_err(|e| e.to_string())?;
-    let (migrated, _) =
-        shuvoice_core::config::migrate_to_latest(&raw).map_err(|e| e.to_string())?;
-    let current = settings::snapshot(&ctx.config_path, |_| false)?.values;
-    Ok(
-        match settings::validate_changes(&migrated, &current, changes) {
-            Ok(_) => Vec::new(),
-            Err(errors) => errors,
-        },
-    )
+    match settings::draft(&ctx.config_path, changes) {
+        Ok(_) => Ok(Vec::new()),
+        Err(ApplyError::Invalid { errors }) => Ok(errors),
+        Err(error) => Err(format!("{error:?}")),
+    }
+}
+
+fn apply_error(id: u64, error: ApplyError) -> Value {
+    match error {
+        ApplyError::Conflict { current_revision } => err(
+            Some(id),
+            "conflict",
+            "the config file changed since it was loaded",
+            json!({"current_revision":current_revision}),
+        ),
+        ApplyError::Invalid { errors } => err(
+            Some(id),
+            "invalid",
+            "some settings are invalid",
+            json!({"errors":errors}),
+        ),
+        ApplyError::Io { message } => err(Some(id), "io", message, Value::Null),
+    }
+}
+
+struct Reservation<'a>(&'a Context, u64, Instant);
+impl Drop for Reservation<'_> {
+    fn drop(&mut self) {
+        (self.0.release)(self.1);
+    }
+}
+
+fn model_inventory(config: &Config) -> Value {
+    use shuvoice_core::{AsrBackendKind, TtsBackendKind};
+    let mut required = Vec::new();
+    match config.asr_backend {
+        AsrBackendKind::Sherpa => required.push(json!({"id":format!("sherpa:{}",config.sherpa_model_name),"label":config.sherpa_model_name,"installed":crate::setup::sherpa_model::is_complete_sherpa_dir(&crate::setup::sherpa_model::sherpa_model_dir(config)),"size_hint":null})),
+        AsrBackendKind::Nemo | AsrBackendKind::Moonshine => required.push(json!({"id":format!("worker:{}",config.asr_backend.as_str()),"label":"Worker-managed model (downloaded on first worker load)","installed":false,"size_hint":null})),
+        AsrBackendKind::OpenaiRealtime => {},
+    }
+    if config.tts_enabled && config.tts_backend == TtsBackendKind::Local {
+        let dir = config
+            .tts_local_model_path
+            .as_ref()
+            .map(shuvoice_core::expand_user_path)
+            .unwrap_or_else(crate::setup::piper::managed_piper_model_dir);
+        let voice = config
+            .tts_local_voice
+            .as_deref()
+            .unwrap_or(crate::setup::piper::recommended_piper_voice().stem);
+        required.push(json!({"id":format!("piper:{voice}"),"label":format!("Piper {voice}"),"installed":crate::setup::piper::validate_piper_voice_artifacts(&dir,Some(voice)).is_ok(),"size_hint":null}));
+    }
+    json!({"required":required})
+}
+
+fn model_download_op(
+    id: u64,
+    value: Value,
+    ctx: &Context,
+    out: &Output,
+    cancel: &Arc<AtomicBool>,
+) -> Value {
+    #[derive(Default, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Download {
+        id: String,
+    }
+    let p: Download = match params(value) {
+        Ok(p) => p,
+        Err(message) => return err(Some(id), "protocol", message, Value::Null),
+    };
+    let config = ctx
+        .model_catalog
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(&p.id)
+        .cloned();
+    let Some(config) = config else {
+        return err(
+            Some(id),
+            "invalid",
+            "Request models for the draft before downloading this id",
+            Value::Null,
+        );
+    };
+    let mut progress_callback = |fraction: Option<f32>, text: &str| {
+        emit_cancellable(
+            out,
+            &progress(id, "downloading", json!({"fraction":fraction,"text":text})),
+            cancel,
+        )
+    };
+    if cancel.load(Ordering::Acquire) {
+        return err(Some(id), "cancelled", "Download cancelled", Value::Null);
+    }
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => return err(Some(id), "io", error.to_string(), Value::Null),
+    };
+    let result = runtime.block_on(async {
+        if p.id.starts_with("sherpa:") {
+            crate::setup::sherpa_model::download_sherpa_model_cancellable(&config, None, &mut progress_callback, Some(Arc::clone(cancel))).await.map(drop)
+        } else if let Some(voice) = p.id.strip_prefix("piper:") {
+            let voice = crate::setup::piper::get_curated_piper_voice(voice)?;
+            let dir = config.tts_local_model_path.as_ref().map(shuvoice_core::expand_user_path).unwrap_or_else(crate::setup::piper::managed_piper_model_dir);
+            let downloader = crate::setup::http::ReqwestDownloader::default();
+            let future = crate::setup::piper::ensure_local_piper_ready(voice, &dir, false, &downloader, &shuvoice_io::process::StdCommandRunner, &mut progress_callback);
+            tokio::pin!(future);
+            loop {
+                tokio::select! {
+                    result = &mut future => break result.and_then(|result| if result.status == "ok" { Ok(()) } else { Err(result.message) }),
+                    _ = tokio::time::sleep(Duration::from_millis(20)) => if cancel.load(Ordering::Acquire) { break Err("Download cancelled".into()); },
+                }
+            }
+        } else { Err("This model is worker-managed; no standalone download adapter is implemented".into()) }
+    });
+    match result {
+        Ok(()) => ok(id, json!({"id":p.id,"installed":true})),
+        Err(message) if cancel.load(Ordering::Acquire) => {
+            err(Some(id), "cancelled", message, Value::Null)
+        }
+        Err(message) => err(Some(id), "unavailable", message, Value::Null),
+    }
 }
 
 /// Shared, line-atomic writer for responses and events from several threads.
 pub type Output = Arc<Mutex<dyn Write + Send>>;
 
 fn emit(out: &Output, message: &Value) {
+    let _ = try_emit(out, message);
+}
+
+fn emit_cancellable(out: &Output, message: &Value, cancel: &AtomicBool) {
+    if !try_emit(out, message) {
+        cancel.store(true, Ordering::Release);
+    }
+}
+
+fn try_emit(out: &Output, message: &Value) -> bool {
     let mut out = out.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    // A closed stdout means the app is gone; nothing useful to do on error.
-    let _ = serde_json::to_writer(&mut *out, message);
-    let _ = out.write_all(b"\n");
-    let _ = out.flush();
+    serde_json::to_writer(&mut *out, message).is_ok()
+        && out.write_all(b"\n").is_ok()
+        && out.flush().is_ok()
 }
 
 fn progress(id: u64, phase: &str, extra: Value) -> Value {
@@ -326,7 +652,7 @@ fn apply_op(
             Value::Null,
         );
     };
-    if p.changes.is_empty() {
+    if p.changes.is_empty() && !p.onboarding {
         return err(
             Some(id),
             "protocol",
@@ -334,6 +660,7 @@ fn apply_op(
             Value::Null,
         );
     }
+    emit_cancellable(out, &progress(id, "validating", Value::Null), cancel);
     match validate(ctx, &p.changes) {
         Ok(errors) if !errors.is_empty() => {
             return err(
@@ -351,14 +678,70 @@ fn apply_op(
     // recording or read-aloud. Nothing has been saved yet.
     let started = Instant::now();
     let mut announced: Vec<String> = Vec::new();
+    emit_cancellable(
+        out,
+        &progress(id, "waiting_idle", json!({"busy": []})),
+        cancel,
+    );
+    let reservation;
     loop {
-        let busy = busy_activities(&(ctx.status)());
-        if busy.is_empty() {
-            break;
+        if cancel.load(Ordering::Acquire) {
+            return err(
+                Some(id),
+                "cancelled",
+                "apply cancelled; nothing was saved",
+                Value::Null,
+            );
         }
+        let status = (ctx.status)();
+        let busy = busy_activities(&status);
         if busy != announced {
-            emit(out, &progress(id, "waiting_idle", json!({ "busy": busy })));
+            emit_cancellable(
+                out,
+                &progress(id, "waiting_idle", json!({ "busy": busy })),
+                cancel,
+            );
             announced = busy;
+        }
+        if announced.is_empty() {
+            emit_cancellable(out, &progress(id, "reserving", Value::Null), cancel);
+            if cancel.load(Ordering::Acquire) {
+                return err(
+                    Some(id),
+                    "cancelled",
+                    "apply cancelled; nothing was saved",
+                    Value::Null,
+                );
+            }
+            match status.get("active_state").and_then(Value::as_str) {
+                Some("inactive" | "failed" | "dead") => {
+                    reservation = None;
+                    break;
+                }
+                Some("active") => match (ctx.reserve)() {
+                    Ok(token) => {
+                        reservation = Some(Reservation(ctx, token, Instant::now()));
+                        break;
+                    }
+                    Err(message) if message.starts_with("ERROR busy") => {}
+                    Err(message) => {
+                        return err(
+                            Some(id),
+                            "unavailable",
+                            format!("cannot reserve running service: {message}; nothing was saved"),
+                            Value::Null,
+                        );
+                    }
+                },
+                _ => {
+                    return err(
+                        Some(id),
+                        "unavailable",
+                        "service state is unknown; nothing was saved",
+                        Value::Null,
+                    );
+                }
+            }
         }
         if cancel.load(Ordering::Acquire) {
             return err(
@@ -379,7 +762,23 @@ fn apply_op(
         std::thread::sleep(ctx.idle_poll);
     }
 
-    emit(out, &progress(id, "saving", Value::Null));
+    if cancel.load(Ordering::Acquire) {
+        return err(
+            Some(id),
+            "cancelled",
+            "apply cancelled; nothing was saved",
+            Value::Null,
+        );
+    }
+    emit_cancellable(out, &progress(id, "saving", Value::Null), cancel);
+    if cancel.load(Ordering::Acquire) {
+        return err(
+            Some(id),
+            "cancelled",
+            "apply cancelled; nothing was saved",
+            Value::Null,
+        );
+    }
     let saved = match settings::apply(&ctx.config_path, &revision, &p.changes) {
         Ok(saved) => saved,
         Err(ApplyError::Conflict { current_revision }) => {
@@ -401,15 +800,50 @@ fn apply_op(
         Err(ApplyError::Io { message }) => return err(Some(id), "io", message, Value::Null),
     };
 
+    if p.onboarding
+        && let Err(message) = (ctx.marker)()
+    {
+        return err(Some(id), "io", message, json!({"saved": saved}));
+    }
+
     emit(out, &progress(id, "restarting", Value::Null));
-    ok(id, json!({ "saved": saved, "restart": (ctx.restart)() }))
+    if reservation
+        .as_ref()
+        .is_some_and(|lease| lease.2.elapsed() >= Duration::from_secs(60))
+    {
+        return ok(
+            id,
+            json!({"saved":saved,"restart":{"outcome":"readiness_failed","action":"restart","message":"Save exceeded the maintenance safety budget; saved but not restarted. Apply again when idle."}}),
+        );
+    }
+    let restart = (ctx.restart)();
+    drop(reservation);
+    ok(id, json!({ "saved": saved, "restart": restart }))
 }
 
 /// Serve requests from `input` until EOF. `apply` runs on a worker thread
 /// (one at a time); `cancel` stops an apply that is still waiting for idle.
+struct WorkerSlot {
+    cancel: Arc<AtomicBool>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for WorkerSlot {
+    fn drop(&mut self) {
+        // Covers EOF AND an input read error; no detached apply on disconnect.
+        self.cancel.store(true, Ordering::Release);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
 pub fn serve(mut input: impl BufRead, out: Output, ctx: Arc<Context>) -> std::io::Result<()> {
     let cancel = Arc::new(AtomicBool::new(false));
-    let mut worker: Option<std::thread::JoinHandle<()>> = None;
+    let mut slot = WorkerSlot {
+        cancel: cancel.clone(),
+        worker: None,
+    };
     let mut line = Vec::new();
     loop {
         line.clear();
@@ -422,7 +856,13 @@ pub fn serve(mut input: impl BufRead, out: Output, ctx: Arc<Context>) -> std::io
         if line.len() > MAX_REQUEST_BYTES && line.last() != Some(&b'\n') {
             // Discard the rest of the oversized line.
             let mut sink = Vec::new();
-            input.read_until(b'\n', &mut sink)?;
+            loop {
+                sink.clear();
+                let read = (&mut input).take(4096).read_until(b'\n', &mut sink)?;
+                if read == 0 || sink.last() == Some(&b'\n') {
+                    break;
+                }
+            }
             let message = format!("request exceeds {MAX_REQUEST_BYTES} bytes");
             emit(&out, &err(None, "protocol", message, Value::Null));
             continue;
@@ -434,21 +874,25 @@ pub fn serve(mut input: impl BufRead, out: Output, ctx: Arc<Context>) -> std::io
         }
 
         let request = serde_json::from_str::<Request>(text).ok();
-        let running = worker.as_ref().is_some_and(|w| !w.is_finished());
+        let running = slot.worker.as_ref().is_some_and(|w| !w.is_finished());
         match request.as_ref().map(|r| (r.v, r.op.as_str())) {
-            Some((PROTOCOL_VERSION, "apply")) if running => {
+            Some((PROTOCOL_VERSION, "apply" | "model_download")) if running => {
                 let id = request.as_ref().map(|r| r.id);
                 emit(
                     &out,
                     &err(id, "busy", "another apply is in progress", Value::Null),
                 );
             }
-            Some((PROTOCOL_VERSION, "apply")) => {
-                let Request { id, params, .. } = request.expect("matched Some");
+            Some((PROTOCOL_VERSION, "apply" | "model_download")) => {
+                let Request { id, params, op, .. } = request.expect("matched Some");
                 cancel.store(false, Ordering::Release);
                 let (ctx, out, cancel) = (Arc::clone(&ctx), Arc::clone(&out), Arc::clone(&cancel));
-                worker = Some(std::thread::spawn(move || {
-                    let response = apply_op(id, params, &ctx, &out, &cancel);
+                slot.worker = Some(std::thread::spawn(move || {
+                    let response = if op == "apply" {
+                        apply_op(id, params, &ctx, &out, &cancel)
+                    } else {
+                        model_download_op(id, params, &ctx, &out, &cancel)
+                    };
                     emit(&out, &response);
                 }));
             }
@@ -457,14 +901,18 @@ pub fn serve(mut input: impl BufRead, out: Output, ctx: Arc<Context>) -> std::io
                 let id = request.expect("matched Some").id;
                 emit(&out, &ok(id, json!({ "cancelling": running })));
             }
-            _ => emit(&out, &handle(text, &ctx)),
+            _ => {
+                if !try_emit(&out, &handle(text, &ctx)) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::BrokenPipe,
+                        "settings app disconnected",
+                    ));
+                }
+            }
         }
     }
     // The app closed: cancel a pending wait, let a started restart finish.
-    cancel.store(true, Ordering::Release);
-    if let Some(worker) = worker {
-        let _ = worker.join();
-    }
+    drop(slot);
     Ok(())
 }
 
@@ -484,9 +932,11 @@ pub fn run_stdio() -> ExitStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shuvoice_core::settings::FIELDS;
 
     fn ctx(dir: &tempfile::TempDir) -> Context {
         Context {
+            model_catalog: Mutex::new(BTreeMap::new()),
             config_path: dir.path().join("config.toml"),
             env_present: Box::new(|name| name == "OPENAI_API_KEY"),
             status: Box::new(
@@ -494,6 +944,9 @@ mod tests {
             ),
             devices: Box::new(|| Ok(json!({ "devices": [{ "index": 0, "name": "Mic" }] }))),
             restart: Box::new(|| json!({ "outcome": "ready", "action": "restart" })),
+            reserve: Box::new(|| Ok(1)),
+            release: Box::new(|_| {}),
+            marker: Box::new(|| Ok(())),
             idle_poll: Duration::from_millis(5),
             idle_timeout: Duration::from_millis(200),
         }
@@ -615,14 +1068,22 @@ mod tests {
     fn apply_saves_then_restarts_with_progress_events() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
-        let lines = run(ctx(&dir), &[apply_request(5, "absent", 30)]);
+        let (done, lines) = apply_direct(ctx(&dir), apply_request(5, "absent", 30));
         let phases: Vec<_> = lines
             .iter()
             .filter(|l| l["event"] == "progress")
             .map(|l| l["phase"].as_str().unwrap().to_string())
             .collect();
-        assert_eq!(phases, ["saving", "restarting"]);
-        let done = lines.last().unwrap();
+        assert_eq!(
+            phases,
+            [
+                "validating",
+                "waiting_idle",
+                "reserving",
+                "saving",
+                "restarting"
+            ]
+        );
         assert_eq!(done["id"], 5);
         assert_eq!(done["result"]["restart"]["outcome"], "ready");
         assert!(
@@ -661,9 +1122,14 @@ mod tests {
             Box::new(|| json!({ "active_state": "active", "stt": "recording", "tts": "paused" }));
         context.restart = Box::new(|| panic!("must not restart while busy"));
         let (response, events) = apply_direct(context, apply_request(6, "absent", 30));
-        assert_eq!(events[0]["phase"], "waiting_idle");
-        assert_eq!(events[0]["busy"], json!(["recording", "tts_paused"]));
-        assert_eq!(events.len(), 1, "busy set announced once: {events:?}");
+        assert_eq!(events[0]["phase"], "validating");
+        assert_eq!(events[2]["phase"], "waiting_idle");
+        assert_eq!(events[2]["busy"], json!(["recording", "tts_paused"]));
+        assert_eq!(
+            events.len(),
+            3,
+            "busy set announced once after initial phase: {events:?}"
+        );
         assert_eq!(response["error"]["kind"], "busy");
         assert!(!path.exists(), "nothing is saved while waiting");
     }
@@ -684,7 +1150,15 @@ mod tests {
         let phases: Vec<_> = events.iter().map(|e| e["phase"].clone()).collect();
         assert_eq!(
             phases,
-            [json!("waiting_idle"), json!("saving"), json!("restarting")]
+            [
+                json!("validating"),
+                json!("waiting_idle"),
+                json!("waiting_idle"),
+                json!("waiting_idle"),
+                json!("reserving"),
+                json!("saving"),
+                json!("restarting")
+            ]
         );
         assert_eq!(response["ok"], true, "{response}");
     }
@@ -720,6 +1194,68 @@ mod tests {
     }
 
     #[test]
+    fn output_disconnect_cancels_before_the_save_boundary() {
+        struct Disconnected;
+        impl Write for Disconnected {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let context = ctx(&dir);
+        let out: Output = Arc::new(Mutex::new(Disconnected));
+        let response = apply_op(
+            1,
+            apply_request(1, "absent", 30)["params"].clone(),
+            &context,
+            &out,
+            &AtomicBool::new(false),
+        );
+        assert_eq!(response["error"]["kind"], "cancelled");
+        assert!(!context.config_path.exists());
+    }
+
+    #[test]
+    fn input_read_error_cancels_and_joins_a_pending_worker() {
+        struct FailingInput(std::io::Cursor<Vec<u8>>);
+        impl Read for FailingInput {
+            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+                if self.0.position() as usize == self.0.get_ref().len() {
+                    return Err(std::io::Error::other("fixture disconnect"));
+                }
+                self.0.read(out)
+            }
+        }
+        impl BufRead for FailingInput {
+            fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+                if self.0.position() as usize == self.0.get_ref().len() {
+                    return Err(std::io::Error::other("fixture disconnect"));
+                }
+                self.0.fill_buf()
+            }
+            fn consume(&mut self, amount: usize) {
+                self.0.consume(amount);
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut context = ctx(&dir);
+        context.status = Box::new(|| json!({"active_state":"active","stt":"recording"}));
+        let input = FailingInput(std::io::Cursor::new(
+            format!("{}\n", apply_request(1, "absent", 30)).into_bytes(),
+        ));
+        let buffer = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let out: Output = buffer.clone();
+        let started = Instant::now();
+        assert!(serve(input, out, Arc::new(context)).is_err());
+        assert!(started.elapsed() < Duration::from_secs(1));
+        let output = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+        assert!(output.contains("cancelled"), "{output}");
+    }
+
+    #[test]
     fn stopped_service_is_not_busy() {
         assert!(busy_activities(&json!({"active_state":"inactive","stt":"recording"})).is_empty());
         assert!(
@@ -728,5 +1264,206 @@ mod tests {
             )
             .is_empty()
         );
+    }
+
+    #[test]
+    fn race_after_idle_probe_cannot_save_until_actor_grants_reservation() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut context = ctx(&dir);
+        let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = attempts.clone();
+        context.reserve = Box::new(move || {
+            if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                Err("ERROR busy: recording won race".into())
+            } else {
+                Ok(1)
+            }
+        });
+        let release = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = release.clone();
+        context.release = Box::new(move |_| {
+            counter.fetch_add(1, Ordering::SeqCst);
+        });
+        let (response, _) = apply_direct(context, apply_request(1, "absent", 30));
+        assert_eq!(response["ok"], true);
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        assert_eq!(release.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn failed_save_releases_reservation_and_never_restarts() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut context = ctx(&dir);
+        context.restart = Box::new(|| panic!("must not restart after failed save"));
+        let releases = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = releases.clone();
+        context.release = Box::new(move |_| {
+            counter.fetch_add(1, Ordering::SeqCst);
+        });
+        let (response, _) = apply_direct(context, apply_request(1, "stale", 30));
+        assert_eq!(response["error"]["kind"], "conflict");
+        assert_eq!(releases.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn io_failure_during_save_releases_reservation() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut context = ctx(&dir);
+        let path = context.config_path.clone();
+        context.reserve = Box::new(move || {
+            std::fs::create_dir(&path).unwrap();
+            Ok(1)
+        });
+        let released = Arc::new(AtomicBool::new(false));
+        let flag = released.clone();
+        context.release = Box::new(move |_| {
+            flag.store(true, Ordering::Release);
+        });
+        context.restart = Box::new(|| panic!("must not restart after I/O save failure"));
+        let (response, _) = apply_direct(context, apply_request(1, "absent", 30));
+        assert_eq!(response["error"]["kind"], "io");
+        assert!(released.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn cancellation_after_reserving_releases_without_saving() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut context = ctx(&dir);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flag = cancel.clone();
+        context.reserve = Box::new(move || {
+            flag.store(true, Ordering::Release);
+            Ok(1)
+        });
+        let released = Arc::new(AtomicBool::new(false));
+        let flag = released.clone();
+        context.release = Box::new(move |_| {
+            flag.store(true, Ordering::Release);
+        });
+        let out: Output = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let request = apply_request(1, "absent", 30);
+        let response = apply_op(1, request["params"].clone(), &context, &out, &cancel);
+        assert_eq!(response["error"]["kind"], "cancelled");
+        assert!(released.load(Ordering::Acquire));
+        assert!(!context.config_path.exists());
+    }
+
+    #[test]
+    fn stopped_service_skips_reservation_and_onboarding_marks_before_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut context = ctx(&dir);
+        context.status = Box::new(|| json!({"active_state":"inactive"}));
+        context.reserve = Box::new(|| panic!("stopped service must not reserve"));
+        let marked = Arc::new(AtomicBool::new(false));
+        let flag = marked.clone();
+        context.marker = Box::new(move || {
+            flag.store(true, Ordering::Release);
+            Ok(())
+        });
+        context.restart = Box::new(move || {
+            assert!(marked.load(Ordering::Acquire));
+            json!({"outcome":"ready"})
+        });
+        let (response, _) = apply_direct(
+            context,
+            json!({"id":1,"params":{"revision":"absent","changes":{},"onboarding":true}}),
+        );
+        assert_eq!(response["ok"], true, "{response}");
+    }
+
+    #[test]
+    fn optional_ops_use_real_core_policy_and_feature_detection() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = ctx(&dir);
+        let features = call(&context, json!({"v":1,"id":1,"op":"hello"}));
+        assert!(
+            features["result"]["features"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("models"))
+        );
+        let preview = call(
+            &context,
+            json!({"v":1,"id":2,"op":"corrections_preview","params":{"text":"shove voice meets hyper land","changes":{"typing.typing_text_case":"lowercase"}}}),
+        );
+        assert_eq!(preview["result"]["output"], "shuvoice meets hyprland");
+        assert_eq!(preview["result"]["builtins"]["shove voice"], "ShuVoice");
+        let capability = call(
+            &context,
+            json!({"v":1,"id":3,"op":"capabilities","params":{"changes":{"asr.asr_backend":"openai_realtime"}}}),
+        );
+        assert_eq!(capability["result"]["vocabulary_hints"]["supported"], true);
+        let models = call(
+            &context,
+            json!({"v":1,"id":4,"op":"models","params":{"changes":{"asr.asr_backend":"openai_realtime","tts.tts_enabled":false}}}),
+        );
+        assert_eq!(models["result"]["required"], json!([]));
+    }
+
+    #[test]
+    fn model_download_shares_slot_with_apply_and_invalid_ids_are_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut context = ctx(&dir);
+        context.status = Box::new(|| json!({"active_state":"active","stt":"recording"}));
+        let lines = run(
+            context,
+            &[
+                apply_request(1, "absent", 30),
+                json!({"v":1,"id":2,"op":"model_download","params":{"id":"../bad"}}),
+            ],
+        );
+        assert_eq!(
+            lines.iter().find(|line| line["id"] == 2).unwrap()["error"]["kind"],
+            "busy"
+        );
+        let context = ctx(&dir);
+        let out: Output = Arc::new(Mutex::new(Vec::<u8>::new()));
+        assert_eq!(
+            model_download_op(
+                3,
+                json!({"id":"../bad"}),
+                &context,
+                &out,
+                &Arc::new(AtomicBool::new(false))
+            )["error"]["kind"],
+            "invalid"
+        );
+    }
+
+    #[test]
+    fn model_download_installed_fixture_progress_and_cancel() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = ctx(&dir);
+        let model_dir = dir.path().join("model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        for name in ["tokens.txt", "encoder.onnx", "decoder.onnx", "joiner.onnx"] {
+            std::fs::write(model_dir.join(name), b"fixture").unwrap();
+        }
+        let inventory = call(
+            &context,
+            json!({"v":1,"id":1,"op":"models","params":{"changes":{"asr.sherpa_model_dir":model_dir.display().to_string(),"tts.tts_enabled":false}}}),
+        );
+        let model = inventory["result"]["required"][0]["id"].as_str().unwrap();
+        let buffer = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let out: Output = buffer.clone();
+        let response = model_download_op(
+            2,
+            json!({"id":model}),
+            &context,
+            &out,
+            &Arc::new(AtomicBool::new(false)),
+        );
+        assert_eq!(response["result"]["installed"], true, "{response}");
+        let event: Value = serde_json::from_slice(&buffer.lock().unwrap()).unwrap();
+        assert_eq!(event["phase"], "downloading");
+        assert_eq!(event["fraction"], 1.0);
+        let response = model_download_op(
+            3,
+            json!({"id":model}),
+            &context,
+            &out,
+            &Arc::new(AtomicBool::new(true)),
+        );
+        assert_eq!(response["error"]["kind"], "cancelled");
     }
 }

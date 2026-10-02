@@ -171,6 +171,8 @@ enum PendingTts {
 
 /// Responsive session core.
 pub struct Session<I, T, S, O, F, C> {
+    maintenance_until: Option<std::time::Instant>,
+    maintenance_generation: u64,
     pub config: Config,
     deps: SessionDeps<I, T, S, O, F, C>,
     render: RenderOptions,
@@ -294,6 +296,8 @@ where
             cuda_recovered_skip_reset: false,
             preroll: Vec::new(),
             state: UtteranceState::new(),
+            maintenance_until: None,
+            maintenance_generation: 0,
             was_recording: false,
             finalize: None,
             chunk_job: None,
@@ -2243,7 +2247,7 @@ where
     }
 
     pub fn debug_status_json(&self) -> String {
-        serde_json::json!({
+        let mut value = serde_json::json!({
             "app": {
                 "asr_backend": self.config.asr_backend.as_str(),
                 "tts_backend": self.config.tts_backend.as_str(),
@@ -2286,25 +2290,114 @@ where
                 "wants_raw_audio": self.deps.asr.wants_raw_audio(),
                 "consecutive_failures": self.circuit.consecutive_failures(),
                 "current_transcript": if self.config.overlay_debug_mode {
-                    self.debug_current_transcript.clone()
+                    self.debug_current_transcript.chars().take(80).collect::<String>()
                 } else {
                     "[redacted]".into()
                 },
                 "last_final_transcript": if self.config.overlay_debug_mode {
-                    self.debug_last_final_transcript.clone()
+                    self.debug_last_final_transcript.chars().take(80).collect::<String>()
                 } else {
                     "[redacted]".into()
                 },
                 "finalization_mode": format!("{:?}", self.deps.asr.finalization_mode()),
             },
             "metrics": self.deps.metrics.snapshot(),
-        })
-        .to_string()
+        });
+        let rendered = value.to_string();
+        if rendered.len() <= 3300 {
+            return rendered;
+        }
+        // Leave room for ui_ready + InvocationID added by the CLI bridge.
+        value
+            .as_object_mut()
+            .expect("debug object")
+            .remove("metrics");
+        value["asr"]["current_transcript"] = "[truncated]".into();
+        value["asr"]["last_final_transcript"] = "[truncated]".into();
+        let rendered = value.to_string();
+        if rendered.len() <= 3300 {
+            rendered
+        } else {
+            serde_json::json!({"app":value["app"],"truncated":true}).to_string()
+        }
     }
 
     pub async fn handle_command(&mut self, cmd: SessionCommand) -> AppResult<String> {
         use SessionCommand::*;
+        let (cmd, reply) = match cmd {
+            ControlRequest { command, reply } => (*command, Some(reply)),
+            cmd => (cmd, None),
+        };
+        // Keep legacy control acknowledgments outside maintenance. Direct
+        // SessionHandle callers still receive the richer actor result.
+        let compatibility_reply = match &cmd {
+            TtsResume => Some("OK tts resumed"),
+            TtsTogglePause => Some("OK tts toggled"),
+            TtsRestart => Some("OK tts restarted"),
+            _ => None,
+        };
+        if self
+            .maintenance_until
+            .is_some_and(|until| until <= self.deps.clock.now())
+        {
+            self.maintenance_until = None;
+        }
+        if self.maintenance_until.is_some()
+            && matches!(
+                cmd,
+                Start
+                    | Toggle
+                    | TtsSpeak { .. }
+                    | TtsSpeakSelection
+                    | TtsSpeakClipboard
+                    | TtsResume
+                    | TtsTogglePause
+                    | TtsRestart
+            )
+        {
+            let response = "ERROR busy: settings maintenance reservation".to_string();
+            if let Some(reply) = reply {
+                let _ = reply.send(response.clone());
+            }
+            return Ok(response);
+        }
         let res = match cmd {
+            MaintenanceReserve => {
+                if self.maintenance_until.is_some()
+                    || self.recording
+                    || self.processing
+                    || self.start_pending
+                    || self.finalize.is_some()
+                    || self.lifecycle_job.is_some()
+                    || self.inject_commit.is_some()
+                    || self.pending_tts.is_some()
+                    || matches!(
+                        self.tts_player_state,
+                        TtsPlayerState::Synthesizing
+                            | TtsPlayerState::Playing
+                            | TtsPlayerState::Paused
+                    )
+                {
+                    Ok("ERROR busy: speech or maintenance in progress".into())
+                } else {
+                    self.maintenance_until =
+                        Some(self.deps.clock.now() + std::time::Duration::from_secs(120));
+                    self.maintenance_generation = rand::random::<u64>().max(1);
+                    Ok(format!(
+                        "OK reserved token={} ttl=120",
+                        self.maintenance_generation
+                    ))
+                }
+            }
+            MaintenanceRelease(token) => {
+                if self.maintenance_until.is_some() && token == self.maintenance_generation {
+                    self.maintenance_until = None;
+                    Ok("OK released".into())
+                } else {
+                    Ok("ERROR maintenance token is stale".into())
+                }
+            }
+            ControlRequest { .. } => Err(AppError::message("nested control request")),
             Start => {
                 // Enqueue-only: never await ASR reset on the actor task.
                 self.request_start_recording();
@@ -2334,38 +2427,37 @@ where
                 self.request_tts(TtsIntent::Clipboard);
                 Ok("OK tts speaking".into())
             }
-            TtsPause => {
-                if self.tts_pause()? {
+            TtsPause => self.tts_pause().and_then(|paused| {
+                if paused {
                     Ok("OK tts paused".into())
                 } else {
                     Err(AppError::message("tts not playing"))
                 }
-            }
-            TtsResume => {
-                if self.tts_resume()? {
+            }),
+            TtsResume => self.tts_resume().and_then(|resumed| {
+                if resumed {
                     Ok("OK tts resumed".into())
                 } else {
                     Err(AppError::message("tts not paused"))
                 }
-            }
-            TtsTogglePause => {
-                let state = self.tts_toggle_pause()?;
-                Ok(format!("OK tts {state}"))
-            }
-            TtsRestart => {
-                if self.tts_restart()? {
+            }),
+            TtsTogglePause => self
+                .tts_toggle_pause()
+                .map(|state| format!("OK tts {state}")),
+            TtsRestart => self.tts_restart().and_then(|restarted| {
+                if restarted {
                     Ok("OK tts restarted".into())
                 } else {
                     Err(AppError::message("tts no previous text"))
                 }
-            }
-            TtsStop => {
-                if self.tts_stop()? {
-                    Ok("OK tts stopped".into())
+            }),
+            TtsStop => self.tts_stop().map(|stopped| {
+                if stopped {
+                    "OK tts stopped".into()
                 } else {
-                    Ok("OK tts already idle".into())
+                    "OK tts already idle".into()
                 }
-            }
+            }),
             TtsSetSpeed(speed) => {
                 let v = self.tts_set_playback_speed(speed);
                 Ok(format!("OK tts speed {v}"))
@@ -2386,6 +2478,44 @@ where
             }
         };
         self.publish_view();
+        if let Some(reply) = reply {
+            let response = match (compatibility_reply, &res) {
+                (Some(response), _) => response.to_string(),
+                (None, Ok(response)) => response.clone(),
+                (None, Err(err)) => format!("ERROR {err}"),
+            };
+            if reply.send(response).is_err() {
+                // A timed-out/disconnected reservation requester must not hold
+                // the service until TTL. Existing grants are not released by
+                // unrelated failed acknowledgments.
+                if res
+                    .as_ref()
+                    .is_ok_and(|response| response.starts_with("OK reserved"))
+                {
+                    self.maintenance_until = None;
+                }
+            }
+        }
         res
+    }
+}
+
+#[cfg(test)]
+mod settings_safety_tests {
+    use super::*;
+    use crate::fakes::ScriptedAsrBackend;
+    use crate::runtime::TestHarness;
+
+    #[tokio::test]
+    async fn debug_transcripts_are_utf8_safe_and_fit_the_control_cap() {
+        let config = Config::try_with(|c| c.overlay_debug_mode = true).unwrap();
+        let mut h = TestHarness::basic(ScriptedAsrBackend::default(), config).await;
+        h.session.debug_current_transcript = "\"\n😀".repeat(10_000);
+        h.session.debug_last_final_transcript = "\u{0001}".repeat(100_000);
+        let rendered = h.session.debug_status_json();
+        assert!(rendered.len() <= 3300, "{} bytes", rendered.len());
+        let value: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+        assert!(value["app"].is_object());
+        h.shutdown().await;
     }
 }

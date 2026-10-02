@@ -74,6 +74,36 @@ pub fn input_devices() -> Result<Vec<InputDevice>, String> {
     }
 }
 
+pub fn output_devices() -> Result<Vec<InputDevice>, String> {
+    #[cfg(feature = "audio")]
+    {
+        use cpal::traits::{DeviceTrait, HostTrait};
+        let devices = cpal::default_host()
+            .output_devices()
+            .map_err(|e| e.to_string())?;
+        Ok(devices
+            .enumerate()
+            .filter_map(|(index, device)| {
+                let config = device.default_output_config().ok()?;
+                Some(InputDevice {
+                    index,
+                    name: device
+                        .description()
+                        .ok()
+                        .map(|d| d.name().to_string())
+                        .unwrap_or_else(|| device.to_string()),
+                    channels: config.channels(),
+                    default_sample_rate: f64::from(config.sample_rate()),
+                })
+            })
+            .collect())
+    }
+    #[cfg(not(feature = "audio"))]
+    {
+        Err("audio feature disabled".into())
+    }
+}
+
 #[cfg(feature = "audio")]
 fn input_devices_cpal() -> Result<Vec<InputDevice>, String> {
     use cpal::traits::{DeviceTrait, HostTrait};

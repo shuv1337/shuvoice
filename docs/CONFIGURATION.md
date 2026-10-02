@@ -1,5 +1,18 @@
 # Configuration
 
+## Recognition vocabulary
+
+`[vocabulary].recognition_hints` defaults to `[]`. Terms are trimmed and must
+be case-insensitively unique, nonempty, at most 100 characters each, at most
+100 terms / 1500 total characters, without control characters or `<` / `>`.
+The OpenAI Realtime adapter sends prompt context for `gpt-4o-transcribe`,
+`gpt-4o-mini-transcribe`, and `whisper-1` using the GA transcription session
+schema. The `gpt-4o-transcribe-latest` alias is conservatively unsupported for
+hints. Sherpa (including Parakeet offline-instant), NeMo and Moonshine have no
+implemented hint adapter. `typing.text_replacements` remains a separate,
+cross-backend post-transcription correction map; built-ins are merged with
+user overrides. Hints guide recognition but do not force output.
+
 ShuVoice reads `~/.config/shuvoice/config.toml`. The wizard writes this file;
 manual examples live under `examples/`. Schema ownership is
 `crates/shuvoice-core` (`Config` + section field map).

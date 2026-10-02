@@ -30,13 +30,72 @@ pub fn resolve_settings_bin(
         .find(|path| is_executable(path))
 }
 
-pub fn run_settings_command() -> ExitStatus {
+pub fn installed_settings_bin() -> Option<PathBuf> {
+    resolve_settings_bin(
+        std::env::var_os("SHUVOICE_SETTINGS_BIN").map(PathBuf::from),
+        std::env::current_exe().ok(),
+    )
+}
+
+/// Launch independently of the speech unit's cgroup. No shell interpretation.
+pub fn onboarding_command(bin: &Path, detached: bool) -> Command {
+    let mut command = if detached {
+        let mut command = Command::new("systemd-run");
+        command.args(["--user", "--collect", "--quiet"]);
+        for name in super::wizard_service::SESSION_ENV.into_iter().chain([
+            "XDG_RUNTIME_DIR",
+            "XDG_CONFIG_HOME",
+            "XDG_DATA_HOME",
+            "SHUVOICE_BIN",
+        ]) {
+            if let Some(value) = std::env::var_os(name) {
+                let mut argument = std::ffi::OsString::from(format!("--setenv={name}="));
+                argument.push(value);
+                command.arg(argument);
+            }
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            command.arg(format!("--setenv=SHUVOICE_BIN={}", exe.display()));
+        }
+        command.arg("--").arg(bin);
+        command
+    } else {
+        Command::new(bin)
+    };
+    command.arg("--onboarding");
+    if let Ok(exe) = std::env::current_exe() {
+        command.env("SHUVOICE_BIN", exe);
+    }
+    command
+}
+
+pub fn launch_onboarding(bin: &Path, detached: bool) -> ExitStatus {
+    match onboarding_command(bin, detached).status() {
+        Ok(status) if status.success() && detached => {
+            ExitStatus::code(crate::error::EXIT_DEPENDENCY)
+        }
+        Ok(status) => ExitStatus::code(status.code().unwrap_or(EXIT_FAILURE)),
+        Err(err) => {
+            eprintln!("ERROR: could not launch onboarding: {err}");
+            ExitStatus::code(if detached {
+                crate::error::EXIT_DEPENDENCY
+            } else {
+                EXIT_FAILURE
+            })
+        }
+    }
+}
+
+pub fn run_settings_command(onboarding: bool) -> ExitStatus {
     let current_exe = std::env::current_exe().ok();
     let override_path = std::env::var_os("SHUVOICE_SETTINGS_BIN").map(PathBuf::from);
     let Some(bin) = resolve_settings_bin(override_path, current_exe.clone()) else {
         eprintln!("{SETTINGS_BIN} is not installed; opening the setup wizard instead.");
-        return super::wizard::run_wizard_command();
+        return super::wizard::run_gtk_wizard_command();
     };
+    if onboarding {
+        return launch_onboarding(&bin, false);
+    }
     let mut command = Command::new(&bin);
     // The app runs its bridge with this same `shuvoice` binary.
     if let Some(exe) = current_exe {

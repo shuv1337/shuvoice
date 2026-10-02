@@ -25,8 +25,10 @@ window. TTS speaks selection/clipboard. STT and TTS are mutually exclusive.
 The settings app owns no config logic: it talks to `shuvoice settings-bridge`
 (JSON lines on stdio) and Rust (`shuvoice_core::settings`) owns fields,
 validation and patch-style persistence. `shuvoice settings` opens it (falls back
-to the GTK wizard when not installed); first run and `shuvoice wizard` still use
-the GTK wizard. GPUIX needs `apps/settings/patches/gpui-primary-seat.patch`
+to the GTK wizard when not installed). First run and `shuvoice wizard` open
+settings in onboarding mode when installed; service-originated first run
+launches outside the unit cgroup with `systemd-run --user`, then exits 78.
+GPUIX needs `apps/settings/patches/gpui-primary-seat.patch`
 (stock GPUI ignores physical input when the compositor has extra seats); see
 `apps/settings/README.md`.
 
@@ -70,6 +72,8 @@ Workspace: root `Cargo.toml`. Default member: `shuvoice-cli`.
 
 `--no-default-features` builds still compile the CLI; `run` / setup composition
 **fails closed with exit 78** when the selected backend or UI surface is missing.
+The CLI always links ShuVoice UI's headless marker/shortcut helpers; GTK remains
+gated by `ui` and is not enabled by the settings bridge alone.
 
 ---
 
@@ -79,7 +83,9 @@ Workspace: root `Cargo.toml`. Default member: `shuvoice-cli`.
    `shuvoice-core` `config_section_fields()`, XDG paths, atomic write/backup.
 2. **Control socket**: line protocol `OK …` / `ERROR …`; commands in
    `CONTROL_COMMANDS` (`start`, `stop`, `toggle`, `status`, `ping`, `metrics`,
-   `debug_status`, `tts_*`).
+   `debug_status`, `tts_*`, additive `maintenance_reserve` / `maintenance_release`).
+   Reservations are actor-serialized, idle-only, token-owned, expire after 120 s, and reject
+   new STT/TTS work with `ERROR busy` while held.
 3. **Exit 78**: `DEPENDENCY_EXIT_CODE` / `RestartPreventExitStatus=78` on the
    user unit — missing features, layer-shell, worker root, Sherpa CUDA, etc.
 4. **Wizard defaults**: Parakeet CPU offline-instant + Kokoro 1.25× (see
@@ -93,6 +99,11 @@ Workspace: root `Cargo.toml`. Default member: `shuvoice-cli`.
 User-facing config keys live in Rust core — do not invent keys in docs or
 callers. Prefer `shuvoice config effective` and `examples/config.toml`.
 
+`[vocabulary].recognition_hints` is a validated list distinct from correction
+rules. Prompt hints are implemented for OpenAI `gpt-4o-transcribe`,
+`gpt-4o-mini-transcribe`, and `whisper-1` using GA `session.update`.
+Other adapters/models (including Parakeet offline-instant) report unsupported.
+
 ---
 
 ## Runtime paths
@@ -101,6 +112,7 @@ callers. Prefer `shuvoice config effective` and `examples/config.toml`.
 |---|---|
 | `$XDG_CONFIG_HOME/shuvoice/config.toml` | Config |
 | `$XDG_CONFIG_HOME/shuvoice/local.dev` | Local secrets/env |
+| `$XDG_CONFIG_HOME/shuvoice/local.env` | Fallback local secrets/env (process env, then local.dev win) |
 | `$XDG_RUNTIME_DIR/shuvoice/control.sock` | Control socket default |
 | `$XDG_DATA_HOME/shuvoice/models/sherpa/<name>/` | Sherpa models |
 | `$XDG_DATA_HOME/shuvoice/models/piper/` | Managed Piper voices |

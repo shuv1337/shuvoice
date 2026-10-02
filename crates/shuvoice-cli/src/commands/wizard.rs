@@ -23,6 +23,13 @@ Install it with: pacman -S gtk4-layer-shell";
 
 /// Launch the setup wizard (force reconfigure).
 pub fn run_wizard_command() -> ExitStatus {
+    if let Some(bin) = super::settings::installed_settings_bin() {
+        return super::settings::launch_onboarding(&bin, false);
+    }
+    run_gtk_wizard_command()
+}
+
+pub fn run_gtk_wizard_command() -> ExitStatus {
     dispatch_wizard_launch(run_welcome_wizard(true), |service| {
         maybe_restart_running_service(service)
     })
@@ -121,6 +128,18 @@ pub fn maybe_restart_running_service(service: &str) -> &'static str {
 /// import its display environment, then wait for overlay readiness. Prints
 /// nothing (the settings bridge uses stdout for its protocol).
 pub fn restart_live(service: &str) -> RestartOutcome {
+    let mut previous_invocation = wizard_service::service_invocation_id(&StdCommandRunner, service);
+    if previous_invocation.is_empty()
+        && matches!(
+            wizard_service::unit_snapshot(&StdCommandRunner, service)
+                .state
+                .as_str(),
+            "inactive" | "failed" | "dead"
+        )
+    {
+        // Proven stopped unit: a nonempty current InvocationID is a new start.
+        previous_invocation = "<stopped>".into();
+    }
     let control_socket = crate::config::load_config()
         .ok()
         .and_then(|config| config.control_socket);
@@ -132,7 +151,14 @@ pub fn restart_live(service: &str) -> RestartOutcome {
                 std::env::var(name).ok()
             })
         },
-        || wizard_service::wait_until_ready(service, &StdCommandRunner, control_socket.as_deref()),
+        || {
+            wizard_service::wait_until_ready(
+                service,
+                &StdCommandRunner,
+                control_socket.as_deref(),
+                &previous_invocation,
+            )
+        },
     )
 }
 

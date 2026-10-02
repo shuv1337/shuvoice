@@ -12,7 +12,7 @@ repository.workspace = true
 default = ["desktop"]
 desktop = ["audio", "asr-sherpa", "asr-openai", "ui", "tts", "tts-worker"]
 audio = ["dep:cpal", "shuvoice-io/audio"]
-ui = ["dep:shuvoice-ui", "shuvoice-ui/gtk", "dep:gtk4", "dep:glib"]
+ui = ["shuvoice-ui/gtk", "dep:gtk4", "dep:glib"]
 # Real shuvoice-asr backends (static Sherpa; no Python wheel / CUDA repair).
 asr-sherpa = ["shuvoice-asr/sherpa"]
 asr-openai = ["shuvoice-asr/openai"]
@@ -42,7 +42,8 @@ shuvoice-control.workspace = true
 shuvoice-core.workspace = true
 shuvoice-io = { path = "../shuvoice-io", default-features = false }
 shuvoice-tts = { path = "../shuvoice-tts", optional = true, default-features = false }
-shuvoice-ui = { workspace = true, optional = true }
+# Headless marker/shortcut helpers are needed by settings even without GTK.
+shuvoice-ui = { workspace = true }
 libc = { workspace = true }
 thiserror.workspace = true
 tokio.workspace = true

@@ -12,6 +12,10 @@
 
 config_version = 1
 
+[vocabulary]
+# Recognition hints (not correction rules). Active only on tested OpenAI models.
+recognition_hints = []
+
 [audio]
 sample_rate = 16000
 chunk_ms = 100

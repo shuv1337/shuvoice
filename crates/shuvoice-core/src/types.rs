@@ -710,6 +710,8 @@ pub const CONTROL_COMMANDS: &[&str] = &[
     "ping",
     "metrics",
     "debug_status",
+    "maintenance_reserve",
+    "maintenance_release",
     "tts_speak",
     "tts_speak_clipboard",
     "tts_pause",

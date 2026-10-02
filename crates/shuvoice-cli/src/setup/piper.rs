@@ -292,6 +292,14 @@ pub async fn ensure_local_piper_ready(
 
     // Unique temp staging (pid + nanos); cleaned on success or failure.
     let stage = stage_dir(&model_dir, &format!("piper-{}", voice.stem))?;
+    // Async cancellation may drop this future before the explicit cleanup.
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let _cleanup = Cleanup(stage.clone());
     let stage_model = stage.join(format!("{}.onnx", voice.stem));
     let stage_side = stage.join(format!("{}.onnx.json", voice.stem));
 

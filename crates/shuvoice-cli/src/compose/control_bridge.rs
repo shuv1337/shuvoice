@@ -89,6 +89,14 @@ impl<S> ControlHandlers for ControlBridge<S>
 where
     S: ControlHandlerSurface + Send + Sync + 'static,
 {
+    fn on_serialized_command(&self, command: ControlCommand) -> Option<String> {
+        if let ControlCommand::MaintenanceRelease(token) = command {
+            return self
+                .surface
+                .on_serialized_command(&format!("maintenance_release {token}"));
+        }
+        self.surface.on_serialized_command(command.as_str())
+    }
     fn on_start(&self) {
         self.surface.on_start();
     }
@@ -114,6 +122,13 @@ where
         if let Some(ready) = &self.ui_ready {
             if let Ok(serde_json::Value::Object(mut fields)) = serde_json::from_str(&status) {
                 fields.insert("ui_ready".into(), ready.load(Ordering::Acquire).into());
+                if let Ok(invocation) = std::env::var("INVOCATION_ID") {
+                    // systemd IDs are 32 ASCII hex digits. Do not let an
+                    // arbitrary environment string defeat the JSON byte cap.
+                    if invocation.len() <= 64 && invocation.chars().all(|c| c.is_ascii_hexdigit()) {
+                        fields.insert("invocation_id".into(), invocation.into());
+                    }
+                }
                 return serde_json::Value::Object(fields).to_string();
             }
         }
