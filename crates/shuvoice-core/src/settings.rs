@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 
 use crate::config::{
     CURRENT_CONFIG_VERSION, Config, DEFAULT_SHERPA_MODEL_NAME, PARAKEET_TDT_V3_INT8_MODEL_NAME,
-    expand_user_path, load_raw, migrate_to_latest, write_atomic,
+    expand_user_path, load_raw, migrate_to_latest, toml_dumps, write_atomic,
 };
 use crate::tts_speed::{TTS_PLAYBACK_SPEED_MAX, TTS_PLAYBACK_SPEED_MIN};
 
@@ -488,13 +488,18 @@ pub enum ApplyError {
 pub fn revision(path: impl AsRef<Path>) -> Result<String, String> {
     let path = expand_user_path(path);
     match std::fs::read(&path) {
-        Ok(bytes) => {
-            let digest = Sha256::digest(&bytes);
-            Ok(digest.iter().map(|b| format!("{b:02x}")).collect())
-        }
+        Ok(bytes) => Ok(revision_bytes(&bytes)),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(ABSENT_REVISION.into()),
         Err(err) => Err(format!("cannot read {}: {err}", path.display())),
     }
+}
+
+/// Hash the exact bytes consumed by a config loader, without reopening its path.
+pub(crate) fn revision_bytes(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 fn split_id(id: &str) -> (&str, &str) {
@@ -955,9 +960,16 @@ pub fn apply(
             current_revision: again,
         });
     }
+    // Identify the payload we commit, not a later read that could observe an
+    // uncooperative editor's replacement instead of our saved settings.
+    let saved_revision = revision_bytes(
+        toml_dumps(&patched)
+            .map_err(|e| io(e.to_string()))?
+            .as_bytes(),
+    );
     let backup = write_atomic(&path, &patched).map_err(|e| io(e.to_string()))?;
     Ok(Applied {
-        revision: revision(&path).map_err(io)?,
+        revision: saved_revision,
         backup: backup.map(|p| p.display().to_string()),
         changed: changes.keys().cloned().collect(),
     })

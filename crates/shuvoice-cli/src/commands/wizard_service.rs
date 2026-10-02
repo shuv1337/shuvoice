@@ -63,6 +63,7 @@ pub(super) fn refresh_display_environment(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Readiness {
     Ready,
+    ReadyLegacyRevision,
     /// Unit is active and healthy so far but not ready within the budget
     /// (e.g. a slow worker model load). Not a failure.
     StillStarting(String),
@@ -73,6 +74,8 @@ pub(super) enum Readiness {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Probe {
     Ready,
+    ReadyLegacyRevision,
+    RevisionMismatch,
     NotReady,
     /// The service answered with diagnostics that have no `ui_ready` field.
     Legacy,
@@ -134,6 +137,7 @@ pub(super) fn wait_until_ready(
     runner: &dyn CommandRunner,
     control_socket: Option<&str>,
     previous_invocation: &str,
+    expected_revision: Option<&str>,
 ) -> Readiness {
     let deadline = Instant::now() + READY_BUDGET;
     wait_until_ready_with(
@@ -146,11 +150,7 @@ pub(super) fn wait_until_ready(
         ) {
             Ok(response) => {
                 let current = service_invocation_id(runner, service);
-                if new_invocation_ready(&response, previous_invocation, &current) {
-                    Probe::Ready
-                } else {
-                    Probe::NotReady
-                }
+                readiness_probe(&response, previous_invocation, &current, expected_revision)
             }
             Err(_) => Probe::Unreachable,
         },
@@ -182,6 +182,32 @@ fn new_invocation_ready(response: &str, previous: &str, current: &str) -> bool {
             .and_then(|v| v["invocation_id"].as_str().map(str::to_string))
             .as_deref()
             == Some(current)
+}
+
+fn readiness_probe(response: &str, previous: &str, current: &str, expected: Option<&str>) -> Probe {
+    if previous.is_empty() || current.is_empty() || previous == current {
+        return Probe::NotReady;
+    }
+    let probe = probe_from_response(response);
+    if probe != Probe::Ready {
+        return probe;
+    }
+    let fields: serde_json::Value =
+        serde_json::from_str(response.strip_prefix("OK ").unwrap()).unwrap();
+    // Older binaries lack socket invocation provenance. Only accept its absence
+    // when revision provenance is absent too; a reported stale ID is never OK.
+    if !new_invocation_ready(response, previous, current)
+        && (fields.get("invocation_id").is_some() || fields.get("config_revision").is_some())
+    {
+        return Probe::NotReady;
+    }
+    match (expected, fields.get("config_revision")) {
+        (Some(expected), Some(value)) if value.as_str() != Some(expected) => {
+            Probe::RevisionMismatch
+        }
+        (Some(_), None) => Probe::ReadyLegacyRevision,
+        _ => Probe::Ready,
+    }
 }
 
 /// Readiness policy with injectable systemd/control/clock seams.
@@ -216,6 +242,10 @@ pub(super) fn wait_until_ready_with(
             }
             "active" => match probe() {
                 Probe::Ready => return Readiness::Ready,
+                Probe::ReadyLegacyRevision => return Readiness::ReadyLegacyRevision,
+                Probe::RevisionMismatch => return Readiness::Failed(
+                    "The new service loaded a different config revision than the saved settings; reload settings and apply again.".into()
+                ),
                 Probe::Legacy => saw_legacy = true,
                 Probe::NotReady | Probe::Unreachable => {}
             },
@@ -324,6 +354,51 @@ mod tests {
             "new"
         ));
         assert!(new_invocation_ready(new, "old", "new"));
+    }
+
+    #[test]
+    fn readiness_requires_saved_revision_and_documents_legacy_fallback() {
+        let ready =
+            "OK {\"ui_ready\":true,\"invocation_id\":\"new\",\"config_revision\":\"saved\"}";
+        assert_eq!(
+            readiness_probe(ready, "old", "new", Some("saved")),
+            Probe::Ready
+        );
+        assert_eq!(
+            readiness_probe(ready, "old", "new", Some("other")),
+            Probe::RevisionMismatch
+        );
+        assert_eq!(
+            readiness_probe(ready, "old", "old", Some("other")),
+            Probe::NotReady
+        );
+        let legacy = "OK {\"ui_ready\":true}";
+        assert_eq!(
+            readiness_probe(legacy, "old", "new", Some("saved")),
+            Probe::ReadyLegacyRevision
+        );
+        assert_eq!(
+            readiness_probe(legacy, "old", "old", Some("saved")),
+            Probe::NotReady
+        );
+        let stale = "OK {\"ui_ready\":true,\"invocation_id\":\"old\"}";
+        assert_eq!(
+            readiness_probe(stale, "old", "new", Some("saved")),
+            Probe::NotReady
+        );
+        let missing_ui = "OK {\"invocation_id\":\"new\",\"config_revision\":\"saved\"}";
+        assert_eq!(
+            readiness_probe(missing_ui, "old", "new", Some("saved")),
+            Probe::Legacy
+        );
+        let (failed, _) = run(&[snap("active", 0)], &[Probe::RevisionMismatch]);
+        assert!(
+            matches!(failed, Readiness::Failed(message) if message.contains("different config revision"))
+        );
+        assert_eq!(
+            run(&[snap("active", 0)], &[Probe::ReadyLegacyRevision]).0,
+            Readiness::ReadyLegacyRevision
+        );
     }
 
     #[test]

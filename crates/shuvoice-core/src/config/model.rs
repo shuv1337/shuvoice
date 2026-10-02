@@ -16,7 +16,7 @@ use super::defaults::{
     DEFAULT_OPENAI_TTS_MODEL_ID, DEFAULT_OPENAI_TTS_VOICE_ID, DEFAULT_SHERPA_MODEL_NAME,
     DEFAULT_TEXT_REPLACEMENTS, config_section_fields,
 };
-use super::io::{load_raw, toml_dumps, write_atomic};
+use super::io::{toml_dumps, write_atomic};
 use super::migrate::migrate_to_latest;
 use crate::error::{CoreError, CoreResult};
 use crate::postprocess::{CompiledTextReplacements, compile_text_replacements};
@@ -66,6 +66,8 @@ pub struct ResolvedRaw {
 /// Fully validated runtime configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// Runtime provenance only; never persisted as a config key.
+    pub loaded_config_revision: Option<String>,
     pub config_version: u32,
     /// Recognition context, distinct from post-transcription replacements.
     pub recognition_hints: Vec<String>,
@@ -184,6 +186,7 @@ impl Default for Config {
         let text_replacements = DEFAULT_TEXT_REPLACEMENTS.clone();
         let compiled = compile_text_replacements(&text_replacements);
         Self {
+            loaded_config_revision: None,
             config_version: CURRENT_CONFIG_VERSION,
             recognition_hints: super::defaults::DEFAULT_RECOGNITION_HINTS
                 .iter()
@@ -751,14 +754,15 @@ impl Config {
     ) -> CoreResult<(Self, ConfigLoadReport)> {
         let path_buf = super::io::expand_user_path(path);
         let path = path_buf.as_path();
-        let raw = load_raw(path)?;
+        let (raw, revision) = super::io::load_raw_with_revision(path)?;
         let ResolvedRaw {
-            config: cfg,
+            config: mut cfg,
             mut migrated,
             migration,
             derived_mode_from_legacy,
             ignored_keys,
         } = Self::resolve_raw(&raw)?;
+        cfg.loaded_config_revision = Some(revision);
 
         let should_persist =
             migration.to_version != migration.from_version || derived_mode_from_legacy;
@@ -1489,6 +1493,30 @@ mod tests {
         assert_eq!(cfg.text_replacements, *DEFAULT_TEXT_REPLACEMENTS);
         assert_eq!(cfg.asr_backend, AsrBackendKind::Sherpa);
         assert_eq!(cfg.tts_backend, TtsBackendKind::Elevenlabs);
+    }
+
+    #[test]
+    fn loaded_revision_tracks_consumed_bytes_not_later_file_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let missing = Config::load_from_path(&path).unwrap();
+        assert_eq!(
+            missing.loaded_config_revision.as_deref(),
+            Some(crate::settings::ABSENT_REVISION)
+        );
+        std::fs::write(&path, "config_version = 1\n[overlay]\nfont_size = 30\n").unwrap();
+        let expected = crate::settings::revision(&path).unwrap();
+        let config = Config::load_from_path(&path).unwrap();
+        std::fs::write(&path, "config_version = 1\n[overlay]\nfont_size = 31\n").unwrap();
+        assert_eq!(config.font_size, 30);
+        assert_eq!(
+            config.loaded_config_revision.as_deref(),
+            Some(expected.as_str())
+        );
+        assert_ne!(
+            config.loaded_config_revision.unwrap(),
+            crate::settings::revision(&path).unwrap()
+        );
     }
 
     #[test]
