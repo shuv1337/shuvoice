@@ -9,14 +9,18 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-src="${GPUIX_SRC:-$HOME/repos/gpuix}"
+src="${1:-${GPUIX_SRC:-$HOME/repos/gpuix}}"
 tag="@gpuix/react@0.10.0"
 patch="$here/patches/gpui-primary-seat.patch"
 
 if [ ! -d "$src/.git" ]; then
   git clone --depth 1 --branch "$tag" https://github.com/remorses/gpuix "$src"
 fi
-git -C "$src" submodule update --init --depth 1 zed
+if [ ! -f "$src/zed/Cargo.toml" ]; then
+  git -C "$src" submodule update --init --depth 1 zed
+fi
+test "$(git -C "$src/zed" rev-parse HEAD)" = '81c99f816b4a5f69d3c014774068034c24d1d7af'
+test "$(git -C "$src" rev-parse HEAD)" = "$(git -C "$src" rev-parse "$tag^{commit}")"
 
 client="crates/gpui_linux/src/linux/wayland/client.rs"
 if ! grep -q 'ignoring additional wl_seat global' "$src/zed/$client"; then

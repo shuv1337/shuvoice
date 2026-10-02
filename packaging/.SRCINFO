@@ -8,6 +8,7 @@ pkgbase = shuvoice-git
 	makedepends = git
 	makedepends = cargo
 	makedepends = rust
+	makedepends = bun
 	makedepends = pkgconf
 	makedepends = clang
 	makedepends = gtk4
@@ -17,6 +18,7 @@ pkgbase = shuvoice-git
 	depends = gtk4
 	depends = gtk4-layer-shell
 	depends = alsa-lib
+	depends = libxkbcommon
 	depends = wtype
 	depends = wl-clipboard
 	depends = pipewire
@@ -31,6 +33,10 @@ pkgbase = shuvoice-git
 	conflicts = shuvoice
 	options = !lto
 	source = git+https://github.com/shuv1337/shuvoice.git
+	source = gpuix::git+https://github.com/remorses/gpuix.git#tag=@gpuix/react@0.10.0
+	source = zed::git+https://github.com/remorses/zed.git#commit=81c99f816b4a5f69d3c014774068034c24d1d7af
+	sha256sums = SKIP
+	sha256sums = SKIP
 	sha256sums = SKIP
 
 pkgname = shuvoice-git

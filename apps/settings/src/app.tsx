@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from '@gpuix/react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@gpuix/react/select'
 import { type Bridge, BridgeError, type BridgeEvent } from './bridge.ts'
 import type { Brand } from './branding.ts'
-import { diff, errorsByField, formatNumber, parseNumber, step, visible, type Values } from './draft.ts'
+import { diff, errorsByField, formatNumber, parseNumber, step, visible, searchFields, supports, type Values } from './draft.ts'
 import {
   SECTION_LABELS,
   type ApplyResult,
@@ -29,7 +29,7 @@ const C = {
   lineStrong: '#44444f',
   text: '#e6e6ea',
   dim: '#9a9aa6',
-  faint: '#6d6d78',
+  faint: '#9a9aa6',
   accent: '#7aa2f7',
   onAccent: '#101014',
   ok: '#9ece6a',
@@ -37,9 +37,9 @@ const C = {
   bad: '#f7768e',
 }
 
-type Page = Section | 'service'
+type Page = Section | 'service' | 'shortcuts'
 
-type Step = 'validating' | 'waiting_idle' | 'saving' | 'restarting'
+type Step = 'validating' | 'waiting_idle' | 'reserving' | 'saving' | 'restarting'
 
 type Phase =
   | { kind: 'loading' }
@@ -107,6 +107,8 @@ function Button({ label, onClick, primary, disabled, testId }: {
   return (
     <div
       testId={testId}
+      tabIndex={disabled ? -1 : 0}
+      onKeyDown={e => { if (!disabled && (e.key === 'enter' || e.key === 'space')) onClick() }}
       onClick={disabled ? undefined : onClick}
       style={{
         paddingLeft: 14,
@@ -221,6 +223,8 @@ function ChoiceControl({ field, value, choices, onValue }: {
 
 const INPUT_STYLE = {
   padding: 8,
+  minHeight: 36,
+  flexShrink: 0,
   borderRadius: 6,
   borderWidth: 1,
   borderColor: C.line,
@@ -234,6 +238,8 @@ function Switch({ field, value, onValue }: { field: FieldMeta; value: Json; onVa
     <div
       testId={`field-${field.id}`}
       onClick={() => onValue(!on)}
+      tabIndex={0}
+      onKeyDown={e => { if (e.key === 'enter' || e.key === 'space') onValue(!on) }}
       style={{
         width: 44,
         height: 24,
@@ -315,6 +321,32 @@ function deviceChoices(devices: InputDevice[] | null, value: Json): { selected: 
   return { selected, choices }
 }
 
+function CollectionControl({ field, value, onValue, onInvalid }: { field: FieldMeta; value: Json; onValue: (v: Json) => void; onInvalid: (m: string) => void }) {
+  const map = field.kind.type === 'string_map'
+  const decode = (v: Json): string[][] => map ? Object.entries(v && !Array.isArray(v) && typeof v === 'object' ? v : {}).map(([k, v]) => [k, String(v)]) : (Array.isArray(v) ? v : []).map(v => [String(v)])
+  const [rows, setRows] = useState(() => decode(value))
+  const [query, setQuery] = useState('')
+  const sent = useRef(value)
+  useEffect(() => { if (value !== sent.current) { setRows(decode(value)); sent.current = value } }, [value])
+  const update = (next: string[][]) => {
+    setRows(next)
+    // JSON objects cannot represent duplicate keys. Keep these rows locally
+    // until they can be sent losslessly; Rust validates all representable values.
+    if (map && new Set(next.map(r => r[0])).size !== next.length) { onInvalid('Duplicate correction'); return }
+    const nextValue = map ? Object.fromEntries(next) : next.map(r => r[0] ?? '')
+    sent.current = nextValue
+    onValue(nextValue)
+  }
+  return <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <input testId={`search-${field.id}`} placeholder="Filter entries" value={query} onChange={e => setQuery(e.value ?? '')} style={{ ...INPUT_STYLE, width: 320 }} />
+    {rows.map((row, i) => row.join(' ').toLowerCase().includes(query.toLowerCase()) ? <div key={i} style={{ display: 'flex', flexDirection: 'row', gap: 8 }}>
+      {row.map((text, j) => <input key={j} testId={`entry-${field.id}-${i}-${j}`} value={text} onChange={e => update(rows.map((r, n) => n === i ? r.map((v, k) => k === j ? e.value ?? '' : v) : r))} style={{ ...INPUT_STYLE, width: map ? 220 : 360 }} />)}
+      <Button label="Remove" onClick={() => update(rows.filter((_, n) => n !== i))} />
+    </div> : null)}
+    <Button label={map ? 'Add correction' : 'Add term'} testId={`add-${field.id}`} onClick={() => { setQuery(''); update([...rows, map ? ['', ''] : ['']]) }} />
+  </div>
+}
+
 function FieldRow({ field, value, error, note, extra, devices, onValue, onInvalid }: {
   field: FieldMeta
   value: Json
@@ -342,6 +374,13 @@ function FieldRow({ field, value, error, note, extra, devices, onValue, onInvali
     case 'text':
       control = <TextControl field={field} value={value} onValue={onValue} />
       break
+    case 'optional_text':
+      control = <div style={{ display: 'flex', flexDirection: 'row', gap: 8 }}><TextControl field={field} value={value} onValue={onValue} /><Button label="Unset" onClick={() => onValue(null)} /></div>
+      break
+    case 'string_list':
+    case 'string_map':
+      control = <CollectionControl field={field} value={value} onValue={onValue} onInvalid={onInvalid} />
+      break
     case 'audio_device': {
       const { selected, choices } = deviceChoices(devices, value)
       control = (
@@ -357,9 +396,10 @@ function FieldRow({ field, value, error, note, extra, devices, onValue, onInvali
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <Text color={C.dim} size={12}>
-        {field.label}
-      </Text>
+      <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+        <Text color={C.dim} size={12}>{field.label}</Text>
+        <Button label="Reset to default" testId={`reset-${field.id}`} onClick={() => onValue(field.default ?? null)} />
+      </div>
       {control}
       {field.help ? (
         <Text color={C.faint} size={12}>
@@ -383,11 +423,13 @@ function FieldRow({ field, value, error, note, extra, devices, onValue, onInvali
 function ServicePage({ status, snap }: { status: ServiceStatus | null; snap: Snapshot | null }) {
   const rows: [string, string][] = [
     ['Service', status ? status.active_state : '…'],
-    ['Overlay', status?.ui_ready === true ? 'Ready' : status?.ui_ready === false ? 'Starting' : '—'],
+    ['Overlay', status?.ui_ready === true ? 'Ready' : status?.active_state === 'active' && status.ui_ready === false ? 'Starting' : '—'],
     ['Dictation', status?.stt ?? '—'],
     ['Read aloud', status?.tts ?? '—'],
   ]
   if (snap) rows.push(['Config file', snap.path])
+  if (snap?.config_error) rows.push(['Config error', snap.config_error])
+  for (const secret of snap?.secrets ?? []) rows.push([secret.env, secret.present ? `Set · ${secret.source ?? 'source unavailable'}` : 'Not set'])
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {rows.map(([label, value]) => (
@@ -447,7 +489,28 @@ function Splash({ src }: { src: string }) {
   )
 }
 
-export function App({ bridge, brand }: { bridge: Bridge; brand: Brand }) {
+export function App({ bridge, brand, onboarding: initialOnboarding = false }: { bridge: Bridge; brand: Brand; onboarding?: boolean }) {
+  const [hello, setHello] = useState<{ features?: string[] } | null>(null)
+  const [onboarding, setOnboarding] = useState(initialOnboarding)
+  const [stage, setStage] = useState(0)
+  const [query, setQuery] = useState('')
+  const [highlight, setHighlight] = useState('')
+  const [advanced, setAdvanced] = useState(false)
+  const [outputs, setOutputs] = useState<InputDevice[]>([])
+  const [hints, setHints] = useState<{ supported: boolean; detail: string } | null>(null)
+  const [previewText, setPreviewText] = useState('')
+  const [preview, setPreview] = useState<{ output: string; builtins: Record<string, string> } | null>(null)
+  const [models, setModels] = useState<{ id: string; label: string; installed: boolean; size_hint: string | null }[]>([])
+  const [download, setDownload] = useState<{ id: string; text: string; fraction: number | null } | null>(null)
+  const [operationError, setOperationError] = useState('')
+  const [modelEpoch, setModelEpoch] = useState(0)
+  const [shortcut, setShortcut] = useState<{ current: { id: string; label: string } | null; options: { id: string; label: string }[]; config_path: string | null; error: string | null } | null>(null)
+  const [binding, setBinding] = useState('')
+  const [shortcutResult, setShortcutResult] = useState<{ status: string; message: string; conflicts: string[]; backup: string | null } | null>(null)
+  const [shortcutPreview, setShortcutPreview] = useState<string | null>(null)
+  const [formEpoch, setFormEpoch] = useState(0)
+  const [shortcutBusy, setShortcutBusy] = useState(false)
+  const feature = (name: string) => supports(hello, name)
   const [schema, setSchema] = useState<Schema | null>(null)
   const [snap, setSnap] = useState<Snapshot | null>(null)
   const [draft, setDraft] = useState<Values>({})
@@ -465,22 +528,24 @@ export function App({ bridge, brand }: { bridge: Bridge; brand: Brand }) {
   }, [])
 
   const load = useCallback(async () => {
-    const [nextSchema, nextSnap] = await Promise.all([
+    const [nextSchema, nextSnap, greeting] = await Promise.all([
       bridge.call<Schema>('schema'),
       bridge.call<Snapshot>('snapshot'),
+      bridge.call<{ features?: string[] }>('hello'),
     ])
     setSchema(nextSchema)
     setSnap(nextSnap)
-    setDraft(nextSnap.values)
+    setHello(greeting)
+    setDraft(initialOnboarding && supports(greeting, 'onboarding_defaults') ? (await bridge.call<{ values: Values }>('onboarding_defaults')).values : nextSnap.values)
     setErrors({})
     setPhase({ kind: 'idle' })
   }, [bridge])
 
   useEffect(() => {
-    load().catch((e: Error) => setPhase({ kind: 'error', message: e.message }))
+    load().catch((e: Error) => { setHello(null); setOnboarding(true); setPhase({ kind: 'error', message: e.message }) })
     bridge
-      .call<{ devices: InputDevice[] }>('devices')
-      .then((r) => setDevices(r.devices))
+      .call<{ devices: InputDevice[]; outputs?: InputDevice[] }>('devices')
+      .then((r) => { setDevices(r.devices); setOutputs(r.outputs ?? []) })
       .catch(() => setDevices([]))
   }, [load, bridge])
 
@@ -492,11 +557,40 @@ export function App({ bridge, brand }: { bridge: Bridge; brand: Brand }) {
   }, [bridge])
 
   const changes = useMemo(() => (snap ? diff(snap.values, draft) : {}), [snap, draft])
+  useEffect(() => {
+    let stale = false
+    const timer = setTimeout(() => {
+      if (supports(hello, 'capabilities')) void bridge.call<{ vocabulary_hints: { supported: boolean; detail: string } }>('capabilities', { changes }).then(r => { if (!stale) setHints(r.vocabulary_hints) }).catch(e => { if (!stale) setOperationError(e.message) })
+      if (supports(hello, 'models')) void bridge.call<{ required: typeof models }>('models', { changes }).then(r => { if (!stale) setModels(r.required) }).catch(e => { if (!stale) setOperationError(e.message) })
+      if (supports(hello, 'corrections_preview')) void bridge.call<{ output: string; builtins: Record<string, string> }>('corrections_preview', { changes, text: previewText }).then(r => { if (!stale) setPreview(r) }).catch(e => { if (!stale) setOperationError(e.message) })
+    }, 250)
+    return () => { stale = true; clearTimeout(timer) }
+  }, [hello, changes, previewText, modelEpoch])
+  useEffect(() => {
+    if (supports(hello, 'shortcut_get')) void bridge.call<NonNullable<typeof shortcut>>('shortcut_get').then(r => { setShortcut(r); setBinding(r.current?.id ?? r.options[0]?.id ?? '') }).catch(e => setOperationError(e.message))
+  }, [hello])
+  const downloadModel = async (id: string) => {
+    if (applying.current) return
+    applying.current = true
+    setOperationError('')
+    setDownload({ id, text: 'Downloading…', fraction: null })
+    try { await bridge.call('model_download', { id }, e => setDownload({ id, text: String(e.text ?? 'Downloading…'), fraction: typeof e.fraction === 'number' ? e.fraction : null })); setModelEpoch(n => n + 1) }
+    catch (e) { if (!(e instanceof BridgeError && e.kind === 'cancelled')) setOperationError((e as Error).message) }
+    finally { setDownload(null); applying.current = false }
+  }
+  const setShortcutBinding = async (dry_run: boolean) => {
+    if (shortcutBusy) return
+    setShortcutBusy(true)
+    try { const r = await bridge.call<NonNullable<typeof shortcutResult>>('shortcut_set', { id: binding, dry_run }); setShortcutResult(r); setShortcutPreview(dry_run && !['error', 'unsupported'].includes(r.status) ? binding : null); if (!dry_run) setShortcut(await bridge.call<NonNullable<typeof shortcut>>('shortcut_get')) }
+    catch (e) { setOperationError((e as Error).message); setShortcutPreview(null) }
+    finally { setShortcutBusy(false) }
+  }
   const dirty = Object.keys(changes).length
   const hasErrors = Object.keys(errors).length > 0
-  const busy = phase.kind === 'applying' || phase.kind === 'loading'
+  const busy = phase.kind === 'applying' || phase.kind === 'loading' || download !== null
 
   const setValue = (id: string, value: Json) => {
+    if (busy) return
     setDraft((d) => ({ ...d, [id]: value }))
     setErrors(({ [id]: _, '': __, ...rest }) => rest)
     if (phase.kind === 'done' || phase.kind === 'error') setPhase({ kind: 'idle' })
@@ -506,10 +600,11 @@ export function App({ bridge, brand }: { bridge: Bridge; brand: Brand }) {
     setErrors(errorsByField(list))
     const first = schema?.fields.find((f) => list.some((e) => e.field === f.id))
     if (first) setPage(first.section)
+    if (first) { setHighlight(first.id); setAdvanced(true) }
   }
 
   const apply = async () => {
-    if (!snap || dirty === 0 || hasErrors || busy || applying.current) return
+    if (!snap || (!onboarding && dirty === 0) || hasErrors || busy || applying.current) return
     applying.current = true
     setPhase({ kind: 'applying', step: 'validating', busy: [] })
     const onEvent = (event: BridgeEvent) => {
@@ -518,11 +613,12 @@ export function App({ bridge, brand }: { bridge: Bridge; brand: Brand }) {
       }
     }
     try {
-      const result = await bridge.call<ApplyResult>('apply', { revision: snap.revision, changes }, onEvent)
+      const result = await bridge.call<ApplyResult>('apply', { revision: snap.revision, changes, ...(onboarding ? { onboarding: true } : {}) }, onEvent)
       const fresh = await bridge.call<Snapshot>('snapshot')
       setSnap(fresh)
       setDraft(fresh.values)
       setPhase(outcomePhase(result))
+      if (onboarding && result.restart.outcome === 'ready') setOnboarding(false)
     } catch (e) {
       if (!(e instanceof BridgeError)) {
         setPhase({ kind: 'error', message: (e as Error).message })
@@ -547,13 +643,14 @@ export function App({ bridge, brand }: { bridge: Bridge; brand: Brand }) {
 
   const revert = () => {
     if (!snap) return
+    setFormEpoch(n => n + 1)
     setDraft(snap.values)
     setErrors({})
     setPhase({ kind: 'idle' })
   }
 
-  const fields = (schema?.fields ?? []).filter((f) => f.section === page && visible(f, draft))
-  const pages: Page[] = [...(schema?.sections ?? []), 'service']
+  const fields = (schema?.fields ?? []).filter((f) => f.section === page && (visible(f, draft) || f.id === highlight))
+  const pages: Page[] = [...new Set<Section>([...(schema?.sections ?? []), 'vocabulary', 'advanced']), 'shortcuts', 'service']
   const summary = serviceSummary(status)
 
   let footerText = ''
@@ -565,7 +662,7 @@ export function App({ bridge, brand }: { bridge: Bridge; brand: Brand }) {
         ? busyText(phase.busy)
         : phase.step === 'restarting'
           ? 'Restarting ShuVoice…'
-          : 'Saving…'
+          : phase.step === 'reserving' ? 'Reserving ShuVoice…' : phase.step === 'validating' ? 'Checking settings…' : 'Saving…'
     footerColor = phase.step === 'waiting_idle' ? C.warn : C.dim
   } else if (phase.kind === 'done') [footerText, footerColor] = [phase.text, phase.tone === 'ok' ? C.ok : C.warn]
   else if (phase.kind === 'conflict') [footerText, footerColor] = ['Config changed on disk', C.warn]
@@ -588,6 +685,9 @@ export function App({ bridge, brand }: { bridge: Bridge; brand: Brand }) {
   }
 
   const showSplash = splashHeld || phase.kind === 'loading'
+  const stages = ['Engine', 'Microphone', 'Read-aloud', 'Shortcut', 'Finish']
+  const moveStage = (next: number) => { setStage(next); setPage((['speech', 'audio', 'text_to_speech', 'shortcuts', 'service'] as Page[])[next]!); setHighlight('') }
+  const row = (f: FieldMeta) => <div key={`${f.id}-${formEpoch}`} style={{ padding: 8, flexShrink: 0, borderRadius: 6, borderWidth: f.id === highlight ? 1 : 0, borderColor: C.accent }}><FieldRow field={f} value={draft[f.id] ?? null} error={errors[f.id]} note={keyNote(f)} extra={snap?.extra_choices[f.id] ?? []} devices={f.kind.type === 'audio_device' && f.kind.direction === 'output' ? outputs : devices} onValue={v => setValue(f.id, v)} onInvalid={message => setErrors(e => ({ ...e, [f.id]: message }))} /></div>
 
   return (
     <div style={{ position: 'relative', display: 'flex', flexDirection: 'row', width: '100%', height: '100%', backgroundColor: C.bg }}>
@@ -595,14 +695,16 @@ export function App({ bridge, brand }: { bridge: Bridge; brand: Brand }) {
         <div testId="sidebar-logo" style={{ paddingLeft: 4, paddingRight: 4, paddingTop: 4, paddingBottom: 12 }}>
           <img src={brand.lockup} alt="ShuVoice" objectFit="contain" style={{ width: 168, height: 73 }} />
         </div>
-        {pages.map((p) => {
-          const label = p === 'service' ? 'Service' : SECTION_LABELS[p]
+        {onboarding ? <><Text bold>Set up ShuVoice</Text>{stages.map((label, i) => <Button key={label} label={label} primary={i === stage} onClick={() => moveStage(i)} />)}<Button label="Skip to settings" testId="skip-onboarding" onClick={() => setOnboarding(false)} /></> : pages.map((p) => {
+          const label = p === 'service' ? 'Service' : p === 'shortcuts' ? 'Shortcuts' : SECTION_LABELS[p]
           const pageHasError = p !== 'service' && schema?.fields.some((f) => f.section === p && errors[f.id])
           return (
             <div
               key={p}
               testId={`nav-${p}`}
-              onClick={() => setPage(p)}
+              tabIndex={0}
+              onKeyDown={e => { if (e.key === 'enter' || e.key === 'space') setPage(p) }}
+              onClick={() => { setPage(p); setHighlight(''); setAdvanced(false) }}
               style={{
                 padding: 8,
                 borderRadius: 6,
@@ -618,10 +720,35 @@ export function App({ bridge, brand }: { bridge: Bridge; brand: Brand }) {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 }}>
-        <div style={{ flexGrow: 1, minHeight: 0, overflowY: 'scroll', padding: 24, gap: 20, display: 'flex', flexDirection: 'column' }}>
+        {!onboarding ? <input testId="global-search" placeholder="Search settings" value={query} onChange={e => setQuery(e.value ?? '')} style={{ ...INPUT_STYLE, margin: 16 }} /> : null}
+        <div key={`${page}-${highlight}`} style={{ flexGrow: 1, minHeight: 0, overflowY: 'scroll', padding: 24, gap: 20, display: 'flex', flexDirection: 'column' }}>
+          {searchFields(schema?.fields ?? [], query).map(f => <Button key={f.id} label={`${SECTION_LABELS[f.section]} · ${f.label}`} testId={`result-${f.id}`} onClick={() => { setPage(f.section); setHighlight(f.id); setAdvanced(true); setQuery('') }} />)}
           <Text bold size={20} testId="page-title">
-            {page === 'service' ? 'Service' : SECTION_LABELS[page]}
+            {onboarding ? stages[stage] : page === 'service' ? 'Service' : page === 'shortcuts' ? 'Shortcuts' : SECTION_LABELS[page]}
           </Text>
+          {operationError ? <Text color={C.bad}>{operationError}</Text> : null}
+          {page === 'advanced' && fields.length === 0 ? <Text color={C.dim}>No advanced fields exposed by this bridge.</Text> : null}
+          {onboarding && !feature('onboarding_defaults') ? <Text color={C.warn}>Setup requires a newer ShuVoice bridge. Open settings or run shuvoice wizard.</Text> : null}
+          {page === 'speech' && feature('models') ? <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {models.map(m => <div key={m.id} style={{ display: 'flex', flexDirection: 'row', gap: 12, alignItems: 'center' }}><Text testId={`model-${m.id}`}>{`${m.label} · ${m.installed ? 'Installed' : m.size_hint ?? 'Not installed'}`}</Text>{!m.installed && feature('model_download') ? <Button label="Download" testId={`download-${m.id}`} disabled={busy} onClick={() => void downloadModel(m.id)} /> : null}</div>)}
+          </div> : null}
+          {download ? <><Text>{download.text}</Text><div style={{ height: 6, backgroundColor: C.line }}><div style={{ height: 6, width: `${Math.max(0, Math.min(1, download.fraction ?? 0.1)) * 100}%`, backgroundColor: C.accent }} /></div><Button label="Cancel download" onClick={cancel} /></> : null}
+          {page === 'vocabulary' ? <>
+            {hints ? <><Text color={hints.supported ? C.ok : C.warn}>{hints.supported ? 'Hints supported' : 'Hints unsupported'}</Text><Text color={C.dim}>{hints.detail}</Text></> : <Text color={C.dim}>Hint support unavailable from this bridge.</Text>}
+            {feature('corrections_preview') ? <><Text bold>Correction preview</Text><input testId="correction-preview" value={previewText} placeholder="Try a transcription" onChange={e => setPreviewText(e.value ?? '')} style={INPUT_STYLE} /><Text>{preview?.output ?? ''}</Text><Text color={C.dim}>{`Built-ins: ${Object.entries(preview?.builtins ?? {}).map(([a, b]) => `${a} → ${b}`).join(' · ')}`}</Text></> : null}
+          </> : null}
+          {page === 'shortcuts' ? <>
+            {!feature('shortcut_get') || !feature('shortcut_set') ? <Text color={C.dim}>Shortcut editing requires a newer ShuVoice bridge.</Text> : <>
+              <Text>{`Push-to-talk: ${shortcut?.current?.label ?? 'Not configured'}`}</Text>
+              {shortcut?.error ? <Text color={C.warn}>{shortcut.error}</Text> : null}
+              {shortcut?.config_path ? <Text color={C.dim}>{shortcut.config_path}</Text> : null}
+              <ChoiceControl field={{ id: 'shortcut', section: 'advanced', label: 'Shortcut', help: '', unit: '', kind: { type: 'choice', choices: [] } }} value={binding} choices={(shortcut?.options ?? []).map(o => ({ value: o.id, label: o.label }))} onValue={v => { setBinding(v); setShortcutPreview(null); setShortcutResult(null) }} />
+              <Text color={C.dim}>Applies immediately to Hyprland.</Text>
+              <Button label="Preview shortcut" testId="shortcut-preview" disabled={!binding || !!shortcut?.error || shortcutBusy} onClick={() => void setShortcutBinding(true)} />
+              {shortcutResult ? <><Text>{shortcutResult.message}</Text>{shortcutResult.conflicts.map(c => <Text key={c} color={C.warn}>{c}</Text>)}{shortcutResult.backup ? <Text>{`Backup: ${shortcutResult.backup}`}</Text> : null}</> : null}
+              {shortcutPreview === binding ? <><Button label="Confirm shortcut" testId="shortcut-confirm" disabled={shortcutBusy} onClick={() => void setShortcutBinding(false)} /><Button label="Cancel" onClick={() => setShortcutPreview(null)} /></> : null}
+            </>}
+          </> : null}
           {snap?.config_error ? (
             <div style={{ padding: 10, borderRadius: 6, backgroundColor: '#3a2228' }}>
               <Text color={C.bad} testId="config-error">{`Current config is invalid: ${snap.config_error}`}</Text>
@@ -630,19 +757,7 @@ export function App({ bridge, brand }: { bridge: Bridge; brand: Brand }) {
           {page === 'service' ? (
             <ServicePage status={status} snap={snap} />
           ) : (
-            fields.map((f) => (
-              <FieldRow
-                key={f.id}
-                field={f}
-                value={draft[f.id] ?? null}
-                error={errors[f.id]}
-                note={keyNote(f)}
-                extra={snap?.extra_choices[f.id] ?? []}
-                devices={devices}
-                onValue={(v) => setValue(f.id, v)}
-                onInvalid={(message) => setErrors((e) => ({ ...e, [f.id]: message }))}
-              />
-            ))
+            <>{highlight ? fields.filter(f => f.id === highlight).map(row) : null}{fields.filter(f => !f.advanced && f.id !== highlight).map(row)}{fields.some(f => f.advanced) ? <Button label={advanced ? 'Hide advanced' : 'Advanced'} testId="advanced-toggle" onClick={() => setAdvanced(!advanced)} /> : null}{advanced ? fields.filter(f => f.advanced && f.id !== highlight).map(row) : null}</>
           )}
         </div>
 
@@ -659,11 +774,14 @@ export function App({ bridge, brand }: { bridge: Bridge; brand: Brand }) {
           <Text color={summary.color} testId="service-summary">
             {summary.text}
           </Text>
-          {dirty > 0 && !busy ? <Button label="Revert" onClick={revert} testId="revert" /> : null}
+          {models.some(m => !m.installed) ? <Text color={C.warn}>Required model missing</Text> : null}
+          {onboarding && stage > 0 ? <Button label="Back" disabled={busy} onClick={() => moveStage(stage - 1)} /> : null}
+          {onboarding && stage < 4 ? <Button label="Next" testId="onboarding-next" primary disabled={busy} onClick={() => moveStage(stage + 1)} /> : null}
+          {(dirty > 0 || hasErrors) && !busy ? <Button label="Revert" onClick={revert} testId="revert" /> : null}
           <Button
-            label="Apply & Restart"
+            label={onboarding ? 'Finish setup' : 'Apply & Restart'}
             primary
-            disabled={dirty === 0 || hasErrors || busy}
+            disabled={(!onboarding && dirty === 0) || hasErrors || busy || (onboarding && (stage !== 4 || !feature('onboarding_defaults')))}
             onClick={() => void apply()}
             testId="apply"
           />

@@ -67,6 +67,26 @@ sudo pacman -S xdotool          # XWayland injection fallback
 # python                        # only if you run optional NeMo/Moonshine/Melo workers
 ```
 
+### Settings window
+
+The Arch package includes `shuvoice-settings` and the ShuVoice desktop launcher.
+Open `shuvoice settings` for preferences; `shuvoice wizard` is the setup entry
+point. `shuvoice-settings --onboarding` opens guided setup directly.
+
+For source builds, after building the Rust CLI:
+
+```bash
+cd apps/settings
+bun install --frozen-lockfile
+bun run addon
+bun run build
+SHUVOICE_BIN=../../target/release/shuvoice ./dist/shuvoice-settings
+```
+
+Install the settings executable beside `shuvoice`. The compiled executable
+embeds the patched GPUIX addon; Bun is only needed to build. See
+[`apps/settings/README.md`](../apps/settings/README.md) for pinned native sources.
+
 ### Build
 
 ```bash

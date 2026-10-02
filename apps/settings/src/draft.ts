@@ -7,7 +7,7 @@ export type Values = Record<string, Json>
 export function diff(base: Values, draft: Values): Values {
   const changes: Values = {}
   for (const [id, value] of Object.entries(draft)) {
-    if (base[id] !== value) changes[id] = value
+    if (!equal(base[id], value)) changes[id] = value
   }
   return changes
 }
@@ -23,6 +23,24 @@ export function errorsByField(errors: FieldError[]): Record<string, string> {
 }
 
 export type Parsed = { ok: true; value: number } | { ok: false; message: string }
+
+export function equal(a: Json | undefined, b: Json | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  const keys = Object.keys(a)
+  return keys.length === Object.keys(b).length && keys.every(k => Object.hasOwn(b, k) && equal((a as Record<string, Json>)[k], (b as Record<string, Json>)[k]))
+}
+
+export function searchFields(fields: FieldMeta[], query: string): FieldMeta[] {
+  const normalize = (s: string) => s.toLowerCase().replace(/[-_]/g, ' ')
+  const words = normalize(query).trim().split(/\s+/).filter(Boolean)
+  return words.length ? fields.filter(f => words.every(w => normalize(`${f.label} ${f.id} ${f.help} ${f.section}`).includes(w))) : []
+}
+
+export function supports(hello: { features?: string[] } | null, feature: string): boolean {
+  return hello?.features?.includes(feature) === true
+}
 
 /** Parse numeric text for an int/float field (range is checked by Rust). */
 export function parseNumber(kind: FieldKind, text: string): Parsed {

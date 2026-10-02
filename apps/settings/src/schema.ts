@@ -1,8 +1,8 @@
 // Mirrors the serde output of shuvoice_core::settings and the settings bridge.
 
-export type Json = null | boolean | number | string
+export type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 
-export type Section = 'speech' | 'typing' | 'text_to_speech' | 'audio' | 'appearance'
+export type Section = 'speech' | 'vocabulary' | 'typing' | 'text_to_speech' | 'audio' | 'appearance' | 'advanced'
 
 export interface Choice {
   value: string
@@ -14,8 +14,11 @@ export type FieldKind =
   | { type: 'int'; min: number; max: number }
   | { type: 'float'; min: number; max: number; step: number }
   | { type: 'text'; max_len: number }
+  | { type: 'optional_text'; max_len: number }
+  | { type: 'string_list'; item_max_len: number; max_items: number }
+  | { type: 'string_map'; key_max_len: number; value_max_len: number; max_entries: number }
   | { type: 'choice'; choices: Choice[] }
-  | { type: 'audio_device' }
+  | { type: 'audio_device'; direction?: 'input' | 'output' }
 
 export interface FieldMeta {
   id: string
@@ -24,6 +27,8 @@ export interface FieldMeta {
   help: string
   unit: string
   kind: FieldKind
+  advanced?: boolean
+  default?: Json
 }
 
 export interface Schema {
@@ -35,6 +40,7 @@ export interface SecretPresence {
   env: string
   present: boolean
   used_by: string
+  source?: 'env' | 'local.dev' | 'local.env' | null
 }
 
 export interface Snapshot {
@@ -75,6 +81,8 @@ export interface InputDevice {
 
 export const SECTION_LABELS: Record<Section, string> = {
   speech: 'Speech',
+  vocabulary: 'Vocabulary',
+  advanced: 'Advanced',
   typing: 'Typing',
   text_to_speech: 'Text-to-Speech',
   audio: 'Audio',

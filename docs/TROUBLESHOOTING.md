@@ -1,5 +1,21 @@
 # Troubleshooting
 
+## Settings window
+
+- **Cannot find the bridge:** install `shuvoice-settings` beside `shuvoice`, or
+  launch with `SHUVOICE_BIN=/absolute/path/to/shuvoice`. The app does not search PATH.
+- **No keyboard/mouse input on a multi-seat desktop:** rebuild with
+  `cd apps/settings && bun run addon && bun run build`. The primary-seat patch is
+  required for GPUIX 0.10.0; the stock npm addon may select a virtual seat.
+- **Apply waits:** finish dictation or read-aloud (including paused playback), or
+  cancel the pending Apply. Settings are saved after the service is reserved.
+- **Config changed on disk:** Reload before applying again. Reload discards the
+  draft. A saved-but-failed restart is reported separately from a failed save;
+  check Service diagnostics and the user-unit journal.
+- **Missing model:** download it from Speech. Apply warns but does not install it.
+- **Unavailable setup/shortcut/preview controls:** use a matching recent bridge;
+  older bridges intentionally expose fewer features.
+
 Run these first:
 
 ```bash

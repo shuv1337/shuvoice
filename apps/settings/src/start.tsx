@@ -4,7 +4,12 @@ import { App } from './app.tsx'
 import { Bridge, resolveShuvoiceBin, spawnBridge } from './bridge.ts'
 import { loadBrand } from './branding.ts'
 
-const bridge = new Bridge(spawnBridge(resolveShuvoiceBin()))
+let bridge: Bridge
+try { bridge = new Bridge(spawnBridge(resolveShuvoiceBin())) }
+catch (error) {
+  bridge = new Bridge({ send() {}, onLine() {}, onClose(listener) { listener(`Cannot open settings bridge. Set SHUVOICE_BIN to the shuvoice binary. ${error}`) }, close() {} })
+}
+const onboarding = process.argv.includes('--onboarding')
 const brand = await loadBrand()
 const options = { title: 'ShuVoice Settings', appId: 'shuvoice-settings', width: 920, height: 640 }
 
@@ -13,7 +18,7 @@ if (process.env.SHUVOICE_SETTINGS_AUTOMATION === '1') {
   const renderer = createRenderer()
   renderer.init(options)
   enableAutomation(renderer)
-  render(<App bridge={bridge} brand={brand} />, { ...options, renderer })
+  render(<App bridge={bridge} brand={brand} onboarding={onboarding} />, { ...options, renderer })
 } else {
-  render(<App bridge={bridge} brand={brand} />, options)
+  render(<App bridge={bridge} brand={brand} onboarding={onboarding} />, options)
 }
