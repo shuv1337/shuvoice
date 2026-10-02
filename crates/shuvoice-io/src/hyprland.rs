@@ -256,6 +256,7 @@ mod tests {
     use super::*;
     use crate::process::ScriptedRunner;
     use std::sync::Arc;
+    static CACHE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn token_distinguishes_clipboard_variant() {
@@ -308,6 +309,7 @@ mod tests {
 
     #[test]
     fn detect_keybind_skips_release_and_caches() {
+        let _guard = CACHE_TEST_LOCK.lock().unwrap();
         clear_keybind_cache();
         let r = ScriptedRunner::new();
         let payload = r#"[
@@ -327,6 +329,7 @@ mod tests {
 
     #[test]
     fn detect_does_not_collide_tts_variants() {
+        let _guard = CACHE_TEST_LOCK.lock().unwrap();
         clear_keybind_cache();
         let r = ScriptedRunner::new();
         let payload = r#"[
