@@ -128,6 +128,13 @@ pub fn maybe_restart_running_service(service: &str) -> &'static str {
 /// import its display environment, then wait for overlay readiness. Prints
 /// nothing (the settings bridge uses stdout for its protocol).
 pub fn restart_live(service: &str) -> RestartOutcome {
+    restart_live_with_revision(service, None)
+}
+
+pub fn restart_live_with_revision(
+    service: &str,
+    expected_revision: Option<&str>,
+) -> RestartOutcome {
     let mut previous_invocation = wizard_service::service_invocation_id(&StdCommandRunner, service);
     if previous_invocation.is_empty()
         && matches!(
@@ -157,6 +164,7 @@ pub fn restart_live(service: &str) -> RestartOutcome {
                 &StdCommandRunner,
                 control_socket.as_deref(),
                 &previous_invocation,
+                expected_revision,
             )
         },
     )
@@ -176,6 +184,11 @@ pub fn maybe_restart_running_service_with(
 pub enum RestartOutcome {
     /// Overlay reported ready.
     Ready { action: &'static str },
+    #[serde(rename = "ready")]
+    ReadyLegacyRevision {
+        action: &'static str,
+        message: String,
+    },
     /// Unit healthy but not ready within the budget (e.g. slow model load).
     Starting {
         action: &'static str,
@@ -206,6 +219,10 @@ impl RestartOutcome {
         match self {
             Self::Ready { action: "start" } => "started",
             Self::Ready { .. } => "restarted",
+            Self::ReadyLegacyRevision {
+                action: "start", ..
+            } => "started",
+            Self::ReadyLegacyRevision { .. } => "restarted",
             Self::Starting { .. } => "starting",
             Self::HandoffFailed { .. }
             | Self::ActionFailed { .. }
@@ -227,7 +244,7 @@ fn past_tense(action: &str) -> &'static str {
 /// Print the wizard's human-readable result and return its status word.
 fn report(service: &str, outcome: &RestartOutcome) -> &'static str {
     match outcome {
-        RestartOutcome::Ready { action } => {
+        RestartOutcome::Ready { action } | RestartOutcome::ReadyLegacyRevision { action, .. } => {
             println!(
                 "✓ {} {service} so wizard changes take effect.",
                 past_tense(action)
@@ -302,6 +319,10 @@ fn restart_service(
     }
     match ready() {
         Readiness::Ready => RestartOutcome::Ready { action },
+        Readiness::ReadyLegacyRevision => RestartOutcome::ReadyLegacyRevision {
+            action,
+            message: "The running binary does not report config_revision; readiness used the new invocation and ui_ready only.".into(),
+        },
         Readiness::StillStarting(message) => RestartOutcome::Starting { action, message },
         Readiness::Failed(message) => RestartOutcome::ReadinessFailed { action, message },
     }
@@ -478,6 +499,33 @@ mod tests {
         assert_eq!(status, "starting");
         let result = dispatch_wizard_launch(WizardLaunch::Completed, |_| status);
         assert_eq!(result.code, EXIT_SUCCESS);
+    }
+
+    #[test]
+    fn revision_readiness_outcomes_are_visible_on_the_bridge_wire() {
+        let legacy = restart_service(
+            SERVICE,
+            Some(scripted_state_then_action("active", true)),
+            || Ok(()),
+            || Readiness::ReadyLegacyRevision,
+        );
+        let value = serde_json::to_value(legacy).unwrap();
+        assert_eq!(value["outcome"], "ready");
+        assert!(
+            value["message"]
+                .as_str()
+                .unwrap()
+                .contains("does not report config_revision")
+        );
+        let failed = restart_service(
+            SERVICE,
+            Some(scripted_state_then_action("active", true)),
+            || Ok(()),
+            || Readiness::Failed("different config revision".into()),
+        );
+        let value = serde_json::to_value(failed).unwrap();
+        assert_eq!(value["outcome"], "readiness_failed");
+        assert_eq!(value["message"], "different config revision");
     }
 
     #[test]

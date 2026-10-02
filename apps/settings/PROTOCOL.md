@@ -70,10 +70,15 @@ the idle check and the restart. A stopped service skips the reservation.
 Result: `{ saved: Applied, restart: RestartOutcome }`.
 `RestartOutcome.outcome`: `ready` | `starting` | `handoff_failed` |
 `action_failed` | `readiness_failed` | `unavailable` | `not_active`.
-Readiness is satisfied only by a new service invocation reporting `ui_ready`.
-This confirms invocation/socket freshness, not the loaded config revision:
-`debug_status` does not yet expose a startup config revision. An external editor
-that ignores the writer lock can still change the config before startup loads it.
+Readiness requires a new service invocation reporting `ui_ready` and
+`config_revision` equal to the saved revision. The service hashes the exact file
+bytes loaded at startup (the same SHA-256 used by snapshots), not a later read.
+A different revision returns `readiness_failed` with a clear message.
+If an older binary omits `config_revision`, readiness falls back to the new
+invocation plus `ui_ready`; its `ready` outcome includes a warning `message`.
+Old binaries may also omit the socket's `invocation_id`: only this legacy path
+accepts its absence, using systemd's new InvocationID. A reported stale ID is
+always rejected. Missing `ui_ready` never satisfies readiness.
 
 The service uses additive control commands `maintenance_reserve` (returns
 `OK reserved token=<u64> ttl=120`) and `maintenance_release <token>`.
@@ -83,6 +88,19 @@ atomic save begins, cancellation cannot undo the commit; restart completes.
 If saving consumes 60 seconds of the 120-second lease, it reports saved-but-not-
 restarted instead of risking an expired reservation. Readiness checks systemd's
 new InvocationID against the ID in `debug_status`, rejecting old sockets.
+
+Upgrade compatibility: if the running (previous) binary rejects the reservation
+command as unknown/unsupported, the bridge emits
+`{phase:'reserving', reservation:'unsupported'}` and uses a check-only idle gate,
+rechecking STT/TTS immediately before saving. This is not an atomic lock: old
+binaries can begin work after the final check. Busy responses keep waiting;
+unreachable services and uninspectable activity are never assumed idle.
+Other reservation errors do not enable the fallback.
+
+With `SHUVOICE_SETTINGS_NO_RESTART=1`, Apply saves only: it skips all service
+status/reservation/release/restart calls and emits no `restarting` phase. The
+restart result is `{outcome:'not_active', state:'restart disabled'}`. Bridge
+`status` also performs no service probes in this mode.
 
 `params.onboarding: true`: after a successful save, also writes the
 setup-complete marker, and starts (or restarts) the service.

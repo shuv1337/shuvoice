@@ -49,6 +49,70 @@ fn help_lists_required_subcommands() {
 }
 
 #[test]
+fn settings_save_only_env_skips_service_processes_and_control_socket() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::{fs::PermissionsExt, net::UnixListener};
+    use std::process::Stdio;
+
+    let dir = tempdir().unwrap();
+    let runtime = dir.path().join("runtime");
+    fs::create_dir_all(runtime.join("shuvoice")).unwrap();
+    let listener = UnixListener::bind(runtime.join("shuvoice/control.sock")).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let bin = dir.path().join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let systemctl = bin.join("systemctl");
+    fs::write(
+        &systemctl,
+        "#!/bin/sh\necho called >> \"$PROBE_LOG\"\nexit 1\n",
+    )
+    .unwrap();
+    fs::set_permissions(&systemctl, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_shuvoice"));
+    command
+        .arg("settings-bridge")
+        .env("SHUVOICE_SETTINGS_NO_RESTART", "1")
+        .env("XDG_CONFIG_HOME", dir.path().join("config"))
+        .env("XDG_DATA_HOME", dir.path().join("data"))
+        .env("XDG_RUNTIME_DIR", &runtime)
+        .env("PATH", &bin)
+        .env("PROBE_LOG", dir.path().join("probes"));
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let mut output = BufReader::new(child.stdout.take().unwrap());
+    writeln!(input, "{}", serde_json::json!({"v":1,"id":1,"op":"status"})).unwrap();
+    let mut line = String::new();
+    output.read_line(&mut line).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&line).unwrap()["result"]["state"],
+        "restart disabled"
+    );
+    writeln!(input, "{}", serde_json::json!({"v":1,"id":2,"op":"apply","params":{"revision":"absent","changes":{"overlay.font_size":30}}})).unwrap();
+    loop {
+        line.clear();
+        assert!(output.read_line(&mut line).unwrap() > 0);
+        let response: serde_json::Value = serde_json::from_str(&line).unwrap();
+        if response.get("ok").is_some() {
+            assert_eq!(response["ok"], true, "{response}");
+            assert_eq!(
+                response["result"]["restart"],
+                serde_json::json!({"outcome":"not_active","state":"restart disabled"})
+            );
+            break;
+        }
+        assert_ne!(response["phase"], "restarting");
+    }
+    drop(input);
+    assert!(child.wait().unwrap().success());
+    assert!(!dir.path().join("probes").exists());
+    assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
+}
+
+#[test]
 fn control_help_lists_tts_speak_clipboard() {
     let mut cmd = cargo_bin_cmd!("shuvoice");
     cmd.args(["control", "--help"]);

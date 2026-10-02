@@ -50,11 +50,17 @@ fn home_dir() -> PathBuf {
 /// Existing unversioned files are tagged as `config_version = 0` for migration.
 /// Paths are `~`-expanded.
 pub fn load_raw(path: impl AsRef<Path>) -> CoreResult<Map<String, Value>> {
+    Ok(load_raw_with_revision(path)?.0)
+}
+
+pub(super) fn load_raw_with_revision(
+    path: impl AsRef<Path>,
+) -> CoreResult<(Map<String, Value>, String)> {
     let path = expand_user_path(path);
     if !path.exists() {
         let mut map = Map::new();
         map.insert("config_version".into(), Value::from(CURRENT_CONFIG_VERSION));
-        return Ok(map);
+        return Ok((map, crate::settings::ABSENT_REVISION.into()));
     }
 
     let mut file = File::open(&path).map_err(|source| CoreError::Io {
@@ -82,7 +88,7 @@ pub fn load_raw(path: impl AsRef<Path>) -> CoreResult<Map<String, Value>> {
     if !map.contains_key("config_version") {
         map.insert("config_version".into(), Value::from(0));
     }
-    Ok(map)
+    Ok((map, crate::settings::revision_bytes(&bytes)))
 }
 
 /// Create timestamped backup beside `path`.

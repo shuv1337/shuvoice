@@ -35,6 +35,7 @@ use shuvoice_control::{ControlCommand, ControlHandlers};
 pub struct ControlBridge<S = EnqueueControlAdapter> {
     surface: S,
     ui_ready: Option<Arc<AtomicBool>>,
+    config_revision: Option<String>,
 }
 
 impl ControlBridge<EnqueueControlAdapter> {
@@ -58,12 +59,21 @@ impl<S> ControlBridge<S> {
         Self {
             surface,
             ui_ready: None,
+            config_revision: None,
         }
     }
 
     /// Add desktop readiness to the existing diagnostic JSON contract.
     pub fn with_ui_readiness(mut self, ready: Arc<AtomicBool>) -> Self {
         self.ui_ready = Some(ready);
+        self
+    }
+
+    pub fn with_config_revision(mut self, revision: Option<String>) -> Self {
+        self.config_revision = revision.filter(|value| {
+            value == shuvoice_core::settings::ABSENT_REVISION
+                || (value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit()))
+        });
         self
     }
 
@@ -122,6 +132,9 @@ where
         if let Some(ready) = &self.ui_ready {
             if let Ok(serde_json::Value::Object(mut fields)) = serde_json::from_str(&status) {
                 fields.insert("ui_ready".into(), ready.load(Ordering::Acquire).into());
+                if let Some(revision) = &self.config_revision {
+                    fields.insert("config_revision".into(), revision.clone().into());
+                }
                 if let Ok(invocation) = std::env::var("INVOCATION_ID") {
                     // systemd IDs are 32 ASCII hex digits. Do not let an
                     // arbitrary environment string defeat the JSON byte cap.
@@ -177,6 +190,27 @@ mod tests {
         assert_eq!(
             bridge.on_debug_status(),
             "{\"state\":\"idle\",\"audio\":{\"dropped\":2},\"ui_ready\":true}"
+        );
+    }
+
+    #[test]
+    fn debug_reports_startup_revision_within_wire_byte_budget() {
+        let surface = FakeSurface::default();
+        *surface.debug.lock().unwrap() =
+            serde_json::json!({"padding":"x".repeat(3286)}).to_string();
+        let revision = "a".repeat(64);
+        let bridge = ControlBridge::from_surface(surface)
+            .with_ui_readiness(Arc::new(AtomicBool::new(true)))
+            .with_config_revision(Some(revision.clone()));
+        let debug = bridge.on_debug_status();
+        assert!(
+            debug.len() + 90 <= 3500,
+            "reserve bytes for the invocation ID: {}",
+            debug.len()
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&debug).unwrap()["config_revision"],
+            revision
         );
     }
 

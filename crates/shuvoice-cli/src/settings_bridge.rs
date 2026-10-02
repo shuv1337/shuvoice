@@ -98,6 +98,7 @@ struct ChangeParams {
 
 /// Side-effect seams so the protocol is testable without the live service.
 pub struct Context {
+    pub no_restart: bool,
     /// Only validated inventories can authorize download destinations.
     pub model_catalog: Mutex<BTreeMap<String, Config>>,
     pub config_path: PathBuf,
@@ -105,7 +106,7 @@ pub struct Context {
     pub status: Box<dyn Fn() -> Value + Send + Sync>,
     pub devices: Box<dyn Fn() -> Result<Value, String> + Send + Sync>,
     /// Start/restart the service and wait for readiness; returns the outcome.
-    pub restart: Box<dyn Fn() -> Value + Send + Sync>,
+    pub restart: Box<dyn Fn(&str) -> Value + Send + Sync>,
     pub reserve: Box<dyn Fn() -> Result<u64, String> + Send + Sync>,
     pub release: Box<dyn Fn(u64) + Send + Sync>,
     pub marker: Box<dyn Fn() -> Result<(), String> + Send + Sync>,
@@ -115,13 +116,21 @@ pub struct Context {
 
 impl Context {
     pub fn live() -> Self {
+        let no_restart = std::env::var_os("SHUVOICE_SETTINGS_NO_RESTART").is_some_and(|v| v == "1");
         let leases = Arc::new(Mutex::new(BTreeMap::<u64, Option<String>>::new()));
         let release_leases = leases.clone();
         Self {
+            no_restart,
             model_catalog: Mutex::new(BTreeMap::new()),
             config_path: Config::config_path(),
             env_present: Box::new(|name| std::env::var_os(name).is_some_and(|v| !v.is_empty())),
-            status: Box::new(live_status),
+            status: Box::new(move || {
+                if no_restart {
+                    json!({"active_state":"inactive", "state":"restart disabled"})
+                } else {
+                    live_status()
+                }
+            }),
             devices: Box::new(|| {
                 let devices = crate::commands::audio::input_devices()?;
                 let outputs = crate::commands::audio::output_devices()?;
@@ -171,14 +180,11 @@ impl Context {
                     .map(drop)
                     .map_err(|e| e.to_string())
             }),
-            restart: Box::new(|| {
-                // Test/dev knob: save without touching the user service.
-                if std::env::var_os("SHUVOICE_SETTINGS_NO_RESTART").is_some_and(|v| v == "1") {
-                    return json!(crate::commands::wizard::RestartOutcome::NotActive {
-                        state: "restart disabled".into()
-                    });
-                }
-                json!(crate::commands::wizard::restart_live(SERVICE))
+            restart: Box::new(|revision| {
+                json!(crate::commands::wizard::restart_live_with_revision(
+                    SERVICE,
+                    Some(revision)
+                ))
             }),
             idle_poll: Duration::from_millis(500),
             idle_timeout: Duration::from_secs(120),
@@ -237,6 +243,13 @@ fn live_status() -> Value {
             .and_then(|body| serde_json::from_str::<Value>(body).ok())
     })
     .unwrap_or(Value::Null);
+    status_from_debug(
+        &debug,
+        shuvoice_io::waybar::service_active_state(SERVICE, None),
+    )
+}
+
+fn status_from_debug(debug: &Value, active_state: String) -> Value {
     let app = &debug["app"];
     let stt = if app["recording"] == true || app["start_pending"] == true {
         "recording"
@@ -249,7 +262,7 @@ fn live_status() -> Value {
     };
     json!({
         "service": SERVICE,
-        "active_state": shuvoice_io::waybar::service_active_state(SERVICE, None),
+        "active_state": active_state,
         "ui_ready": debug["ui_ready"],
         "stt": stt,
         "tts": app["tts_player_state"],
@@ -683,66 +696,105 @@ fn apply_op(
         &progress(id, "waiting_idle", json!({"busy": []})),
         cancel,
     );
-    let reservation;
-    loop {
-        if cancel.load(Ordering::Acquire) {
-            return err(
-                Some(id),
-                "cancelled",
-                "apply cancelled; nothing was saved",
-                Value::Null,
-            );
-        }
-        let status = (ctx.status)();
-        let busy = busy_activities(&status);
-        if busy != announced {
-            emit_cancellable(
-                out,
-                &progress(id, "waiting_idle", json!({ "busy": busy })),
-                cancel,
-            );
-            announced = busy;
-        }
-        if announced.is_empty() {
-            emit_cancellable(out, &progress(id, "reserving", Value::Null), cancel);
-            if cancel.load(Ordering::Acquire) {
-                return err(
-                    Some(id),
-                    "cancelled",
-                    "apply cancelled; nothing was saved",
-                    Value::Null,
-                );
-            }
-            match status.get("active_state").and_then(Value::as_str) {
-                Some("inactive" | "failed" | "dead") => {
-                    reservation = None;
-                    break;
-                }
-                Some("active") => match (ctx.reserve)() {
-                    Ok(token) => {
-                        reservation = Some(Reservation(ctx, token, Instant::now()));
-                        break;
-                    }
-                    Err(message) if message.starts_with("ERROR busy") => {}
-                    Err(message) => {
-                        return err(
-                            Some(id),
-                            "unavailable",
-                            format!("cannot reserve running service: {message}; nothing was saved"),
-                            Value::Null,
-                        );
-                    }
-                },
-                _ => {
+    let mut reservation = None;
+    let mut unsupported = false;
+    'gate: loop {
+        if !ctx.no_restart {
+            loop {
+                if cancel.load(Ordering::Acquire) {
                     return err(
                         Some(id),
-                        "unavailable",
-                        "service state is unknown; nothing was saved",
+                        "cancelled",
+                        "apply cancelled; nothing was saved",
                         Value::Null,
                     );
                 }
+                let status = (ctx.status)();
+                let busy = busy_activities(&status);
+                if busy != announced {
+                    emit_cancellable(
+                        out,
+                        &progress(id, "waiting_idle", json!({ "busy": busy })),
+                        cancel,
+                    );
+                    announced = busy;
+                }
+                if announced.is_empty() {
+                    emit_cancellable(out, &progress(id, "reserving", Value::Null), cancel);
+                    if cancel.load(Ordering::Acquire) {
+                        return err(
+                            Some(id),
+                            "cancelled",
+                            "apply cancelled; nothing was saved",
+                            Value::Null,
+                        );
+                    }
+                    match status.get("active_state").and_then(Value::as_str) {
+                        Some("inactive" | "failed" | "dead") => {
+                            reservation = None;
+                            break;
+                        }
+                        Some("active") if unsupported => break,
+                        Some("active") => match (ctx.reserve)() {
+                            Ok(token) => {
+                                reservation = Some(Reservation(ctx, token, Instant::now()));
+                                break;
+                            }
+                            Err(message) if message.starts_with("ERROR busy") => {}
+                            Err(message) if reservation_unsupported(&message) => {
+                                unsupported = true;
+                                emit_cancellable(
+                                    out,
+                                    &progress(
+                                        id,
+                                        "reserving",
+                                        json!({"reservation":"unsupported"}),
+                                    ),
+                                    cancel,
+                                );
+                                break;
+                            }
+                            Err(message) => {
+                                return err(
+                                    Some(id),
+                                    "unavailable",
+                                    format!(
+                                        "cannot reserve running service: {message}; nothing was saved"
+                                    ),
+                                    Value::Null,
+                                );
+                            }
+                        },
+                        _ => {
+                            return err(
+                                Some(id),
+                                "unavailable",
+                                "service state is unknown; nothing was saved",
+                                Value::Null,
+                            );
+                        }
+                    }
+                }
+                if cancel.load(Ordering::Acquire) {
+                    return err(
+                        Some(id),
+                        "cancelled",
+                        "apply cancelled; nothing was saved",
+                        Value::Null,
+                    );
+                }
+                if started.elapsed() >= ctx.idle_timeout {
+                    return err(
+                        Some(id),
+                        "busy",
+                        "ShuVoice stayed busy; nothing was saved",
+                        json!({ "busy": announced }),
+                    );
+                }
+                std::thread::sleep(ctx.idle_poll);
             }
         }
+
         if cancel.load(Ordering::Acquire) {
             return err(
                 Some(id),
@@ -751,26 +803,62 @@ fn apply_op(
                 Value::Null,
             );
         }
-        if started.elapsed() >= ctx.idle_timeout {
+        emit_cancellable(out, &progress(id, "saving", Value::Null), cancel);
+        if cancel.load(Ordering::Acquire) {
             return err(
                 Some(id),
-                "busy",
-                "ShuVoice stayed busy; nothing was saved",
-                json!({ "busy": announced }),
+                "cancelled",
+                "apply cancelled; nothing was saved",
+                Value::Null,
             );
         }
-        std::thread::sleep(ctx.idle_poll);
+        if unsupported {
+            // Legacy upgrade path: this is deliberately check-only, not a lock.
+            // Probe again after the saving event, immediately before persistence.
+            let status = (ctx.status)();
+            let busy = legacy_busy(&status);
+            if status["active_state"] == "active"
+                && busy.iter().any(|item| item.starts_with("unknown_"))
+            {
+                return err(
+                    Some(id),
+                    "unavailable",
+                    "cannot confirm the running service is idle; nothing was saved",
+                    Value::Null,
+                );
+            }
+            if status["active_state"] == "active" && !busy.is_empty() {
+                emit_cancellable(
+                    out,
+                    &progress(id, "waiting_idle", json!({"busy":busy})),
+                    cancel,
+                );
+                announced = busy.clone();
+                if started.elapsed() >= ctx.idle_timeout {
+                    return err(
+                        Some(id),
+                        "busy",
+                        "ShuVoice stayed busy; nothing was saved",
+                        json!({"busy":busy}),
+                    );
+                }
+                std::thread::sleep(ctx.idle_poll);
+                continue 'gate;
+            }
+            if !matches!(
+                status["active_state"].as_str(),
+                Some("active" | "inactive" | "failed" | "dead")
+            ) {
+                return err(
+                    Some(id),
+                    "unavailable",
+                    "service state is unknown; nothing was saved",
+                    Value::Null,
+                );
+            }
+        }
+        break;
     }
-
-    if cancel.load(Ordering::Acquire) {
-        return err(
-            Some(id),
-            "cancelled",
-            "apply cancelled; nothing was saved",
-            Value::Null,
-        );
-    }
-    emit_cancellable(out, &progress(id, "saving", Value::Null), cancel);
     if cancel.load(Ordering::Acquire) {
         return err(
             Some(id),
@@ -806,7 +894,9 @@ fn apply_op(
         return err(Some(id), "io", message, json!({"saved": saved}));
     }
 
-    emit(out, &progress(id, "restarting", Value::Null));
+    if !ctx.no_restart {
+        emit(out, &progress(id, "restarting", Value::Null));
+    }
     if reservation
         .as_ref()
         .is_some_and(|lease| lease.2.elapsed() >= Duration::from_secs(60))
@@ -816,9 +906,38 @@ fn apply_op(
             json!({"saved":saved,"restart":{"outcome":"readiness_failed","action":"restart","message":"Save exceeded the maintenance safety budget; saved but not restarted. Apply again when idle."}}),
         );
     }
-    let restart = (ctx.restart)();
+    let restart = if ctx.no_restart {
+        json!({"outcome":"not_active","state":"restart disabled"})
+    } else {
+        (ctx.restart)(&saved.revision)
+    };
     drop(reservation);
     ok(id, json!({ "saved": saved, "restart": restart }))
+}
+
+fn reservation_unsupported(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.starts_with("error")
+        && (message.contains("unknown command")
+            || message.contains("unsupported command")
+            || message.contains("unrecognized command"))
+}
+
+fn legacy_busy(status: &Value) -> Vec<String> {
+    let mut busy = busy_activities(status);
+    if !matches!(
+        status["stt"].as_str(),
+        Some("idle" | "recording" | "processing")
+    ) {
+        busy.push("unknown_stt".into());
+    }
+    if !matches!(
+        status["tts"].as_str(),
+        Some("idle" | "disabled" | "synthesizing" | "playing" | "paused")
+    ) {
+        busy.push("unknown_tts".into());
+    }
+    busy
 }
 
 /// Serve requests from `input` until EOF. `apply` runs on a worker thread
@@ -936,6 +1055,7 @@ mod tests {
 
     fn ctx(dir: &tempfile::TempDir) -> Context {
         Context {
+            no_restart: false,
             model_catalog: Mutex::new(BTreeMap::new()),
             config_path: dir.path().join("config.toml"),
             env_present: Box::new(|name| name == "OPENAI_API_KEY"),
@@ -943,7 +1063,7 @@ mod tests {
                 || json!({ "active_state": "active", "ui_ready": true, "stt": "idle" }),
             ),
             devices: Box::new(|| Ok(json!({ "devices": [{ "index": 0, "name": "Mic" }] }))),
-            restart: Box::new(|| json!({ "outcome": "ready", "action": "restart" })),
+            restart: Box::new(|_| json!({ "outcome": "ready", "action": "restart" })),
             reserve: Box::new(|| Ok(1)),
             release: Box::new(|_| {}),
             marker: Box::new(|| Ok(())),
@@ -1114,13 +1234,115 @@ mod tests {
     }
 
     #[test]
+    fn old_service_reservation_falls_back_and_rechecks_idle_before_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut context = ctx(&dir);
+        let polls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let calls = polls.clone();
+        context.status = Box::new(move || {
+            let n = calls.fetch_add(1, Ordering::SeqCst);
+            json!({"active_state":"active", "stt":if n == 1 {"recording"} else {"idle"}, "tts":"idle"})
+        });
+        context.reserve = Box::new(|| Err("ERROR unknown command: maintenance_reserve".into()));
+        context.release = Box::new(|_| panic!("legacy service has no reservation to release"));
+        let path = context.config_path.clone();
+        context.restart = Box::new(move |expected| {
+            assert_eq!(expected, settings::revision(&path).unwrap());
+            json!({"outcome":"ready"})
+        });
+        let (response, events) = apply_direct(context, apply_request(9, "absent", 30));
+        assert_eq!(response["ok"], true, "{response}");
+        assert!(
+            polls.load(Ordering::SeqCst) >= 4,
+            "must retry after the second probe finds recording"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| e["phase"] == "reserving" && e["reservation"] == "unsupported")
+        );
+    }
+
+    #[test]
+    fn no_restart_apply_never_calls_any_service_adapter() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut context = ctx(&dir);
+        context.no_restart = true;
+        context.status = Box::new(|| panic!("must not probe service"));
+        context.reserve = Box::new(|| panic!("must not reserve service"));
+        context.release = Box::new(|_| panic!("must not release service"));
+        context.restart = Box::new(|_| panic!("must not restart service"));
+        let (response, _) = apply_direct(context, apply_request(9, "absent", 30));
+        assert_eq!(
+            response["result"]["restart"],
+            json!({"outcome":"not_active", "state":"restart disabled"})
+        );
+        assert!(dir.path().join("config.toml").exists());
+    }
+
+    #[test]
+    fn unreachable_and_other_reservation_failures_never_use_legacy_fallback() {
+        for message in [
+            "connection refused",
+            "ERROR invalid token",
+            "ERROR unknown state",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut context = ctx(&dir);
+            context.status =
+                Box::new(|| json!({"active_state":"active","stt":"idle","tts":"idle"}));
+            context.reserve = Box::new(move || Err(message.into()));
+            context.restart = Box::new(|_| panic!("must not restart"));
+            let (response, _) = apply_direct(context, apply_request(9, "absent", 30));
+            assert_eq!(response["error"]["kind"], "unavailable");
+            assert!(!dir.path().join("config.toml").exists());
+        }
+        assert!(reservation_unsupported(
+            "ERROR unsupported command maintenance_reserve"
+        ));
+        assert!(reservation_unsupported("ERROR unrecognized command"));
+        assert!(!reservation_unsupported("ERROR busy"));
+    }
+
+    #[test]
+    fn legacy_fallback_refuses_uninspectable_running_service() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut context = ctx(&dir);
+        context.status = Box::new(|| json!({"active_state":"active", "stt":"unknown"}));
+        context.reserve = Box::new(|| Err("ERROR unknown command".into()));
+        let (response, _) = apply_direct(context, apply_request(9, "absent", 30));
+        assert_eq!(response["error"]["kind"], "unavailable");
+        assert!(!dir.path().join("config.toml").exists());
+    }
+
+    #[test]
+    fn old_debug_payload_preserves_all_idle_gate_states() {
+        for (flags, expected) in [
+            (json!({"recording":true}), "recording"),
+            (json!({"start_pending":true}), "recording"),
+            (json!({"processing":true}), "processing"),
+            (json!({"finalizing":true}), "processing"),
+            (json!({}), "idle"),
+        ] {
+            let status = status_from_debug(&json!({"app":flags}), "active".into());
+            assert_eq!(status["stt"], expected);
+        }
+        for tts in ["synthesizing", "playing", "paused"] {
+            let status =
+                status_from_debug(&json!({"app":{"tts_player_state":tts}}), "active".into());
+            assert!(busy_activities(&status).contains(&format!("tts_{tts}")));
+        }
+        assert!(!legacy_busy(&status_from_debug(&Value::Null, "active".into())).is_empty());
+    }
+
+    #[test]
     fn apply_waits_while_busy_and_times_out_without_saving() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         let mut context = ctx(&dir);
         context.status =
             Box::new(|| json!({ "active_state": "active", "stt": "recording", "tts": "paused" }));
-        context.restart = Box::new(|| panic!("must not restart while busy"));
+        context.restart = Box::new(|_| panic!("must not restart while busy"));
         let (response, events) = apply_direct(context, apply_request(6, "absent", 30));
         assert_eq!(events[0]["phase"], "validating");
         assert_eq!(events[2]["phase"], "waiting_idle");
@@ -1294,7 +1516,7 @@ mod tests {
     fn failed_save_releases_reservation_and_never_restarts() {
         let dir = tempfile::tempdir().unwrap();
         let mut context = ctx(&dir);
-        context.restart = Box::new(|| panic!("must not restart after failed save"));
+        context.restart = Box::new(|_| panic!("must not restart after failed save"));
         let releases = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let counter = releases.clone();
         context.release = Box::new(move |_| {
@@ -1319,7 +1541,7 @@ mod tests {
         context.release = Box::new(move |_| {
             flag.store(true, Ordering::Release);
         });
-        context.restart = Box::new(|| panic!("must not restart after I/O save failure"));
+        context.restart = Box::new(|_| panic!("must not restart after I/O save failure"));
         let (response, _) = apply_direct(context, apply_request(1, "absent", 30));
         assert_eq!(response["error"]["kind"], "io");
         assert!(released.load(Ordering::Acquire));
@@ -1360,7 +1582,7 @@ mod tests {
             flag.store(true, Ordering::Release);
             Ok(())
         });
-        context.restart = Box::new(move || {
+        context.restart = Box::new(move |_| {
             assert!(marked.load(Ordering::Acquire));
             json!({"outcome":"ready"})
         });
