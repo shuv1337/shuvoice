@@ -36,6 +36,7 @@ pub struct ControlBridge<S = EnqueueControlAdapter> {
     surface: S,
     ui_ready: Option<Arc<AtomicBool>>,
     config_revision: Option<String>,
+    invocation_id: Option<String>,
 }
 
 impl ControlBridge<EnqueueControlAdapter> {
@@ -60,6 +61,7 @@ impl<S> ControlBridge<S> {
             surface,
             ui_ready: None,
             config_revision: None,
+            invocation_id: None,
         }
     }
 
@@ -74,6 +76,16 @@ impl<S> ControlBridge<S> {
             value == shuvoice_core::settings::ABSENT_REVISION
                 || (value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit()))
         });
+        self
+    }
+
+    /// systemd invocation of this process (`INVOCATION_ID`), reported so a
+    /// restart can prove readiness came from the new process. IDs are 32
+    /// ASCII hex digits; anything else is dropped so it cannot defeat the
+    /// JSON byte cap.
+    pub fn with_invocation_id(mut self, invocation: Option<String>) -> Self {
+        self.invocation_id = invocation
+            .filter(|value| value.len() <= 64 && value.chars().all(|c| c.is_ascii_hexdigit()));
         self
     }
 
@@ -135,12 +147,8 @@ where
                 if let Some(revision) = &self.config_revision {
                     fields.insert("config_revision".into(), revision.clone().into());
                 }
-                if let Ok(invocation) = std::env::var("INVOCATION_ID") {
-                    // systemd IDs are 32 ASCII hex digits. Do not let an
-                    // arbitrary environment string defeat the JSON byte cap.
-                    if invocation.len() <= 64 && invocation.chars().all(|c| c.is_ascii_hexdigit()) {
-                        fields.insert("invocation_id".into(), invocation.into());
-                    }
+                if let Some(invocation) = &self.invocation_id {
+                    fields.insert("invocation_id".into(), invocation.clone().into());
                 }
                 return serde_json::Value::Object(fields).to_string();
             }
@@ -191,6 +199,23 @@ mod tests {
             bridge.on_debug_status(),
             "{\"state\":\"idle\",\"audio\":{\"dropped\":2},\"ui_ready\":true}"
         );
+    }
+
+    #[test]
+    fn debug_reports_only_a_valid_injected_invocation_id() {
+        let id = "8e7f14be52cb4c4c9ce7dfd733a6843e".to_string();
+        for (given, expected) in [(id.clone(), Some(id)), ("not hex; \"x\"".into(), None)] {
+            let surface = FakeSurface::default();
+            *surface.debug.lock().unwrap() = "{}".into();
+            let bridge = ControlBridge::from_surface(surface)
+                .with_ui_readiness(Arc::new(AtomicBool::new(true)))
+                .with_invocation_id(Some(given));
+            let debug: serde_json::Value = serde_json::from_str(&bridge.on_debug_status()).unwrap();
+            assert_eq!(
+                debug.get("invocation_id").and_then(|v| v.as_str()),
+                expected.as_deref()
+            );
+        }
     }
 
     #[test]

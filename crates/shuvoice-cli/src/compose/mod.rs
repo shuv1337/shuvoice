@@ -1007,6 +1007,7 @@ async fn compose_and_run(config: Config) -> Result<(), ComposeError> {
     let handlers = ControlBridge::new(control_adapter.clone())
         .with_ui_readiness(Arc::clone(&ui_ready))
         .with_config_revision(config.loaded_config_revision.clone())
+        .with_invocation_id(std::env::var("INVOCATION_ID").ok())
         .into_arc();
     let mut control_server = match ControlServer::new(config.control_socket.as_deref(), handlers) {
         Ok(s) => s,
