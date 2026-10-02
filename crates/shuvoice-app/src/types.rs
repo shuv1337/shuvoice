@@ -102,6 +102,13 @@ impl std::fmt::Display for TtsPlayerState {
 /// Commands accepted by the session actor (enqueue-only from control).
 #[derive(Debug, Clone)]
 pub enum SessionCommand {
+    MaintenanceReserve,
+    MaintenanceRelease(u64),
+    /// Bounded synchronous control acknowledgment from the actor, not the cache.
+    ControlRequest {
+        command: Box<SessionCommand>,
+        reply: std::sync::mpsc::Sender<String>,
+    },
     Start,
     Stop,
     Toggle,

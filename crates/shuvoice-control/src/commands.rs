@@ -14,6 +14,8 @@ pub const CONTROL_COMMANDS: &[&str] = &[
     "ping",
     "metrics",
     "debug_status",
+    "maintenance_reserve",
+    "maintenance_release",
     "tts_speak",
     "tts_speak_clipboard",
     "tts_pause",
@@ -34,6 +36,8 @@ pub enum ControlCommand {
     Ping,
     Metrics,
     DebugStatus,
+    MaintenanceReserve,
+    MaintenanceRelease(u64),
     TtsSpeak,
     TtsSpeakClipboard,
     TtsPause,
@@ -56,6 +60,8 @@ impl ControlCommand {
             Self::Ping => "ping",
             Self::Metrics => "metrics",
             Self::DebugStatus => "debug_status",
+            Self::MaintenanceReserve => "maintenance_reserve",
+            Self::MaintenanceRelease(_) => "maintenance_release",
             Self::TtsSpeak => "tts_speak",
             Self::TtsSpeakClipboard => "tts_speak_clipboard",
             Self::TtsPause => "tts_pause",
@@ -93,6 +99,8 @@ impl ControlCommand {
             "ping" => Ok(Self::Ping),
             "metrics" => Ok(Self::Metrics),
             "debug_status" => Ok(Self::DebugStatus),
+            "maintenance_reserve" => Ok(Self::MaintenanceReserve),
+            "maintenance_release" => Ok(Self::MaintenanceRelease(0)),
             "tts_speak" => Ok(Self::TtsSpeak),
             "tts_speak_clipboard" => Ok(Self::TtsSpeakClipboard),
             "tts_pause" => Ok(Self::TtsPause),
@@ -126,8 +134,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn allowlist_has_fifteen_commands() {
-        assert_eq!(CONTROL_COMMANDS.len(), 15);
+    fn allowlist_has_seventeen_commands() {
+        assert_eq!(CONTROL_COMMANDS.len(), 17);
         for token in CONTROL_COMMANDS {
             assert!(ControlCommand::parse_token(token).is_ok());
         }

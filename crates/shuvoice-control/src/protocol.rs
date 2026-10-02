@@ -37,12 +37,28 @@ pub fn parse_request(payload: &[u8]) -> Result<ControlCommand, ControlError> {
     if token.bytes().any(|b| b < 0x20 || b == 0x7f) {
         return Err(ControlError::InvalidCommand(String::new()));
     }
+    if token == "maintenance_release" {
+        let mut parts = normalized.split_whitespace();
+        parts.next();
+        let lease = parts
+            .next()
+            .and_then(|p| p.parse::<u64>().ok())
+            .filter(|n| *n > 0)
+            .ok_or_else(|| ControlError::InvalidCommand(normalized.clone()))?;
+        if parts.next().is_some() {
+            return Err(ControlError::InvalidCommand(normalized));
+        }
+        return Ok(ControlCommand::MaintenanceRelease(lease));
+    }
     ControlCommand::parse_token(token)
 }
 
 /// Encode a command for the wire (`"{cmd}\n"`).
 #[must_use]
 pub fn encode_request(command: ControlCommand) -> Vec<u8> {
+    if let ControlCommand::MaintenanceRelease(token) = command {
+        return format!("maintenance_release {token}\n").into_bytes();
+    }
     let mut out = command.as_str().as_bytes().to_vec();
     out.push(b'\n');
     out
@@ -189,6 +205,21 @@ pub mod fixed {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn maintenance_release_requires_and_roundtrips_the_owned_token() {
+        assert!(parse_request(b"maintenance_release\n").is_err());
+        assert!(parse_request(b"maintenance_release 0\n").is_err());
+        assert!(parse_request(b"maintenance_release 42 extra\n").is_err());
+        assert_eq!(
+            parse_request(&encode_request(ControlCommand::MaintenanceRelease(42))).unwrap(),
+            ControlCommand::MaintenanceRelease(42)
+        );
+        assert_eq!(
+            parse_request(b"maintenance_reserve\n").unwrap(),
+            ControlCommand::MaintenanceReserve
+        );
+    }
 
     #[test]
     fn parse_request_trims_and_lowercases() {
