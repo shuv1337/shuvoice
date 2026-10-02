@@ -105,11 +105,12 @@ export function resolveShuvoiceBin(env: Record<string, string | undefined> = pro
 }
 
 /** Spawn the bridge as a child process and frame its stdout into lines. */
-export function spawnBridge(bin: string): Transport {
+export function spawnBridge(bin: string, env = process.env): Transport {
   const child = Bun.spawn([bin, 'settings-bridge'], {
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'inherit',
+    env,
   })
   const lineListeners: ((line: string) => void)[] = []
   const closeListeners: ((reason: string) => void)[] = []

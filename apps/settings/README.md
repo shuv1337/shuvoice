@@ -37,15 +37,20 @@ cargo build -p shuvoice-cli                 # bridge used by the app
 SHUVOICE_BIN=../../target/debug/shuvoice bun run dev
 bun run typecheck && bun run test
 bun src/e2e/smoke.ts                        # real window + bridge, isolated config
-bun src/e2e/features.ts                     # contract fixture: no system writes
+bun src/e2e/features.ts                     # real bridge: schema, features, onboarding
 ```
 
 `SHUVOICE_SETTINGS_NO_RESTART=1` makes Apply save without restarting the
 service (used by the smoke test).
-Set `SHUVOICE_SETTINGS_SHOTS=/tmp/shuvcode/frontend-shots` on the smoke test to
-capture each page with `grim`. The contract fixture also captures onboarding
-and the new features; its simulated outcomes are not integration evidence for
-the Rust bridge. Both screenshot paths use `hyprctl` window geometry and
+Both real-window tests isolate `HOME`, config, data, cache, runtime and D-Bus
+paths. Only `WAYLAND_DISPLAY` points to the real compositor. Shortcut dry-runs
+use a private Hyprland fixture; tests never confirm a shortcut or download models.
+The features test checks all schema fields and completes onboarding with restart
+disabled. Run it against a matching bridge built with `cargo build -p shuvoice-cli`.
+
+Set `SHUVOICE_SETTINGS_SHOTS=/tmp/shuvcode/frontend-shots-v2` on the smoke test to
+capture each page with `grim`. The features test captures each page and onboarding
+step against the real bridge in that directory by default. Both screenshot paths use `hyprctl` window geometry and
 `HYPRLAND_INSTANCE_SIGNATURE` (falling back to the test desktop signature in
 `/tmp/shuvcode/pr69/live/hypr.sig`).
 
