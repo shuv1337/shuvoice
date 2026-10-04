@@ -38,6 +38,9 @@ docs/internal/
 
 # Local planning/agent artifacts
 /PLAN-*.md
+/goals/
+/tmp/
+/shuvoice-recommendations-next-steps.md
 
 # Native artifacts
 *.so
