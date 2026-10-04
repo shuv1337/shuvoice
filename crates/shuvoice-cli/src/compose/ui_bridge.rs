@@ -896,6 +896,8 @@ pub enum GtkHostControl {
 /// Lifecycle notices from the GTK host back to integration (all `Send`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GtkHostLifecycle {
+    /// Overlay host and command pump have been constructed on the GTK thread.
+    Ready,
     /// GTK main loop is exiting (quit requested and/or application shutdown).
     Exiting,
 }
@@ -1098,6 +1100,7 @@ pub fn run_gtk_main_host(boot: GtkMainHostBootstrap) -> i32 {
     // Option-take so activate runs once without cloning GTK-bound state.
     // `connect_activate` requires `Fn` (not `FnMut`), so use a cell.
     let once = std::cell::RefCell::new(Some((caption_vm, tts_vm, cmd_rx, event_tx, quit_rx)));
+    let ready_tx = lifecycle_tx.clone();
     app.connect_activate(move |app| {
         let Some((caption_vm, tts_vm, cmd_rx, event_tx, quit_rx)) = once.borrow_mut().take() else {
             return;
@@ -1105,6 +1108,9 @@ pub fn run_gtk_main_host(boot: GtkMainHostBootstrap) -> i32 {
         let host = UiHost::new(app, caption_vm, tts_vm, event_tx);
         // Host is moved into the GLib timeout pump; stays on this thread.
         let _cmd_pump = host.attach_cmd_pump(cmd_rx);
+        if let Some(life_tx) = ready_tx.as_ref() {
+            let _ = life_tx.try_send(GtkHostLifecycle::Ready);
+        }
 
         // Quit pump: poll Send-safe channel on the GLib thread, then Application::quit.
         // Holds only a Downgrade'd app ref — never moves GTK widgets across threads.
@@ -1122,7 +1128,10 @@ pub fn run_gtk_main_host(boot: GtkMainHostBootstrap) -> i32 {
         });
     });
 
-    let code = app.run();
+    // `run()` would hand the CLI's own argv (e.g. `shuvoice run`) to
+    // GApplication, which treats `run` as a file to open and exits at once.
+    let argv0: Vec<String> = std::env::args().take(1).collect();
+    let code = app.run_with_args(&argv0);
     // Best-effort second notify if shutdown signal raced.
     if let Some(life_tx) = lifecycle_tx {
         let _ = life_tx.try_send(GtkHostLifecycle::Exiting);

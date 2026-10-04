@@ -9,6 +9,19 @@ use tracing::warn;
 
 use crate::xdg::shuvoice_config_dir;
 
+static LOADED_SOURCES: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, &'static str>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Bootstrap provenance only; never returns stored secret values.
+pub fn loaded_env_source(name: &str) -> Option<&'static str> {
+    LOADED_SOURCES
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(name)
+        .copied()
+}
+
 /// Default path: `$XDG_CONFIG_HOME/shuvoice/local.dev`.
 #[must_use]
 pub fn local_dev_env_path() -> PathBuf {
@@ -79,6 +92,15 @@ pub fn load_local_dev_env(path: Option<&Path>, override_existing: bool) -> std::
         unsafe {
             env::set_var(key, &value);
         }
+        let source = if env_path.file_name().is_some_and(|n| n == "local.env") {
+            "local.env"
+        } else {
+            "local.dev"
+        };
+        LOADED_SOURCES
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(key.into(), source);
         loaded += 1;
     }
 

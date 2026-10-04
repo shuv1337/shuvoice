@@ -30,6 +30,21 @@ env:
   LD_LIBRARY_PATH: /usr/local/lib:/usr/local/lib/x86_64-linux-gnu
 
 jobs:
+  settings:
+    name: Settings frontend
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/settings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test
+
   rust:
     name: Rust workspace
     # Noble: stable GHA image. Distro gtk4-layer-shell-dev is only on 25.10+

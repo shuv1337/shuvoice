@@ -170,7 +170,9 @@ fn control_command_allowlist_matches_core_and_control_crates() {
     use shuvoice_core::CONTROL_COMMANDS as CORE;
 
     assert_eq!(CORE, CTRL);
-    assert_eq!(CORE.len(), 15);
+    assert_eq!(CORE.len(), 17);
+    assert!(CORE.contains(&"maintenance_reserve"));
+    assert!(CORE.contains(&"maintenance_release"));
     // Every clap variant maps to a wire token present in the shared allowlist.
     for cmd in [
         ControlCmd::Start,

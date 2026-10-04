@@ -77,6 +77,15 @@ pub async fn download_sherpa_model(
     archive_url_override: Option<String>,
     progress: &mut (dyn FnMut(Option<f32>, &str) + Send),
 ) -> Result<PathBuf, String> {
+    download_sherpa_model_cancellable(config, archive_url_override, progress, None).await
+}
+
+pub async fn download_sherpa_model_cancellable(
+    config: &Config,
+    archive_url_override: Option<String>,
+    progress: &mut (dyn FnMut(Option<f32>, &str) + Send),
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<PathBuf, String> {
     let target = sherpa_model_dir(config);
     if is_complete_sherpa_dir(&target) {
         progress(Some(1.0), "Sherpa model already available");
@@ -94,7 +103,7 @@ pub async fn download_sherpa_model(
             target_dir: target.clone(),
             base_url: asr_cfg.sherpa_release_download_root(),
             archive_url_override,
-            cancel: None,
+            cancel,
             max_bytes: asr_cfg.connect.max_download_bytes,
             expected_sha256: asr_cfg.connect.sherpa_archive_sha256.clone(),
         };
@@ -113,6 +122,7 @@ pub async fn download_sherpa_model(
     #[cfg(not(feature = "asr-sherpa"))]
     {
         let _ = archive_url_override;
+        let _ = cancel;
         let _ = progress;
         Err(format!(
             "Sherpa model download requires --features asr-sherpa (model={})",

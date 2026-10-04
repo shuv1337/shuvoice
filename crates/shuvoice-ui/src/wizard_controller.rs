@@ -551,29 +551,282 @@ pub fn resolve_shuvoice_command() -> String {
 
 /// Candidate Hyprland config files (first existing is preferred write target).
 pub fn hyprland_config_candidates() -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    if let Some(home) = std::env::var_os("HOME") {
-        let hypr = PathBuf::from(home).join(".config/hypr");
-        out.push(hypr.join("bindings.conf"));
-        out.push(hypr.join("hyprland.conf"));
-        out.push(hypr.join("keybinds.conf"));
+    hyprland_config_candidates_from(
+        std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+        std::env::var_os("HOME").as_deref(),
+    )
+}
+
+/// Candidate Hyprland config files under the XDG config dir. A non-empty
+/// `XDG_CONFIG_HOME` replaces `~/.config` (XDG spec), so an isolated config
+/// never falls through to the user's real Hyprland files. Lua is listed
+/// before a stale `.conf`.
+pub fn hyprland_config_candidates_from(
+    xdg_config_home: Option<&std::ffi::OsStr>,
+    home: Option<&std::ffi::OsStr>,
+) -> Vec<PathBuf> {
+    let base = match xdg_config_home.filter(|v| !v.is_empty()) {
+        Some(xdg) => PathBuf::from(xdg),
+        None => match home {
+            Some(home) => PathBuf::from(home).join(".config"),
+            None => return Vec::new(),
+        },
+    };
+    let hypr = base.join("hypr");
+    [
+        "hyprland.lua",
+        "bindings.lua",
+        "bindings.conf",
+        "hyprland.conf",
+        "keybinds.conf",
+    ]
+    .iter()
+    .map(|name| hypr.join(name))
+    .collect()
+}
+
+fn shortcut_files(candidates: &[PathBuf]) -> Result<Vec<(PathBuf, String)>, String> {
+    if candidates
+        .iter()
+        .any(|p| p.is_file() && p.extension().is_some_and(|e| e == "lua"))
+    {
+        return Err(
+            "Lua Hyprland configuration is unsupported; configure the shortcut manually.".into(),
+        );
     }
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        let hypr = PathBuf::from(xdg).join("hypr");
-        out.push(hypr.join("bindings.conf"));
-        out.push(hypr.join("hyprland.conf"));
+    let files = candidates
+        .iter()
+        .filter(|p| p.is_file())
+        .map(|p| {
+            fs::read_to_string(p)
+                .map(|text| (p.clone(), text))
+                .map_err(|e| e.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if files.is_empty() {
+        return Err("Hyprland configuration not found.".into());
     }
-    let mut seen = Vec::new();
-    let mut unique = Vec::new();
-    for p in out {
-        let key = p.to_string_lossy().to_string();
-        if seen.contains(&key) {
-            continue;
+    Ok(files)
+}
+
+pub fn settings_shortcut_get(candidates: &[PathBuf]) -> Value {
+    let options: Vec<_> = KEYBIND_PRESETS
+        .iter()
+        .filter(|p| p.hypr_key_spec.is_some())
+        .map(|p| serde_json::json!({"id":p.id,"label":p.label}))
+        .collect();
+    match shortcut_files(candidates) {
+        Err(error) => {
+            serde_json::json!({"current":null,"options":options,"config_path":null,"error":error})
         }
-        seen.push(key);
-        unique.push(p);
+        Ok(files) => {
+            let current = files
+                .iter()
+                .flat_map(|(_, text)| text.lines())
+                .filter_map(normalize_bind_line)
+                .find_map(|(spec, command)| {
+                    if !is_shuvoice_start(&command) {
+                        return None;
+                    }
+                    KEYBIND_PRESETS
+                        .iter()
+                        .find(|p| {
+                            p.hypr_key_spec.and_then(normalize_hypr_key_spec).as_ref()
+                                == Some(&spec)
+                        })
+                        .map(|p| serde_json::json!({"id":p.id,"label":p.label}))
+                });
+            serde_json::json!({"current":current,"options":options,"config_path":files[0].0.display().to_string(),"error":null})
+        }
     }
-    unique
+}
+
+/// Fixture-friendly managed-only edit. Never runs hyprctl or rewrites user
+/// bindings merely because they invoke ShuVoice. Lua is deliberately rejected.
+pub fn settings_shortcut_set(
+    candidates: &[PathBuf],
+    id: &str,
+    dry_run: bool,
+    command: &str,
+) -> Value {
+    let result = |status: &str, message: String, conflicts: Vec<String>, backup: Option<String>| serde_json::json!({"status":status,"message":message,"conflicts":conflicts,"backup":backup});
+    let Some(preset) = KEYBIND_PRESETS.iter().find(|p| p.id == id) else {
+        return result("error", "Unknown shortcut.".into(), vec![], None);
+    };
+    let Some(spec) = preset.hypr_key_spec else {
+        return result(
+            "unsupported",
+            "Custom shortcuts require a manual edit.".into(),
+            vec![],
+            None,
+        );
+    };
+    let files = match shortcut_files(candidates) {
+        Ok(files) => files,
+        Err(error) => return result("unsupported", error, vec![], None),
+    };
+    let desired = format_hyprland_bind_for_keybind(id, spec, command);
+    let desired_specs: Vec<_> = desired
+        .lines()
+        .filter_map(normalize_bind_line)
+        .map(|(spec, _)| spec)
+        .collect();
+    let mut conflicts = Vec::new();
+    let mut managed_path = None;
+    let mut filtered_files = Vec::new();
+    for (path, text) in &files {
+        let mut managed = false;
+        let mut filtered = String::new();
+        for (index, line) in text.split_inclusive('\n').enumerate() {
+            if matches!(
+                line.trim(),
+                "# ShuVoice binds (managed by wizard)" | "# Added by ShuVoice setup wizard"
+            ) {
+                if managed_path.is_some() {
+                    return result(
+                        "error",
+                        "Multiple managed shortcut blocks; resolve manually.".into(),
+                        vec![],
+                        None,
+                    );
+                }
+                managed_path = Some(path.clone());
+                managed = true;
+                continue;
+            }
+            if managed
+                && normalize_bind_line(line).is_some_and(|(_, cmd)| is_shuvoice_control_bind(&cmd))
+            {
+                continue;
+            }
+            managed = false;
+            if let Some((spec, _)) = normalize_bind_line(line)
+                && desired_specs.contains(&spec)
+            {
+                conflicts.push(format!("{}:{}", path.display(), index + 1));
+            }
+            // External includes cannot be exhaustively inspected safely here.
+            if let Some(source) = line.trim().strip_prefix("source")
+                && source.trim_start().starts_with('=')
+            {
+                let source = source.trim_start().trim_start_matches('=').trim();
+                let source = shuvoice_core::expand_user_path(source);
+                let source = if source.is_absolute() {
+                    source
+                } else {
+                    path.parent()
+                        .unwrap_or(std::path::Path::new("."))
+                        .join(source)
+                };
+                let source = source.canonicalize().ok();
+                if !candidates
+                    .iter()
+                    .any(|p| source.is_some() && p.canonicalize().ok() == source)
+                {
+                    return result(
+                        "unsupported",
+                        "External Hyprland includes require manual shortcut conflict inspection."
+                            .into(),
+                        vec![],
+                        None,
+                    );
+                }
+            }
+            filtered.push_str(line);
+        }
+        filtered_files.push((path.clone(), text.clone(), filtered));
+    }
+    let destination = managed_path.as_ref().unwrap_or(&files[0].0);
+    if !conflicts.is_empty() {
+        return result(
+            "error",
+            "Shortcut conflicts with an unmanaged binding.".into(),
+            conflicts,
+            None,
+        );
+    }
+    if managed_path.is_some()
+        && files
+            .iter()
+            .any(|(p, text)| p == destination && text.contains(&desired))
+    {
+        return result(
+            "already_present",
+            "Shortcut already configured.".into(),
+            vec![],
+            None,
+        );
+    }
+    let status = if managed_path.is_some() {
+        "replaced"
+    } else {
+        "added"
+    };
+    if dry_run {
+        return result(
+            status,
+            "Shortcut edit preview; no files written.".into(),
+            vec![],
+            None,
+        );
+    }
+    let Some((path, before, mut after)) = filtered_files
+        .into_iter()
+        .find(|(p, _, _)| p == destination)
+    else {
+        return result("error", "No writable destination.".into(), vec![], None);
+    };
+    if !after.ends_with('\n') {
+        after.push('\n');
+    }
+    after.push_str("\n# ShuVoice binds (managed by wizard)\n");
+    after.push_str(&desired);
+    after.push('\n');
+    let backup = path.with_extension(format!(
+        "conf.shuvoice-backup-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let write = (|| -> Result<(), String> {
+        use std::io::Write;
+        // Snapshot check, backup, same-directory atomic replace.
+        if fs::read_to_string(&path).map_err(|e| e.to_string())? != before {
+            return Err("Hyprland config changed; retry.".into());
+        }
+        fs::copy(&path, &backup).map_err(|e| e.to_string())?;
+        let temp = path.with_extension(format!("conf.shuvoice-{}", std::process::id()));
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+            .map_err(|e| e.to_string())?;
+        let write_result = (|| {
+            file.write_all(after.as_bytes())?;
+            file.set_permissions(fs::metadata(&path)?.permissions())?;
+            file.sync_all()?;
+            fs::rename(&temp, &path)
+        })();
+        if write_result.is_err() {
+            let _ = fs::remove_file(&temp);
+        }
+        write_result.map_err(|e| e.to_string())
+    })();
+    match write {
+        Ok(()) => result(
+            status,
+            "Shortcut saved; reload Hyprland to activate.".into(),
+            vec![],
+            Some(backup.display().to_string()),
+        ),
+        Err(error) => result(
+            "error",
+            error,
+            vec![],
+            backup.is_file().then(|| backup.display().to_string()),
+        ),
+    }
 }
 
 /// Normalize mods+key into `mods|key` (lowercased, empty mods allowed).
@@ -701,6 +954,15 @@ pub fn auto_add_hyprland_keybind_with(
     };
 
     let candidates = hyprland_config_candidates();
+    if candidates
+        .iter()
+        .any(|p| p.is_file() && p.extension().is_some_and(|e| e == "lua"))
+    {
+        return (
+            KeybindSetupStatus::MissingConfig,
+            "Lua Hyprland configuration is unsupported; configure the shortcut manually.".into(),
+        );
+    }
     let existing: Vec<PathBuf> = candidates.into_iter().filter(|p| p.is_file()).collect();
     if existing.is_empty() {
         return (
@@ -977,7 +1239,80 @@ fn _touch_control_exec() {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn hyprland_candidates_follow_xdg_and_never_mix_in_home() {
+        use std::ffi::OsStr;
+        let isolated = hyprland_config_candidates_from(
+            Some(OsStr::new("/tmp/x")),
+            Some(OsStr::new("/home/u")),
+        );
+        assert_eq!(isolated[0], PathBuf::from("/tmp/x/hypr/hyprland.lua"));
+        assert!(
+            isolated.iter().all(|p| p.starts_with("/tmp/x")),
+            "{isolated:?}"
+        );
+
+        let home =
+            hyprland_config_candidates_from(Some(OsStr::new("")), Some(OsStr::new("/home/u")));
+        assert!(
+            home.iter().all(|p| p.starts_with("/home/u/.config/hypr")),
+            "{home:?}"
+        );
+        assert!(hyprland_config_candidates_from(None, None).is_empty());
+    }
     use super::*;
+
+    #[test]
+    fn settings_shortcuts_are_managed_only_previewed_backed_up_and_lua_safe() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bindings.conf");
+        let unrelated = "# keep me\nbind = SUPER, A, exec, app\n";
+        fs::write(&path, unrelated).unwrap();
+        let paths = [path.clone()];
+        let preview = settings_shortcut_set(&paths, "insert", true, "/opt/shuvoice");
+        assert_eq!(preview["status"], "added");
+        assert_eq!(fs::read_to_string(&path).unwrap(), unrelated);
+        let added = settings_shortcut_set(&paths, "insert", false, "/opt/shuvoice");
+        assert_eq!(added["status"], "added", "{added}");
+        assert_eq!(
+            fs::read_to_string(added["backup"].as_str().unwrap()).unwrap(),
+            unrelated
+        );
+        assert_eq!(settings_shortcut_get(&paths)["current"]["id"], "insert");
+        assert_eq!(
+            settings_shortcut_set(&paths, "insert", true, "/opt/shuvoice")["status"],
+            "already_present"
+        );
+        let replaced = settings_shortcut_set(&paths, "f9", false, "/opt/shuvoice");
+        assert_eq!(replaced["status"], "replaced", "{replaced}");
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with(unrelated));
+        assert!(!text.contains(", Insert,"));
+        assert_eq!(settings_shortcut_get(&paths)["current"]["id"], "f9");
+        let lua = dir.path().join("hyprland.lua");
+        fs::write(&lua, "-- Lua config\n").unwrap();
+        assert_eq!(
+            settings_shortcut_set(&[lua.clone(), path.clone()], "insert", false, "shuvoice")["status"],
+            "unsupported"
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), text);
+        assert_eq!(fs::read_to_string(lua).unwrap(), "-- Lua config\n");
+    }
+
+    #[test]
+    fn settings_shortcut_conflicts_preserve_unmanaged_shuvoice_bindings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bindings.conf");
+        let text =
+            "bind = , Insert, exec, shuvoice control start\nbind = SUPER, V, exec, unrelated\n";
+        fs::write(&path, text).unwrap();
+        let response =
+            settings_shortcut_set(std::slice::from_ref(&path), "insert", false, "shuvoice");
+        assert_eq!(response["status"], "error");
+        assert!(!response["conflicts"].as_array().unwrap().is_empty());
+        assert_eq!(fs::read_to_string(path).unwrap(), text);
+    }
     use crate::wizard::{
         DEFAULT_KOKORO_VOICE, PARAKEET_TDT_V3_INT8_MODEL_NAME, format_hyprland_bind_for_keybind,
         needs_wizard_fs,

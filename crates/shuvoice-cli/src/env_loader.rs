@@ -31,7 +31,9 @@ pub fn bootstrap_local_dev_env() -> usize {
     if LOCAL_DEV_BOOTSTRAPPED.swap(true, Ordering::SeqCst) {
         return 0;
     }
-    load_local_dev_env_best_effort(false)
+    let dev = load_local_dev_env_best_effort(false);
+    let local_env = local_dev_env_path().with_file_name("local.env");
+    dev + load_local_dev_env(Some(&local_env), false).unwrap_or_default()
 }
 
 /// Whether [`bootstrap_local_dev_env`] has already run in this process.

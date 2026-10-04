@@ -16,7 +16,7 @@ use super::defaults::{
     DEFAULT_OPENAI_TTS_MODEL_ID, DEFAULT_OPENAI_TTS_VOICE_ID, DEFAULT_SHERPA_MODEL_NAME,
     DEFAULT_TEXT_REPLACEMENTS, config_section_fields,
 };
-use super::io::{load_raw, toml_dumps, write_atomic};
+use super::io::{toml_dumps, write_atomic};
 use super::migrate::migrate_to_latest;
 use crate::error::{CoreError, CoreResult};
 use crate::postprocess::{CompiledTextReplacements, compile_text_replacements};
@@ -52,10 +52,25 @@ pub struct ConfigLoadReport {
     pub persist_error: Option<String>,
 }
 
+/// Result of [`Config::resolve_raw`]: validated config plus migrated raw data.
+#[derive(Debug, Clone)]
+pub struct ResolvedRaw {
+    pub config: Config,
+    /// Raw config after migration and legacy mapping (unknown keys preserved).
+    pub migrated: Map<String, Value>,
+    pub migration: crate::config::MigrationReport,
+    pub derived_mode_from_legacy: bool,
+    pub ignored_keys: Vec<String>,
+}
+
 /// Fully validated runtime configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// Runtime provenance only; never persisted as a config key.
+    pub loaded_config_revision: Option<String>,
     pub config_version: u32,
+    /// Recognition context, distinct from post-transcription replacements.
+    pub recognition_hints: Vec<String>,
 
     // Audio
     pub sample_rate: u32,
@@ -171,7 +186,12 @@ impl Default for Config {
         let text_replacements = DEFAULT_TEXT_REPLACEMENTS.clone();
         let compiled = compile_text_replacements(&text_replacements);
         Self {
+            loaded_config_revision: None,
             config_version: CURRENT_CONFIG_VERSION,
+            recognition_hints: super::defaults::DEFAULT_RECOGNITION_HINTS
+                .iter()
+                .map(|s| (*s).into())
+                .collect(),
             sample_rate: 16000,
             chunk_ms: 100,
             fallback_sample_rate: 48000,
@@ -313,6 +333,33 @@ impl Config {
 
     /// Validate and normalize in place (Python `__post_init__`).
     pub fn validate(&mut self) -> CoreResult<()> {
+        let mut seen = HashSet::new();
+        let mut total = 0;
+        if self.recognition_hints.len() > 100 {
+            return Err(CoreError::validation(
+                "recognition_hints must contain at most 100 terms",
+            ));
+        }
+        for hint in &mut self.recognition_hints {
+            *hint = hint.trim().to_string();
+            total += hint.chars().count();
+            if hint.is_empty()
+                || hint.chars().count() > 100
+                || hint
+                    .chars()
+                    .any(|c| c.is_control() || matches!(c, '<' | '>'))
+                || !seen.insert(hint.to_lowercase())
+            {
+                return Err(CoreError::validation(
+                    "recognition_hints must be unique nonempty terms of at most 100 characters, without control characters or angle brackets",
+                ));
+            }
+        }
+        if total > 1500 {
+            return Err(CoreError::validation(
+                "recognition_hints total length must be at most 1500 characters",
+            ));
+        }
         if self.config_version < 1 {
             return Err(CoreError::validation("config_version must be >= 1"));
         }
@@ -707,8 +754,53 @@ impl Config {
     ) -> CoreResult<(Self, ConfigLoadReport)> {
         let path_buf = super::io::expand_user_path(path);
         let path = path_buf.as_path();
-        let raw = load_raw(path)?;
-        let (mut migrated, migration) = migrate_to_latest(&raw)?;
+        let (raw, revision) = super::io::load_raw_with_revision(path)?;
+        let ResolvedRaw {
+            config: mut cfg,
+            mut migrated,
+            migration,
+            derived_mode_from_legacy,
+            ignored_keys,
+        } = Self::resolve_raw(&raw)?;
+        cfg.loaded_config_revision = Some(revision);
+
+        let should_persist =
+            migration.to_version != migration.from_version || derived_mode_from_legacy;
+        let mut persist_attempted = false;
+        let mut persist_error = None;
+        if path.exists() && should_persist {
+            persist_attempted = true;
+            migrated.insert("config_version".into(), Value::from(CURRENT_CONFIG_VERSION));
+            match write_atomic(path, &migrated) {
+                Ok(_) => {}
+                Err(err) => {
+                    let msg = err.to_string();
+                    tracing::warn!(
+                        error = %msg,
+                        path = %path.display(),
+                        "Failed to persist migrated config file"
+                    );
+                    persist_error = Some(msg);
+                }
+            }
+        }
+
+        Ok((
+            cfg,
+            ConfigLoadReport {
+                migration,
+                derived_mode_from_legacy,
+                ignored_keys,
+                persist_attempted,
+                persist_error,
+            },
+        ))
+    }
+
+    /// Migrate, apply and validate raw (`load_raw`-shaped) config data without
+    /// touching disk. Returns the validated config and the migrated raw map.
+    pub fn resolve_raw(raw: &Map<String, Value>) -> CoreResult<ResolvedRaw> {
+        let (mut migrated, migration) = migrate_to_latest(raw)?;
 
         let mut flat = flatten_raw(&migrated);
         let known = known_config_keys();
@@ -748,41 +840,17 @@ impl Config {
             }
         }
 
-        let mut cfg = Config::default();
-        apply_flat_overrides(&mut cfg, &flat)?;
-        cfg.validate()?;
+        let mut config = Config::default();
+        apply_flat_overrides(&mut config, &flat)?;
+        config.validate()?;
 
-        let should_persist =
-            migration.to_version != migration.from_version || derived_mode_from_legacy;
-        let mut persist_attempted = false;
-        let mut persist_error = None;
-        if path.exists() && should_persist {
-            persist_attempted = true;
-            migrated.insert("config_version".into(), Value::from(CURRENT_CONFIG_VERSION));
-            match write_atomic(path, &migrated) {
-                Ok(_) => {}
-                Err(err) => {
-                    let msg = err.to_string();
-                    tracing::warn!(
-                        error = %msg,
-                        path = %path.display(),
-                        "Failed to persist migrated config file"
-                    );
-                    persist_error = Some(msg);
-                }
-            }
-        }
-
-        Ok((
-            cfg,
-            ConfigLoadReport {
-                migration,
-                derived_mode_from_legacy,
-                ignored_keys,
-                persist_attempted,
-                persist_error,
-            },
-        ))
+        Ok(ResolvedRaw {
+            config,
+            migrated,
+            migration,
+            derived_mode_from_legacy,
+            ignored_keys,
+        })
     }
 
     /// Validate a default config after applying a mutation closure (test/helper ergonomics).
@@ -828,8 +896,9 @@ impl Config {
         )
     }
 
-    fn field_to_value(&self, key: &str) -> Option<Value> {
+    pub(crate) fn field_to_value(&self, key: &str) -> Option<Value> {
         Some(match key {
+            "recognition_hints" => serde_json::json!(self.recognition_hints),
             "sample_rate" => Value::from(self.sample_rate),
             "chunk_ms" => Value::from(self.chunk_ms),
             "fallback_sample_rate" => Value::from(self.fallback_sample_rate),
@@ -1011,6 +1080,14 @@ fn flatten_raw(raw: &Map<String, Value>) -> Map<String, Value> {
 fn apply_flat_overrides(cfg: &mut Config, flat: &Map<String, Value>) -> CoreResult<()> {
     for (key, value) in flat {
         match key.as_str() {
+            "recognition_hints" => {
+                cfg.recognition_hints = value
+                    .as_array()
+                    .ok_or_else(|| CoreError::validation("recognition_hints must be a list"))?
+                    .iter()
+                    .map(|v| as_string(v, "recognition_hints"))
+                    .collect::<CoreResult<Vec<_>>>()?;
+            }
             "config_version" => cfg.config_version = as_u32(value, "config_version")?,
             "sample_rate" => cfg.sample_rate = as_u32(value, "sample_rate")?,
             "chunk_ms" => cfg.chunk_ms = as_u32(value, "chunk_ms")?,
@@ -1416,6 +1493,30 @@ mod tests {
         assert_eq!(cfg.text_replacements, *DEFAULT_TEXT_REPLACEMENTS);
         assert_eq!(cfg.asr_backend, AsrBackendKind::Sherpa);
         assert_eq!(cfg.tts_backend, TtsBackendKind::Elevenlabs);
+    }
+
+    #[test]
+    fn loaded_revision_tracks_consumed_bytes_not_later_file_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let missing = Config::load_from_path(&path).unwrap();
+        assert_eq!(
+            missing.loaded_config_revision.as_deref(),
+            Some(crate::settings::ABSENT_REVISION)
+        );
+        std::fs::write(&path, "config_version = 1\n[overlay]\nfont_size = 30\n").unwrap();
+        let expected = crate::settings::revision(&path).unwrap();
+        let config = Config::load_from_path(&path).unwrap();
+        std::fs::write(&path, "config_version = 1\n[overlay]\nfont_size = 31\n").unwrap();
+        assert_eq!(config.font_size, 30);
+        assert_eq!(
+            config.loaded_config_revision.as_deref(),
+            Some(expected.as_str())
+        );
+        assert_ne!(
+            config.loaded_config_revision.unwrap(),
+            crate::settings::revision(&path).unwrap()
+        );
     }
 
     #[test]

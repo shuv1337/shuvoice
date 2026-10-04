@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use once_cell::sync::Lazy;
 
 pub const CURRENT_CONFIG_VERSION: u32 = 1;
+pub const DEFAULT_RECOGNITION_HINTS: &[&str] = &[];
 
 pub const DEFAULT_ELEVENLABS_TTS_VOICE_ID: &str = "zNsotODqUhvbJ5wMG7Ei";
 pub const DEFAULT_ELEVENLABS_TTS_MODEL_ID: &str = "eleven_flash_v2_5";
@@ -84,6 +85,7 @@ pub static DEFAULT_TEXT_REPLACEMENTS: Lazy<BTreeMap<String, String>> = Lazy::new
 /// Nested TOML section → field names (for serialization).
 pub fn config_section_fields() -> &'static [(&'static str, &'static [&'static str])] {
     &[
+        ("vocabulary", &["recognition_hints"]),
         (
             "audio",
             &[

@@ -468,7 +468,7 @@ fn service_stop_ok() {
 // ─── wizard launch ──────────────────────────────────────────────────────────
 
 #[test]
-fn launch_wizard_detached_uses_wizard_arg() {
+fn launch_wizard_action_opens_settings_detached() {
     let control = FakeControl::new(vec![]);
     let runner = systemctl_scripted("inactive");
     let (deps, _, launcher, _, _) = base_deps(control, runner);
@@ -476,7 +476,7 @@ fn launch_wizard_detached_uses_wizard_arg() {
     perform_action(&deps, ACTION_LAUNCH_WIZARD, &mut config, "shuvoice.service").unwrap();
     let calls = launcher.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].1, vec!["wizard".to_string()]);
+    assert_eq!(calls[0].1, vec!["settings".to_string()]);
 }
 
 #[test]

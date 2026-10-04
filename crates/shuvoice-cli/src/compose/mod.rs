@@ -810,6 +810,44 @@ async fn abort_live_startup(
     }
 }
 
+/// Open the GTK display on the main thread before model/audio/socket startup.
+///
+/// GTK's implicit initialization in `Application::run` would otherwise exit
+/// the process late, after the model load. An unreachable display is a session
+/// timing/environment problem (e.g. the unit started before the compositor),
+/// so it fails fast with a retryable code; systemd's start limit bounds the
+/// retries. A reachable Wayland compositor without layer-shell will not change
+/// on retry and is a dependency error (exit 78).
+#[cfg(feature = "ui")]
+fn preflight_display() -> Result<(), ComposeError> {
+    use gtk4::prelude::ObjectExt;
+
+    let wayland = std::env::var("WAYLAND_DISPLAY")
+        .ok()
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "<unset>".into());
+    let refresh = "refresh the user service environment from the current desktop session \
+                   (see docs/TROUBLESHOOTING.md)";
+    if let Err(err) = gtk4::init() {
+        return Err(ComposeError::Runtime(format!(
+            "cannot initialize GTK display ({err}); WAYLAND_DISPLAY={wayland} is not reachable; {refresh}"
+        )));
+    }
+    let on_wayland = gtk4::gdk::Display::default()
+        .is_some_and(|display| display.type_().name() == "GdkWaylandDisplay");
+    if !on_wayland {
+        return Err(ComposeError::Runtime(format!(
+            "GTK fell back to a non-Wayland display because WAYLAND_DISPLAY={wayland} is not reachable; {refresh}"
+        )));
+    }
+    if !shuvoice_ui::layer_shell_supported() {
+        return Err(ComposeError::dep(
+            "the current Wayland compositor does not support wlr-layer-shell",
+        ));
+    }
+    Ok(())
+}
+
 async fn compose_and_run(config: Config) -> Result<(), ComposeError> {
     validate_composition_config(&config).map_err(ComposeError::dep)?;
     if !cfg!(feature = "audio") {
@@ -819,7 +857,11 @@ async fn compose_and_run(config: Config) -> Result<(), ComposeError> {
         ));
     }
 
+    // Construction only (no model load / worker spawn): dependency errors (78)
+    // take precedence over a retryable display error.
     let backend = build_asr_backend(&config).map_err(ComposeError::dep)?;
+    #[cfg(feature = "ui")]
+    preflight_display()?;
     let injector = Arc::new(IoTextInjector::from_config(&config));
     let selection = Arc::new(IoSelection::with_defaults());
     let clock = Arc::new(SystemClock);
@@ -961,7 +1003,12 @@ async fn compose_and_run(config: Config) -> Result<(), ComposeError> {
 
     // ── Control server ────────────────────────────────────────────────────
     let control_adapter = runtime.control.clone();
-    let handlers = ControlBridge::arc(control_adapter.clone());
+    let ui_ready = Arc::new(AtomicBool::new(!cfg!(feature = "ui")));
+    let handlers = ControlBridge::new(control_adapter.clone())
+        .with_ui_readiness(Arc::clone(&ui_ready))
+        .with_config_revision(config.loaded_config_revision.clone())
+        .with_invocation_id(std::env::var("INVOCATION_ID").ok())
+        .into_arc();
     let mut control_server = match ControlServer::new(config.control_socket.as_deref(), handlers) {
         Ok(s) => s,
         Err(e) => {
@@ -1148,7 +1195,11 @@ async fn compose_and_run(config: Config) -> Result<(), ComposeError> {
         forwarders.push(tokio::spawn(async move {
             loop {
                 match life_rx.try_recv() {
+                    Ok(ui_bridge::GtkHostLifecycle::Ready) => {
+                        ui_ready.store(true, Ordering::Release);
+                    }
                     Ok(ui_bridge::GtkHostLifecycle::Exiting) => {
+                        ui_ready.store(false, Ordering::Release);
                         req();
                         break;
                     }

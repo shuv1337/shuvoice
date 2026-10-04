@@ -1,10 +1,12 @@
 //! Setup wizard command.
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use crate::error::{EXIT_DEPENDENCY, EXIT_SUCCESS, ExitStatus};
-use shuvoice_io::process::CommandRunner;
-use shuvoice_io::waybar::{service_action, service_active_state};
+use super::wizard_service::{self, Readiness};
+use crate::error::{EXIT_DEPENDENCY, EXIT_FAILURE, EXIT_SUCCESS, ExitStatus};
+use shuvoice_io::process::{CommandRunner, StdCommandRunner};
+use shuvoice_io::waybar::{run_systemctl_user, service_action, service_active_state};
 
 const SERVICE: &str = "shuvoice.service";
 
@@ -21,6 +23,13 @@ Install it with: pacman -S gtk4-layer-shell";
 
 /// Launch the setup wizard (force reconfigure).
 pub fn run_wizard_command() -> ExitStatus {
+    if let Some(bin) = super::settings::installed_settings_bin() {
+        return super::settings::launch_onboarding(&bin, false);
+    }
+    run_gtk_wizard_command()
+}
+
+pub fn run_gtk_wizard_command() -> ExitStatus {
     dispatch_wizard_launch(run_welcome_wizard(true), |service| {
         maybe_restart_running_service(service)
     })
@@ -36,8 +45,12 @@ pub fn dispatch_wizard_launch(
 ) -> ExitStatus {
     match launch {
         WizardLaunch::Completed => {
-            let _ = on_completed(SERVICE);
-            ExitStatus::code(EXIT_SUCCESS)
+            let result = on_completed(SERVICE);
+            ExitStatus::code(if result == "failed" {
+                EXIT_FAILURE
+            } else {
+                EXIT_SUCCESS
+            })
         }
         WizardLaunch::Cancelled => ExitStatus::code(EXIT_SUCCESS),
         WizardLaunch::Unavailable { message, code } => {
@@ -103,8 +116,58 @@ pub fn run_welcome_wizard_completed(force_reconfigure: bool) -> bool {
 }
 
 /// Start or restart `service` after the wizard completes (real systemctl).
+///
+/// Returns `"failed"` only when the handoff, the systemctl action, or overlay
+/// readiness failed; a healthy service that is still loading returns
+/// `"starting"`.
 pub fn maybe_restart_running_service(service: &str) -> &'static str {
-    maybe_restart_running_service_with(service, None)
+    report(service, &restart_live(service))
+}
+
+/// Start/restart `service` from the current desktop session: validate and
+/// import its display environment, then wait for overlay readiness. Prints
+/// nothing (the settings bridge uses stdout for its protocol).
+pub fn restart_live(service: &str) -> RestartOutcome {
+    restart_live_with_revision(service, None)
+}
+
+pub fn restart_live_with_revision(
+    service: &str,
+    expected_revision: Option<&str>,
+) -> RestartOutcome {
+    let mut previous_invocation = wizard_service::service_invocation_id(&StdCommandRunner, service);
+    if previous_invocation.is_empty()
+        && matches!(
+            wizard_service::unit_snapshot(&StdCommandRunner, service)
+                .state
+                .as_str(),
+            "inactive" | "failed" | "dead"
+        )
+    {
+        // Proven stopped unit: a nonempty current InvocationID is a new start.
+        previous_invocation = "<stopped>".into();
+    }
+    let control_socket = crate::config::load_config()
+        .ok()
+        .and_then(|config| config.control_socket);
+    restart_service(
+        service,
+        None,
+        || {
+            wizard_service::refresh_display_environment(&StdCommandRunner, |name| {
+                std::env::var(name).ok()
+            })
+        },
+        || {
+            wizard_service::wait_until_ready(
+                service,
+                &StdCommandRunner,
+                control_socket.as_deref(),
+                &previous_invocation,
+                expected_revision,
+            )
+        },
+    )
 }
 
 /// Injectable variant for tests (scripted `systemctl --user` runner).
@@ -112,34 +175,156 @@ pub fn maybe_restart_running_service_with(
     service: &str,
     runner: Option<Arc<dyn CommandRunner>>,
 ) -> &'static str {
-    let state = service_active_state(service, runner.clone());
-    if state == "unknown" {
-        return "unavailable";
+    restart_with_checks(service, runner, || Ok(()), || Readiness::Ready)
+}
+
+/// Result of [`restart_service`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum RestartOutcome {
+    /// Overlay reported ready.
+    Ready { action: &'static str },
+    #[serde(rename = "ready")]
+    ReadyLegacyRevision {
+        action: &'static str,
+        message: String,
+    },
+    /// Unit healthy but not ready within the budget (e.g. slow model load).
+    Starting {
+        action: &'static str,
+        message: String,
+    },
+    /// The current desktop's display could not be handed to the service.
+    HandoffFailed {
+        action: &'static str,
+        message: String,
+    },
+    ActionFailed {
+        action: &'static str,
+        message: String,
+    },
+    ReadinessFailed {
+        action: &'static str,
+        message: String,
+    },
+    /// `systemctl --user` is not available.
+    Unavailable,
+    /// The unit is in a state we do not start/restart from.
+    NotActive { state: String },
+}
+
+impl RestartOutcome {
+    /// Stable status word used by the wizard's exit-code policy.
+    pub fn status(&self) -> &'static str {
+        match self {
+            Self::Ready { action: "start" } => "started",
+            Self::Ready { .. } => "restarted",
+            Self::ReadyLegacyRevision {
+                action: "start", ..
+            } => "started",
+            Self::ReadyLegacyRevision { .. } => "restarted",
+            Self::Starting { .. } => "starting",
+            Self::HandoffFailed { .. }
+            | Self::ActionFailed { .. }
+            | Self::ReadinessFailed { .. } => "failed",
+            Self::Unavailable => "unavailable",
+            Self::NotActive { .. } => "not_active",
+        }
     }
+}
 
-    let (action, success_status, success_verb) =
-        if matches!(state.as_str(), "active" | "activating" | "reloading") {
-            ("restart", "restarted", "Restarted")
-        } else if matches!(
-            state.as_str(),
-            "inactive" | "failed" | "dead" | "deactivating"
-        ) {
-            ("start", "started", "Started")
-        } else {
-            return "not_active";
-        };
+fn past_tense(action: &str) -> &'static str {
+    if action == "start" {
+        "Started"
+    } else {
+        "Restarted"
+    }
+}
 
-    match service_action(service, action, runner) {
-        Ok(()) => {
-            println!("✓ {success_verb} {service} so wizard changes take effect.");
-            success_status
-        }
-        Err(err) => {
-            eprintln!(
-                "WARNING: failed to {action} {service} automatically: {err}\n         Run `systemctl --user {action} {service}` manually for wizard changes to take effect."
+/// Print the wizard's human-readable result and return its status word.
+fn report(service: &str, outcome: &RestartOutcome) -> &'static str {
+    match outcome {
+        RestartOutcome::Ready { action } | RestartOutcome::ReadyLegacyRevision { action, .. } => {
+            println!(
+                "✓ {} {service} so wizard changes take effect.",
+                past_tense(action)
             );
-            "failed"
         }
+        RestartOutcome::Starting { action, message } => {
+            println!(
+                "✓ {} {service}; overlay not ready yet: {message}",
+                past_tense(action)
+            );
+        }
+        RestartOutcome::HandoffFailed { action, message } => eprintln!(
+            "WARNING: did not {action} {service}: {message}\n         Run `shuvoice wizard` from a terminal in the current desktop session, or see \"Service fails after the wizard\" in docs/TROUBLESHOOTING.md."
+        ),
+        RestartOutcome::ActionFailed { action, message } => eprintln!(
+            "WARNING: failed to {action} {service} automatically: {message}\n         Run `systemctl --user {action} {service}` manually for wizard changes to take effect."
+        ),
+        RestartOutcome::ReadinessFailed { action, message } => eprintln!(
+            "WARNING: {} {service}, but the overlay did not become ready: {message}",
+            past_tense(action)
+        ),
+        RestartOutcome::Unavailable | RestartOutcome::NotActive { .. } => {}
+    }
+    outcome.status()
+}
+
+fn restart_with_checks(
+    service: &str,
+    runner: Option<Arc<dyn CommandRunner>>,
+    prepare: impl FnOnce() -> Result<(), String>,
+    ready: impl FnOnce() -> Readiness,
+) -> &'static str {
+    report(service, &restart_service(service, runner, prepare, ready))
+}
+
+/// Start (stopped/failed unit) or restart (running unit) `service`.
+fn restart_service(
+    service: &str,
+    runner: Option<Arc<dyn CommandRunner>>,
+    prepare: impl FnOnce() -> Result<(), String>,
+    ready: impl FnOnce() -> Readiness,
+) -> RestartOutcome {
+    let runner: Arc<dyn CommandRunner> = runner.unwrap_or_else(|| Arc::new(StdCommandRunner));
+    let state = service_active_state(service, Some(Arc::clone(&runner)));
+    if state == "unknown" {
+        return RestartOutcome::Unavailable;
+    }
+    let action = if matches!(state.as_str(), "active" | "activating" | "reloading") {
+        "restart"
+    } else if matches!(
+        state.as_str(),
+        "inactive" | "failed" | "dead" | "deactivating"
+    ) {
+        "start"
+    } else {
+        return RestartOutcome::NotActive { state };
+    };
+
+    if let Err(message) = prepare() {
+        return RestartOutcome::HandoffFailed { action, message };
+    }
+    if action == "start" && state == "failed" {
+        // A unit that hit its start limit refuses an explicit start until reset.
+        let _ = run_systemctl_user(
+            runner.as_ref(),
+            &["reset-failed", service],
+            Duration::from_secs(3),
+        );
+    }
+    if let Err(message) = service_action(service, action, Some(runner)) {
+        return RestartOutcome::ActionFailed { action, message };
+    }
+    match ready() {
+        Readiness::Ready => RestartOutcome::Ready { action },
+        Readiness::ReadyLegacyRevision => RestartOutcome::ReadyLegacyRevision {
+            action,
+            message: "The running binary does not report config_revision; readiness used the new invocation and ui_ready only.".into(),
+        },
+        Readiness::StillStarting(message) => RestartOutcome::Starting { action, message },
+        Readiness::Failed(message) => RestartOutcome::ReadinessFailed { action, message },
     }
 }
 
@@ -272,6 +457,88 @@ mod tests {
         assert_eq!(status, "restarted");
         let calls = r.calls();
         assert!(calls.iter().any(|c| c.iter().any(|a| a == "restart")));
+    }
+
+    #[test]
+    fn failed_display_handoff_does_not_restart_service() {
+        let r = scripted_state_then_action("active", true);
+        let status = restart_with_checks(
+            SERVICE,
+            Some(r.clone()),
+            || Err("stale display".into()),
+            || panic!("readiness must not run"),
+        );
+        assert_eq!(status, "failed");
+        assert!(!r.calls().iter().any(|c| c.iter().any(|a| a == "restart")));
+    }
+
+    #[test]
+    fn active_systemd_state_does_not_override_failed_overlay_readiness() {
+        let r = scripted_state_then_action("active", true);
+        let status = restart_with_checks(
+            SERVICE,
+            Some(r.clone()),
+            || Ok(()),
+            || Readiness::Failed("GTK did not become ready".into()),
+        );
+        assert_eq!(status, "failed");
+        assert!(r.calls().iter().any(|c| c.iter().any(|a| a == "restart")));
+        let result = dispatch_wizard_launch(WizardLaunch::Completed, |_| status);
+        assert_eq!(result.code, EXIT_FAILURE);
+    }
+
+    #[test]
+    fn slow_but_healthy_service_is_not_a_wizard_failure() {
+        let r = scripted_state_then_action("active", true);
+        let status = restart_with_checks(
+            SERVICE,
+            Some(r),
+            || Ok(()),
+            || Readiness::StillStarting("loading model".into()),
+        );
+        assert_eq!(status, "starting");
+        let result = dispatch_wizard_launch(WizardLaunch::Completed, |_| status);
+        assert_eq!(result.code, EXIT_SUCCESS);
+    }
+
+    #[test]
+    fn revision_readiness_outcomes_are_visible_on_the_bridge_wire() {
+        let legacy = restart_service(
+            SERVICE,
+            Some(scripted_state_then_action("active", true)),
+            || Ok(()),
+            || Readiness::ReadyLegacyRevision,
+        );
+        let value = serde_json::to_value(legacy).unwrap();
+        assert_eq!(value["outcome"], "ready");
+        assert!(
+            value["message"]
+                .as_str()
+                .unwrap()
+                .contains("does not report config_revision")
+        );
+        let failed = restart_service(
+            SERVICE,
+            Some(scripted_state_then_action("active", true)),
+            || Ok(()),
+            || Readiness::Failed("different config revision".into()),
+        );
+        let value = serde_json::to_value(failed).unwrap();
+        assert_eq!(value["outcome"], "readiness_failed");
+        assert_eq!(value["message"], "different config revision");
+    }
+
+    #[test]
+    fn failed_unit_is_reset_before_explicit_start() {
+        let r = scripted_state_then_action("failed", true);
+        let status = restart_with_checks(SERVICE, Some(r.clone()), || Ok(()), || Readiness::Ready);
+        assert_eq!(status, "started");
+        let calls = r.calls();
+        let pos = |verb: &str| calls.iter().position(|c| c.iter().any(|a| a == verb));
+        assert!(
+            pos("reset-failed").unwrap() < pos("start").unwrap(),
+            "{calls:?}"
+        );
     }
 
     #[test]
