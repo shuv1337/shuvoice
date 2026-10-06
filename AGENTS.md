@@ -83,7 +83,9 @@ gated by `ui` and is not enabled by the settings bridge alone.
    `shuvoice-core` `config_section_fields()`, XDG paths, atomic write/backup.
 2. **Control socket**: line protocol `OK …` / `ERROR …`; commands in
    `CONTROL_COMMANDS` (`start`, `stop`, `toggle`, `status`, `ping`, `metrics`,
-   `debug_status`, `tts_*`, additive `maintenance_reserve` / `maintenance_release`).
+   `debug_status`, `tts_*`, additive `maintenance_reserve` / `maintenance_release`,
+   additive `start_alt` / `toggle_alt` = start in the opposite `typing_text_case`,
+   latched per utterance; `stop` is shared).
    Reservations are actor-serialized, idle-only, token-owned, expire after 120 s, and reject
    new STT/TTS work with `ERROR busy` while held.
 3. **Exit 78**: `DEPENDENCY_EXIT_CODE` / `RestartPreventExitStatus=78` on the

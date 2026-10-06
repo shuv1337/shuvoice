@@ -24,7 +24,7 @@ use shuvoice_asr::{AsrError, FallbackOutcome};
 use shuvoice_core::{
     ASR_MAX_FAILURES, BeginUtteranceParams, BreakerAction, CircuitBreaker, Config,
     ERROR_TOAST_SECONDS, FinalizationMode, MetricsCollector, OutputMode, OverlayState,
-    RecordingStatus, RenderOptions, STOP_TAIL_GRACE, StartGate, UtteranceState,
+    RecordingStatus, RenderOptions, STOP_TAIL_GRACE, StartGate, TypingTextCase, UtteranceState,
     apply_utterance_gain, audio_rms, begin_utterance, capture_preroll, compile_text_replacements,
     evaluate_start_gate, metrics_to_json, ms_to_samples, observe_recording_chunk,
     prefer_transcript, recording_status as core_recording_status, render_transcript_text,
@@ -659,6 +659,19 @@ where
     /// job results until the start settles. The actor `handle_command` path
     /// only calls [`Self::request_start_recording`] so select stays live.
     pub fn request_start_recording(&mut self) {
+        self.request_start_recording_with_case(self.config.typing_text_case);
+    }
+
+    /// Start with the opposite of the configured `typing_text_case`
+    /// (`start_alt` / `toggle_alt` from a second push-to-talk chord).
+    pub fn request_start_recording_alt(&mut self) {
+        self.request_start_recording_with_case(self.config.typing_text_case.alternate());
+    }
+
+    /// Start recording and latch `text_case` for this utterance. The case is
+    /// only latched once the start gate admits a new utterance so a rejected
+    /// start cannot re-case text that is still being finalized.
+    pub fn request_start_recording_with_case(&mut self, text_case: TypingTextCase) {
         if let Some(tts) = self.deps.tts.as_mut()
             && tts.is_active()
         {
@@ -710,6 +723,7 @@ where
                 if self.finalize.is_some() || self.processing || self.was_recording {
                     self.cancel_finalize_and_reset_injector();
                 }
+                self.render.text_case = text_case;
                 self.capture_recording_preroll();
                 self.start_pending = true;
                 self.processing = true;
@@ -725,6 +739,7 @@ where
         if self.finalize.is_some() || self.processing || self.was_recording {
             self.cancel_finalize_and_reset_injector();
         }
+        self.render.text_case = text_case;
 
         // Preroll before reset; second preroll applied when reset completes.
         self.capture_recording_preroll();
@@ -738,6 +753,16 @@ where
     /// Test/direct API: request start and pump job results until settled.
     pub async fn start_recording(&mut self) {
         self.request_start_recording();
+        self.pump_jobs_while(
+            |s| s.start_pending || s.lifecycle_job.is_some(),
+            Duration::from_secs(5),
+        )
+        .await;
+    }
+
+    /// Test/direct API: alternate-case start, pumped until settled.
+    pub async fn start_recording_alt(&mut self) {
+        self.request_start_recording_alt();
         self.pump_jobs_while(
             |s| s.start_pending || s.lifecycle_job.is_some(),
             Duration::from_secs(5),
@@ -850,6 +875,15 @@ where
             self.stop_recording();
         } else {
             self.request_start_recording();
+        }
+    }
+
+    /// Toggle; a start uses the alternate text case.
+    pub async fn toggle_recording_alt(&mut self) {
+        if self.recording || self.start_pending {
+            self.stop_recording();
+        } else {
+            self.request_start_recording_alt();
         }
     }
 
@@ -2347,6 +2381,8 @@ where
                 cmd,
                 Start
                     | Toggle
+                    | StartAlt
+                    | ToggleAlt
                     | TtsSpeak { .. }
                     | TtsSpeakSelection
                     | TtsSpeakClipboard
@@ -2409,6 +2445,14 @@ where
             }
             Toggle => {
                 self.toggle_recording().await;
+                Ok("OK toggled".into())
+            }
+            StartAlt => {
+                self.request_start_recording_alt();
+                Ok("OK started".into())
+            }
+            ToggleAlt => {
+                self.toggle_recording_alt().await;
                 Ok("OK toggled".into())
             }
             Shutdown => {

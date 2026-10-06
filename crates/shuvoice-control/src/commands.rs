@@ -10,6 +10,8 @@ pub const CONTROL_COMMANDS: &[&str] = &[
     "start",
     "stop",
     "toggle",
+    "start_alt",
+    "toggle_alt",
     "status",
     "ping",
     "metrics",
@@ -32,6 +34,10 @@ pub enum ControlCommand {
     Start,
     Stop,
     Toggle,
+    /// Start recording with the alternate text case (opposite of `typing_text_case`).
+    StartAlt,
+    /// Toggle recording; a start uses the alternate text case.
+    ToggleAlt,
     Status,
     Ping,
     Metrics,
@@ -56,6 +62,8 @@ impl ControlCommand {
             Self::Start => "start",
             Self::Stop => "stop",
             Self::Toggle => "toggle",
+            Self::StartAlt => "start_alt",
+            Self::ToggleAlt => "toggle_alt",
             Self::Status => "status",
             Self::Ping => "ping",
             Self::Metrics => "metrics",
@@ -95,6 +103,8 @@ impl ControlCommand {
             "start" => Ok(Self::Start),
             "stop" => Ok(Self::Stop),
             "toggle" => Ok(Self::Toggle),
+            "start_alt" => Ok(Self::StartAlt),
+            "toggle_alt" => Ok(Self::ToggleAlt),
             "status" => Ok(Self::Status),
             "ping" => Ok(Self::Ping),
             "metrics" => Ok(Self::Metrics),
@@ -134,11 +144,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn allowlist_has_seventeen_commands() {
-        assert_eq!(CONTROL_COMMANDS.len(), 17);
+    fn allowlist_has_nineteen_commands() {
+        assert_eq!(CONTROL_COMMANDS.len(), 19);
         for token in CONTROL_COMMANDS {
             assert!(ControlCommand::parse_token(token).is_ok());
         }
+    }
+
+    #[test]
+    fn alt_case_commands_round_trip() {
+        assert_eq!(
+            ControlCommand::parse_token("start_alt").unwrap(),
+            ControlCommand::StartAlt
+        );
+        assert_eq!(
+            ControlCommand::parse_token("toggle_alt").unwrap(),
+            ControlCommand::ToggleAlt
+        );
+        assert_eq!(ControlCommand::StartAlt.as_str(), "start_alt");
+        assert_eq!(ControlCommand::ToggleAlt.as_str(), "toggle_alt");
+        assert!(!ControlCommand::StartAlt.is_tts());
     }
 
     #[test]

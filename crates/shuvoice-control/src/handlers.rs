@@ -22,6 +22,16 @@ pub trait ControlHandlers: Send + Sync + 'static {
     fn on_toggle(&self);
     fn on_status(&self) -> String;
 
+    /// `start_alt`: handlers without a case-aware surface fall back to a plain start.
+    fn on_start_alt(&self) {
+        self.on_start();
+    }
+
+    /// `toggle_alt`: handlers without a case-aware surface fall back to a plain toggle.
+    fn on_toggle_alt(&self) {
+        self.on_toggle();
+    }
+
     fn on_metrics(&self) -> String {
         "metrics unavailable".to_string()
     }
@@ -139,6 +149,18 @@ pub fn dispatch(handlers: &Arc<dyn ControlHandlers>, command: ControlCommand) ->
         }
         ControlCommand::Toggle => {
             if run_catch("on_toggle", || handlers.on_toggle()).is_err() {
+                return fixed::INTERNAL.to_string();
+            }
+            fixed::TOGGLED.to_string()
+        }
+        ControlCommand::StartAlt => {
+            if run_catch("on_start_alt", || handlers.on_start_alt()).is_err() {
+                return fixed::INTERNAL.to_string();
+            }
+            fixed::STARTED.to_string()
+        }
+        ControlCommand::ToggleAlt => {
+            if run_catch("on_toggle_alt", || handlers.on_toggle_alt()).is_err() {
                 return fixed::INTERNAL.to_string();
             }
             fixed::TOGGLED.to_string()

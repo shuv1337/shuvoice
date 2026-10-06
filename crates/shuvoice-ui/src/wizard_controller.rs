@@ -23,7 +23,8 @@ use shuvoice_core::{
 use crate::error::UiError;
 use crate::wizard::{
     KEYBIND_PRESETS, KeybindSetupStatus, WizardVm, WizardWritePlan, control_exec,
-    finish_status_text, format_hyprland_bind_for_keybind, model_download_status_text,
+    finish_status_text, format_hyprland_bind_for_keybind, hypr_key_spec_with_shift,
+    model_download_status_text,
 };
 
 /// Result of the optional model-setup callback.
@@ -911,8 +912,13 @@ fn is_shuvoice_control_bind(cmd: &str) -> bool {
     padded.contains(" control ") || c.contains("--control")
 }
 
+fn is_shuvoice_start_alt(cmd: &str) -> bool {
+    is_shuvoice_control_bind(cmd)
+        && (cmd.contains("control start_alt") || cmd.contains("--control start_alt"))
+}
 fn is_shuvoice_start(cmd: &str) -> bool {
     is_shuvoice_control_bind(cmd)
+        && !is_shuvoice_start_alt(cmd)
         && (cmd.contains("control start") || cmd.contains("--control start"))
 }
 fn is_shuvoice_stop(cmd: &str) -> bool {
@@ -984,16 +990,26 @@ pub fn auto_add_hyprland_keybind_with(
         }
     };
 
-    let mut conflict_specs = vec![target_spec.clone()];
+    let Some(alt_spec) = normalize_hypr_key_spec(&hypr_key_spec_with_shift(hypr_key)) else {
+        return (
+            KeybindSetupStatus::Error,
+            format!("Invalid Hyprland key spec for preset '{keybind_id}': {hypr_key}"),
+        );
+    };
+
+    let mut conflict_specs = vec![target_spec.clone(), alt_spec.clone()];
     let desired_start = [target_spec.clone()];
-    let mut desired_stop = vec![target_spec.clone()];
-    let mut extra_stop: Option<String> = None;
-    if keybind_id == "right_ctrl"
-        && let Some(spec) = normalize_bind_spec("CTRL", "Control_R")
-    {
-        extra_stop = Some(spec.clone());
-        desired_stop.push(spec.clone());
-        conflict_specs.push(spec);
+    let desired_alt_start = [alt_spec.clone()];
+    let mut desired_stop = vec![target_spec.clone(), alt_spec.clone()];
+    let mut extra_stop: Vec<String> = Vec::new();
+    if keybind_id == "right_ctrl" {
+        for mods in ["CTRL", "CTRL SHIFT"] {
+            if let Some(spec) = normalize_bind_spec(mods, "Control_R") {
+                extra_stop.push(spec.clone());
+                desired_stop.push(spec.clone());
+                conflict_specs.push(spec);
+            }
+        }
     }
     // TTS chords
     let tts_speak_spec = normalize_bind_spec("SUPER CTRL", "S").expect("tts speak");
@@ -1018,8 +1034,10 @@ pub fn auto_add_hyprland_keybind_with(
     let mut shuvoice_files: Vec<PathBuf> = Vec::new();
     let mut shuvoice_count = 0usize;
     let mut has_start = false;
+    let mut has_alt_start = false;
     let mut has_stop = false;
-    let mut has_extra_stop = false;
+    let mut has_alt_stop = false;
+    let mut extra_stops_seen = 0usize;
     let mut has_tts = false;
     let mut has_tts_clip = false;
     let mut has_other_shuvoice = false;
@@ -1045,6 +1063,7 @@ pub fn auto_add_hyprland_keybind_with(
                 continue;
             }
             let is_ctrl = is_shuvoice_start(&cmd)
+                || is_shuvoice_start_alt(&cmd)
                 || is_shuvoice_stop(&cmd)
                 || is_shuvoice_tts_speak(&cmd)
                 || is_shuvoice_tts_clipboard(&cmd);
@@ -1056,12 +1075,19 @@ pub fn auto_add_hyprland_keybind_with(
                 has_start = true;
                 continue;
             }
+            if is_shuvoice_start_alt(&cmd) && desired_alt_start.iter().any(|s| s == &spec) {
+                has_alt_start = true;
+                continue;
+            }
             if is_shuvoice_stop(&cmd) && desired_stop.iter().any(|s| s == &spec) {
-                if desired_start.iter().any(|s| s == &spec) || spec == target_spec {
+                if spec == target_spec {
                     has_stop = true;
                 }
-                if extra_stop.as_ref() == Some(&spec) {
-                    has_extra_stop = true;
+                if spec == alt_spec {
+                    has_alt_stop = true;
+                }
+                if extra_stop.contains(&spec) {
+                    extra_stops_seen += 1;
                 }
                 continue;
             }
@@ -1082,10 +1108,13 @@ pub fn auto_add_hyprland_keybind_with(
         }
     }
 
-    let mut fully = has_start && has_stop && has_tts && has_tts_clip;
-    if extra_stop.is_some() {
-        fully = fully && has_extra_stop;
-    }
+    let fully = has_start
+        && has_alt_start
+        && has_stop
+        && has_alt_stop
+        && has_tts
+        && has_tts_clip
+        && extra_stops_seen == extra_stop.len();
     if fully && !has_other_shuvoice && shuvoice_count == desired_lines.len() {
         // Also require exact desired lines present (quoted path / wait-sec).
         let mut corpus = String::new();
@@ -1129,6 +1158,7 @@ pub fn auto_add_hyprland_keybind_with(
             }
             if let Some((_spec, cmd)) = normalize_bind_line(line)
                 && (is_shuvoice_start(&cmd)
+                    || is_shuvoice_start_alt(&cmd)
                     || is_shuvoice_stop(&cmd)
                     || is_shuvoice_tts_speak(&cmd)
                     || is_shuvoice_tts_clipboard(&cmd))
@@ -1565,6 +1595,42 @@ keep = "yes"
     }
 
     #[test]
+    fn auto_add_conflicts_on_shift_alternate_chord_and_upgrades_legacy_block() {
+        crate::test_env::with_isolated_xdg(|root| {
+            let hypr = hypr_dir(root);
+            fs::write(
+                hypr.join("hyprland.conf"),
+                "bind = SHIFT, Insert, exec, grimblast save area\n",
+            )
+            .unwrap();
+            let (st, _) = auto_add_hyprland_keybind_with("insert", "shuvoice");
+            assert_eq!(st, KeybindSetupStatus::Conflict);
+        });
+        crate::test_env::with_isolated_xdg(|root| {
+            let hypr = hypr_dir(root);
+            // A pre-`start_alt` managed block is incomplete and must be upgraded in place.
+            let legacy = [
+                "bind = , Control_R, exec, shuvoice control start --control-wait-sec 0",
+                "bindr = , Control_R, exec, shuvoice control stop --control-wait-sec 0",
+                "bindr = CTRL, Control_R, exec, shuvoice control stop --control-wait-sec 0",
+                "bind = SUPER CTRL, S, exec, shuvoice control tts_speak --control-wait-sec 0",
+                "bind = SUPER CTRL SHIFT, S, exec, shuvoice control tts_speak_clipboard --control-wait-sec 0",
+            ]
+            .join("\n");
+            fs::write(hypr.join("hyprland.conf"), format!("{legacy}\n")).unwrap();
+            let (st, msg) = auto_add_hyprland_keybind_with("right_ctrl", "shuvoice");
+            assert_eq!(st, KeybindSetupStatus::Added, "{msg}");
+            let content = fs::read_to_string(hypr.join("hyprland.conf")).unwrap();
+            assert!(content.contains("bind = SHIFT, Control_R, exec, shuvoice control start_alt"));
+            assert!(content.contains("bindr = CTRL SHIFT, Control_R, exec, shuvoice control stop"));
+            assert_eq!(content.matches("control start ").count(), 1);
+            assert_eq!(content.matches("control start_alt").count(), 1);
+            let (st, _) = auto_add_hyprland_keybind_with("right_ctrl", "shuvoice");
+            assert_eq!(st, KeybindSetupStatus::AlreadyConfigured);
+        });
+    }
+
+    #[test]
     fn auto_add_parses_bindl_and_is_idempotent() {
         crate::test_env::with_isolated_xdg(|root| {
             let hypr = hypr_dir(root);
@@ -1578,7 +1644,8 @@ keep = "yes"
             assert_eq!(st, KeybindSetupStatus::AlreadyConfigured);
             let content = fs::read_to_string(hypr.join("hyprland.conf")).unwrap();
             assert!(content.contains("bindl = , F1, exec, foo"));
-            assert_eq!(content.matches("control start").count(), 1);
+            assert_eq!(content.matches("control start ").count(), 1);
+            assert_eq!(content.matches("control start_alt ").count(), 1);
         });
     }
 

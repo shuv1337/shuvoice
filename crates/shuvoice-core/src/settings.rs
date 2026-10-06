@@ -153,17 +153,20 @@ const BASIC_FIELDS: &[FieldMeta] = &[
             ],
         },
     ),
-    field(
-        "typing.typing_text_case",
-        Section::Typing,
-        "Text case",
-        FieldKind::Choice {
-            choices: &[
-                choice("default", "As transcribed"),
-                choice("lowercase", "Lowercase"),
-            ],
-        },
-    ),
+    FieldMeta {
+        help: "Shift + push-to-talk dictates in the other case.",
+        ..field(
+            "typing.typing_text_case",
+            Section::Typing,
+            "Text case",
+            FieldKind::Choice {
+                choices: &[
+                    choice("default", "As transcribed"),
+                    choice("lowercase", "Lowercase"),
+                ],
+            },
+        )
+    },
     field(
         "tts.tts_enabled",
         Section::TextToSpeech,

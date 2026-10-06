@@ -15,6 +15,10 @@ pub enum ControlCmd {
     Start,
     Stop,
     Toggle,
+    #[value(name = "start_alt")]
+    StartAlt,
+    #[value(name = "toggle_alt")]
+    ToggleAlt,
     Status,
     Ping,
     Metrics,
@@ -48,6 +52,8 @@ impl ControlCmd {
             Self::Start => ControlCommand::Start,
             Self::Stop => ControlCommand::Stop,
             Self::Toggle => ControlCommand::Toggle,
+            Self::StartAlt => ControlCommand::StartAlt,
+            Self::ToggleAlt => ControlCommand::ToggleAlt,
             Self::Status => ControlCommand::Status,
             Self::Ping => ControlCommand::Ping,
             Self::Metrics => ControlCommand::Metrics,
@@ -98,8 +104,9 @@ pub fn run_control(
     socket_path: Option<&str>,
     wait_sec: f64,
 ) -> Result<String, String> {
+    let is_toggle = matches!(command, ControlCmd::Toggle | ControlCmd::ToggleAlt);
     let mut status_before = String::new();
-    if command == ControlCmd::Toggle && wait_sec > 0.0 {
+    if is_toggle && wait_sec > 0.0 {
         status_before = send_cmd(
             ControlCmd::Status,
             socket_path,
@@ -114,7 +121,7 @@ pub fn run_control(
     if wait_sec > 0.0 {
         if command == ControlCmd::Stop {
             should_wait = true;
-        } else if command == ControlCmd::Toggle {
+        } else if is_toggle {
             should_wait = status_before.trim().ends_with("recording");
         }
     }

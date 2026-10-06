@@ -112,6 +112,10 @@ pub enum SessionCommand {
     Start,
     Stop,
     Toggle,
+    /// Start with the alternate text case (opposite of `typing_text_case`).
+    StartAlt,
+    /// Toggle; a start uses the alternate text case.
+    ToggleAlt,
     Shutdown,
     TtsSpeak {
         text: String,

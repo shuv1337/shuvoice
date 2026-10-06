@@ -10,7 +10,7 @@ use shuvoice_app::fakes::{
 };
 use shuvoice_app::{
     ASR_MAX_FAILURES, Config, OutputMode, OverlayState, PTT_REARM_GRACE_SEC, RecordingStatus,
-    TestHarness, TtsPlayerState, TtsSource, TypingTextCase,
+    SessionCommand, TestHarness, TtsPlayerState, TtsSource, TypingTextCase,
 };
 use shuvoice_asr::FallbackOutcome;
 
@@ -400,6 +400,82 @@ async fn commit_utterance_uses_rendered_text_for_overlay_and_typing() {
     // exactly-once
     h.session.commit_utterance().await;
     assert_eq!(h.injector.finals().len(), 1);
+    h.shutdown().await;
+}
+
+#[tokio::test]
+async fn alt_start_latches_opposite_text_case_per_utterance() {
+    let scripted = ScriptedAsrBackend::local_streaming(4);
+    {
+        let shared = scripted.shared();
+        let mut inner = shared.lock();
+        inner.texts.push_back("Raw Transcript One".into());
+        inner.texts.push_back("Raw Transcript Two".into());
+        inner.texts.push_back("Raw Transcript Three".into());
+    }
+    let mut config = cfg();
+    config.typing_text_case = TypingTextCase::Default;
+    let mut h = build_with(scripted, FakeTts::new(), FakeSelection::default(), config).await;
+
+    // Alternate start on a `default` config → lowercase for this utterance only.
+    h.session.start_recording_alt().await;
+    h.session.begin_utterance().await;
+    h.session.append_recording_chunk(&[0.2; 4]);
+    h.session.process_recording_chunks().await;
+    assert_eq!(
+        h.session.render_transcript_text("Mid Utterance"),
+        "mid utterance"
+    );
+    h.session.commit_utterance().await;
+    assert_eq!(h.injector.finals(), vec!["raw transcript one".to_string()]);
+
+    // A plain start reverts to the configured case.
+    h.session.stop_recording();
+    h.clock.advance_ms(500);
+    h.session.start_recording().await;
+    h.session.begin_utterance().await;
+    h.session.append_recording_chunk(&[0.2; 4]);
+    h.session.process_recording_chunks().await;
+    h.session.commit_utterance().await;
+    assert_eq!(h.injector.finals()[1], "Raw Transcript Two");
+
+    // A start that is ignored while recording must not re-case the live utterance.
+    h.session.stop_recording();
+    h.clock.advance_ms(500);
+    h.session.start_recording_alt().await;
+    h.session.start_recording().await;
+    h.session.begin_utterance().await;
+    h.session.append_recording_chunk(&[0.2; 4]);
+    h.session.process_recording_chunks().await;
+    h.session.commit_utterance().await;
+    assert_eq!(h.injector.finals()[2], "raw transcript three");
+    h.shutdown().await;
+}
+
+#[tokio::test]
+async fn alt_start_on_lowercase_config_yields_as_transcribed_text() {
+    let scripted = ScriptedAsrBackend::local_streaming(4);
+    scripted
+        .shared()
+        .lock()
+        .texts
+        .push_back("raw transcript".into());
+    let mut config = cfg();
+    config.typing_text_case = TypingTextCase::Lowercase;
+    config.auto_capitalize = true;
+    let mut h = build_with(scripted, FakeTts::new(), FakeSelection::default(), config).await;
+    let reply = h
+        .session
+        .handle_command(SessionCommand::StartAlt)
+        .await
+        .unwrap();
+    assert_eq!(reply, "OK started");
+    h.session.start_recording().await; // no-op while pending/recording; pumps the start
+    h.session.begin_utterance().await;
+    h.session.append_recording_chunk(&[0.2; 4]);
+    h.session.process_recording_chunks().await;
+    h.session.commit_utterance().await;
+    assert_eq!(h.injector.finals(), vec!["Raw transcript".to_string()]);
     h.shutdown().await;
 }
 

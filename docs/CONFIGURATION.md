@@ -162,7 +162,7 @@ Keys: `auto_gain_target_peak`, `auto_gain_max`, `auto_gain_settle_chunks`,
 [typing]
 output_mode = "final_only"                 # final_only | streaming_partial
 typing_final_injection_mode = "auto"       # auto | clipboard | direct
-typing_text_case = "default"               # default | lowercase
+typing_text_case = "default"               # default | lowercase (Shift+PTT uses the other)
 preserve_clipboard = false
 typing_clipboard_settle_delay_ms = 40
 typing_retry_attempts = 2
@@ -220,9 +220,14 @@ layerrule = ignorealpha 0.20, tts-overlay
 
 Default socket: `$XDG_RUNTIME_DIR/shuvoice/control.sock`.
 
-Allowlisted commands: `start`, `stop`, `toggle`, `status`, `ping`, `metrics`,
-`debug_status`, `tts_speak`, `tts_speak_clipboard`, `tts_pause`, `tts_resume`,
-`tts_toggle_pause`, `tts_restart`, `tts_stop`, `tts_status`.
+Allowlisted commands: `start`, `stop`, `toggle`, `start_alt`, `toggle_alt`,
+`status`, `ping`, `metrics`, `debug_status`, `maintenance_reserve`,
+`maintenance_release`, `tts_speak`, `tts_speak_clipboard`, `tts_pause`,
+`tts_resume`, `tts_toggle_pause`, `tts_restart`, `tts_stop`, `tts_status`.
+
+`start_alt` / `toggle_alt` begin an utterance in the opposite of the configured
+`typing_text_case` (see [Typing](#typing)); the case is latched for that
+utterance and `stop` is shared with the primary chord.
 
 ## TTS
 

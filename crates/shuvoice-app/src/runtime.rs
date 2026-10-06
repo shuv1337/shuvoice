@@ -100,6 +100,8 @@ impl ControlHandlerSurface for EnqueueControlAdapter {
             }
             "start" => SessionCommand::Start,
             "toggle" => SessionCommand::Toggle,
+            "start_alt" => SessionCommand::StartAlt,
+            "toggle_alt" => SessionCommand::ToggleAlt,
             "tts_speak" if self.tts_enabled => SessionCommand::TtsSpeakSelection,
             "tts_speak_clipboard" if self.tts_enabled => SessionCommand::TtsSpeakClipboard,
             "tts_resume" if self.tts_enabled => SessionCommand::TtsResume,

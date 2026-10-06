@@ -298,6 +298,15 @@ impl TypingTextCase {
             Self::Lowercase => "lowercase",
         }
     }
+
+    /// The other case mode — used by `start_alt` / `toggle_alt` so a second
+    /// push-to-talk chord always produces the opposite of the configured mode.
+    pub fn alternate(self) -> Self {
+        match self {
+            Self::Default => Self::Lowercase,
+            Self::Lowercase => Self::Default,
+        }
+    }
 }
 
 impl FromStr for TypingTextCase {
@@ -706,6 +715,8 @@ pub const CONTROL_COMMANDS: &[&str] = &[
     "start",
     "stop",
     "toggle",
+    "start_alt",
+    "toggle_alt",
     "status",
     "ping",
     "metrics",
@@ -754,6 +765,24 @@ mod tests {
             RecordingStatus::from_flags(false, true, false, false).as_str(),
             "idle"
         );
+    }
+
+    #[test]
+    fn typing_text_case_alternate_flips_and_round_trips() {
+        assert_eq!(
+            TypingTextCase::Default.alternate(),
+            TypingTextCase::Lowercase
+        );
+        assert_eq!(
+            TypingTextCase::Lowercase.alternate(),
+            TypingTextCase::Default
+        );
+        assert_eq!(
+            TypingTextCase::Default.alternate().alternate(),
+            TypingTextCase::Default
+        );
+        assert!(is_valid_control_command("start_alt"));
+        assert!(is_valid_control_command("toggle_alt"));
     }
 
     #[test]

@@ -126,9 +126,17 @@ Recommended Hyprland binds:
 bind = , Control_R, exec, shuvoice control start --control-wait-sec 0
 bindr = , Control_R, exec, shuvoice control stop --control-wait-sec 0
 bindr = CTRL, Control_R, exec, shuvoice control stop --control-wait-sec 0
+bind = SHIFT, Control_R, exec, shuvoice control start_alt --control-wait-sec 0
+bindr = SHIFT, Control_R, exec, shuvoice control stop --control-wait-sec 0
+bindr = CTRL SHIFT, Control_R, exec, shuvoice control stop --control-wait-sec 0
 bind = SUPER CTRL, S, exec, shuvoice control tts_speak --control-wait-sec 0
 bind = SUPER CTRL SHIFT, S, exec, shuvoice control tts_speak_clipboard --control-wait-sec 0
 ```
+
+`start` dictates in your configured `typing_text_case`; `start_alt` (Shift +
+the same key) dictates in the other mode — lowercase when you normally type
+as-transcribed, as-transcribed when you normally type lowercase. Both share
+`stop`. `toggle_alt` is the matching toggle for click-style bindings.
 
 `tts_speak` reads the primary selection first, then falls back to the clipboard.
 `tts_speak_clipboard` reads only the system clipboard — useful in Zellij and

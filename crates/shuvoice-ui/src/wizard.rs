@@ -419,6 +419,27 @@ pub fn format_hyprland_bind(hypr_key_spec: &str, shuvoice_command: &str) -> Stri
     )
 }
 
+/// Add `SHIFT` to the modifier half of a Hyprland `MODS, KEY` spec.
+///
+/// `", Control_R"` → `"SHIFT, Control_R"`; `"SUPER, V"` → `"SUPER SHIFT, V"`.
+pub fn hypr_key_spec_with_shift(hypr_key_spec: &str) -> String {
+    let (mods, key) = hypr_key_spec
+        .split_once(',')
+        .map(|(m, k)| (m.trim(), k.trim()))
+        .unwrap_or(("", hypr_key_spec.trim()));
+    if mods.is_empty() {
+        format!("SHIFT, {key}")
+    } else {
+        format!("{mods} SHIFT, {key}")
+    }
+}
+
+/// Format the full managed Hyprland block for a push-to-talk preset.
+///
+/// Emits the primary hold-to-talk pair, a `SHIFT`+key pair that starts with
+/// the alternate text case (`start_alt`) and shares `stop`, and the TTS chords.
+/// For `right_ctrl` both release paths also get a `CTRL`-modified fallback
+/// since Control_R reports itself as a held modifier on release.
 pub fn format_hyprland_bind_for_keybind(
     keybind_id: &str,
     hypr_key_spec: &str,
@@ -431,6 +452,21 @@ pub fn format_hyprland_bind_for_keybind(
     if keybind_id == "right_ctrl" {
         lines.push(format!(
             "bindr = CTRL, Control_R, exec, {}",
+            control_exec("stop", shuvoice_command)
+        ));
+    }
+    let shifted = hypr_key_spec_with_shift(hypr_key_spec);
+    lines.push(format!(
+        "bind = {shifted}, exec, {}",
+        control_exec("start_alt", shuvoice_command)
+    ));
+    lines.push(format!(
+        "bindr = {shifted}, exec, {}",
+        control_exec("stop", shuvoice_command)
+    ));
+    if keybind_id == "right_ctrl" {
+        lines.push(format!(
+            "bindr = CTRL SHIFT, Control_R, exec, {}",
             control_exec("stop", shuvoice_command)
         ));
     }
@@ -848,6 +884,21 @@ pub struct FormatSummaryArgs<'a> {
     pub tts_playback_speed: Option<f64>,
 }
 
+fn text_case_label_for(text_case: &str) -> &str {
+    match text_case {
+        "default" => "Default",
+        "lowercase" => "Lowercase",
+        other => other,
+    }
+}
+
+fn alternate_text_case(text_case: &str) -> &'static str {
+    match text_case {
+        "lowercase" => "default",
+        _ => "lowercase",
+    }
+}
+
 pub fn format_summary(args: FormatSummaryArgs<'_>) -> String {
     let asr_name = ASR_BACKENDS
         .iter()
@@ -867,11 +918,7 @@ pub fn format_summary(args: FormatSummaryArgs<'_>) -> String {
         "direct" => "Direct typing (keystroke simulation)",
         other => other,
     };
-    let text_case_label = match args.typing_text_case {
-        "default" => "Default",
-        "lowercase" => "Lowercase",
-        other => other,
-    };
+    let text_case_label = text_case_label_for(args.typing_text_case);
 
     let tts_backend = if args.tts_backend.trim().is_empty() {
         DEFAULT_TTS_BACKEND
@@ -972,6 +1019,11 @@ pub fn format_summary(args: FormatSummaryArgs<'_>) -> String {
         }
         lines.push(String::new());
         lines.push(indented);
+        lines.push(String::new());
+        lines.push(format!(
+            "Shift+{keybind_label} dictates in the other text case ({}).",
+            text_case_label_for(alternate_text_case(args.typing_text_case))
+        ));
     } else {
         lines.push(String::new());
         lines.push("Configure your keybind in ~/.config/hypr/hyprland.conf".into());
@@ -1618,6 +1670,37 @@ mod tests {
         );
         assert!(right.contains("tts_speak"));
         assert!(right.contains("tts_speak_clipboard"));
+    }
+
+    #[test]
+    fn format_hyprland_bind_adds_shift_alternate_case_chord() {
+        assert_eq!(hypr_key_spec_with_shift(", Control_R"), "SHIFT, Control_R");
+        assert_eq!(hypr_key_spec_with_shift("SUPER, V"), "SUPER SHIFT, V");
+
+        let right = format_hyprland_bind_for_keybind("right_ctrl", ", Control_R", "shuvoice");
+        assert!(right.contains(
+            "bind = SHIFT, Control_R, exec, shuvoice control start_alt --control-wait-sec 0"
+        ));
+        assert!(right.contains(
+            "bindr = SHIFT, Control_R, exec, shuvoice control stop --control-wait-sec 0"
+        ));
+        assert!(right.contains(
+            "bindr = CTRL SHIFT, Control_R, exec, shuvoice control stop --control-wait-sec 0"
+        ));
+        // Primary binds stay first so shortcut detection keeps finding the preset.
+        let first = right.lines().next().unwrap();
+        assert!(first.starts_with("bind = , Control_R, exec, shuvoice control start "));
+
+        let super_v = format_hyprland_bind_for_keybind("super_v", "SUPER, V", "shuvoice");
+        assert!(super_v.contains(
+            "bind = SUPER SHIFT, V, exec, shuvoice control start_alt --control-wait-sec 0"
+        ));
+        assert!(
+            super_v.contains(
+                "bindr = SUPER SHIFT, V, exec, shuvoice control stop --control-wait-sec 0"
+            )
+        );
+        assert!(!super_v.contains("CTRL SHIFT, V"));
     }
 
     #[test]
