@@ -36,7 +36,8 @@ pub use error::{AppError, AppResult};
 pub use events::{EventBus, EventBusRx, push_event_log};
 pub use runtime::{
     ControlHandlerSurface, EnqueueControlAdapter, SESSION_SHUTDOWN_GRACE, SessionHandle,
-    SessionRuntime, TestHarness, spawn_session_runtime, spawn_test_runtime,
+    SessionRuntime, TestHarness, spawn_session_runtime, spawn_session_runtime_with_transcripts,
+    spawn_test_runtime,
 };
 pub use session::{Session, SessionDeps, TEST_HANG_ACTOR_ON_SHUTDOWN};
 pub use types::{
@@ -52,7 +53,8 @@ pub use types::{
 pub mod core {
     pub use shuvoice_core::{
         CircuitBreaker, DEPENDENCY_EXIT_CODE, MetricsCollector, PTT_REARM_GRACE, STOP_TAIL_GRACE,
-        UtteranceState, apply_utterance_gain, audio_rms, looks_like_cuda_oom_error,
-        metrics_to_json, prefer_transcript, render_transcript_text, sanitize_final_injection_text,
+        TranscriptRecord, UtteranceState, apply_utterance_gain, audio_rms,
+        looks_like_cuda_oom_error, metrics_to_json, prefer_transcript, render_transcript_text,
+        sanitize_final_injection_text,
     };
 }

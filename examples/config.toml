@@ -15,6 +15,9 @@ config_version = 1
 [vocabulary]
 # Recognition hints (not correction rules). Active only on tested OpenAI models.
 recognition_hints = []
+# Append each finalized utterance (raw, replaced, typed) to
+# ~/.local/state/shuvoice/transcripts.jsonl for tuning text_replacements.
+transcript_log = false
 
 [audio]
 sample_rate = 16000

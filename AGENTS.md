@@ -106,6 +106,13 @@ rules. Prompt hints are implemented for OpenAI `gpt-4o-transcribe`,
 `gpt-4o-mini-transcribe`, and `whisper-1` using GA `session.update`.
 Other adapters/models (including Parakeet offline-instant) report unsupported.
 
+`[vocabulary].transcript_log` (default off) appends one JSON line per
+finalized utterance (raw / replaced / output + fired replacement rules) via
+`shuvoice_app::traits::TranscriptSink`; the record type is
+`shuvoice_core::TranscriptRecord`, the writer is `shuvoice_io::JsonlAppender`
+(off-actor thread, bounded queue, `0600`, single `.1` rotation). Transcript
+text must stay out of tracing/journal output.
+
 ---
 
 ## Runtime paths
@@ -122,8 +129,9 @@ Other adapters/models (including Parakeet offline-instant) report unsupported.
 | `$XDG_DATA_HOME/shuvoice/workers-nemo-venv/` | NeMo worker venv |
 | `$XDG_DATA_HOME/shuvoice/workers-moonshine-venv/` | Moonshine worker venv |
 | `$XDG_DATA_HOME/shuvoice/.wizard-done` | Wizard marker |
+| `$XDG_STATE_HOME/shuvoice/transcripts.jsonl` | Opt-in transcript log (`[vocabulary].transcript_log`) |
 
-Defaults without XDG overrides: `~/.config`, `~/.local/share`.
+Defaults without XDG overrides: `~/.config`, `~/.local/share`, `~/.local/state`.
 
 ---
 

@@ -71,6 +71,8 @@ pub struct Config {
     pub config_version: u32,
     /// Recognition context, distinct from post-transcription replacements.
     pub recognition_hints: Vec<String>,
+    /// Append each finalized utterance to the local transcript log.
+    pub transcript_log: bool,
 
     // Audio
     pub sample_rate: u32,
@@ -192,6 +194,7 @@ impl Default for Config {
                 .iter()
                 .map(|s| (*s).into())
                 .collect(),
+            transcript_log: false,
             sample_rate: 16000,
             chunk_ms: 100,
             fallback_sample_rate: 48000,
@@ -899,6 +902,7 @@ impl Config {
     pub(crate) fn field_to_value(&self, key: &str) -> Option<Value> {
         Some(match key {
             "recognition_hints" => serde_json::json!(self.recognition_hints),
+            "transcript_log" => Value::Bool(self.transcript_log),
             "sample_rate" => Value::from(self.sample_rate),
             "chunk_ms" => Value::from(self.chunk_ms),
             "fallback_sample_rate" => Value::from(self.fallback_sample_rate),
@@ -1088,6 +1092,7 @@ fn apply_flat_overrides(cfg: &mut Config, flat: &Map<String, Value>) -> CoreResu
                     .map(|v| as_string(v, "recognition_hints"))
                     .collect::<CoreResult<Vec<_>>>()?;
             }
+            "transcript_log" => cfg.transcript_log = as_bool(value, "transcript_log")?,
             "config_version" => cfg.config_version = as_u32(value, "config_version")?,
             "sample_rate" => cfg.sample_rate = as_u32(value, "sample_rate")?,
             "chunk_ms" => cfg.chunk_ms = as_u32(value, "chunk_ms")?,
@@ -1530,6 +1535,23 @@ mod tests {
         .unwrap();
         let cfg = Config::load_from_path(&path).unwrap();
         assert_eq!(cfg.typing_final_injection_mode, InjectionMode::Direct);
+    }
+
+    #[test]
+    fn transcript_log_defaults_off_and_round_trips() {
+        assert!(!Config::default().transcript_log);
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "config_version = 1\n[vocabulary]\ntranscript_log = true\n",
+        )
+        .unwrap();
+        let cfg = Config::load_from_path(&path).unwrap();
+        assert!(cfg.transcript_log);
+        let saved = dir.path().join("saved.toml");
+        cfg.save_to_path(&saved).unwrap();
+        assert!(Config::load_from_path(&saved).unwrap().transcript_log);
     }
 
     #[test]

@@ -25,6 +25,22 @@ pub fn xdg_data_home() -> PathBuf {
     home_dir().join(".local").join("share")
 }
 
+/// Resolve `$XDG_STATE_HOME` or `~/.local/state`.
+pub fn xdg_state_home() -> PathBuf {
+    if let Ok(value) = env::var("XDG_STATE_HOME") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    home_dir().join(".local").join("state")
+}
+
+/// ShuVoice state directory: `$XDG_STATE_HOME/shuvoice`.
+pub fn state_dir() -> PathBuf {
+    xdg_state_home().join("shuvoice")
+}
+
 /// Resolve `$XDG_RUNTIME_DIR` when set.
 pub fn xdg_runtime_dir() -> Option<PathBuf> {
     env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from)

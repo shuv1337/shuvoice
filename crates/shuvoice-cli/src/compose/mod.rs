@@ -64,7 +64,7 @@ use shuvoice_app::traits::{FeedbackSink, OverlaySink, SystemClock, TtsEngine};
 #[allow(unused_imports)] // SessionCommand used under feature = "tts"
 use shuvoice_app::{
     EnqueueControlAdapter, SessionCommand, SessionEvent, SessionRuntime, TtsPlayerState,
-    spawn_session_runtime,
+    spawn_session_runtime, spawn_session_runtime_with_transcripts,
 };
 use shuvoice_asr::DynAsrBackend;
 use shuvoice_control::{ControlCommand, ControlServer};
@@ -77,7 +77,7 @@ use crate::error::{EXIT_DEPENDENCY, EXIT_FAILURE, EXIT_SUCCESS, ExitStatus};
 use crate::setup::layer_shell::layer_shell_present;
 
 use self::control_bridge::ControlBridge;
-use self::io_adapters::{IoSelection, IoTextInjector};
+use self::io_adapters::{IoSelection, IoTextInjector, transcript_sink};
 use self::worker_runtime::{WorkerRuntimeError, discover_asr_worker_runtime};
 
 #[cfg(feature = "tts")]
@@ -930,7 +930,7 @@ async fn compose_and_run(config: Config) -> Result<(), ComposeError> {
     // ── Session runtime ───────────────────────────────────────────────────
     // After this succeeds, every error path MUST call `abort_live_startup`
     // before returning (no bare `?` across the live-runtime boundary).
-    let mut runtime = match spawn_session_runtime(
+    let mut runtime = match spawn_session_runtime_with_transcripts(
         config.clone(),
         backend,
         injector,
@@ -939,6 +939,7 @@ async fn compose_and_run(config: Config) -> Result<(), ComposeError> {
         feedback_for_session,
         clock,
         tts_engine,
+        transcript_sink(&config),
     )
     .await
     {

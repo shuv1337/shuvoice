@@ -24,11 +24,12 @@ use shuvoice_asr::{AsrError, FallbackOutcome};
 use shuvoice_core::{
     ASR_MAX_FAILURES, BeginUtteranceParams, BreakerAction, CircuitBreaker, Config,
     ERROR_TOAST_SECONDS, FinalizationMode, MetricsCollector, OutputMode, OverlayState,
-    RecordingStatus, RenderOptions, STOP_TAIL_GRACE, StartGate, TypingTextCase, UtteranceState,
-    apply_utterance_gain, audio_rms, begin_utterance, capture_preroll, compile_text_replacements,
-    evaluate_start_gate, metrics_to_json, ms_to_samples, observe_recording_chunk,
-    prefer_transcript, recording_status as core_recording_status, render_transcript_text,
-    sanitize_final_injection_text, update_noise_floor,
+    RecordingStatus, RenderOptions, STOP_TAIL_GRACE, StartGate, TranscriptRecord, TypingTextCase,
+    UtteranceState, apply_utterance_gain, audio_rms, begin_utterance, capture_preroll,
+    compile_text_replacements, evaluate_start_gate, metrics_to_json, ms_to_samples,
+    observe_recording_chunk, prefer_transcript, recording_status as core_recording_status,
+    render_transcript_text, render_transcript_text_traced, sanitize_final_injection_text,
+    update_noise_floor,
 };
 use tokio::sync::mpsc;
 
@@ -40,7 +41,9 @@ use crate::finalize::{
     FinalizeOutcome, JobResult, LifecyclePurpose, TtsCaptureKind, default_grace, spawn_chunk_job,
     spawn_fallback_job, spawn_finalize_job, spawn_reset_job,
 };
-use crate::traits::{Clock, FeedbackSink, OverlaySink, SelectionCapture, TextInjector, TtsEngine};
+use crate::traits::{
+    Clock, FeedbackSink, OverlaySink, SelectionCapture, TextInjector, TranscriptSink, TtsEngine,
+};
 use crate::types::{
     EFFECT_PUMP_BOUND, RuntimeView, SessionCommand, SessionEvent, StatusSnapshot,
     TTS_AWAIT_FINALIZE_TIMEOUT, TtsPlayerState, TtsSource, UtteranceGen,
@@ -66,6 +69,7 @@ pub struct SessionDeps<I, T, S, O, F, C> {
     pub metrics: Arc<MetricsCollector>,
     pub view: RuntimeView,
     pub events: Option<EventBus>,
+    pub transcripts: Option<Arc<dyn TranscriptSink>>,
 }
 
 impl<I, T, S, O, F, C> SessionDeps<I, T, S, O, F, C> {
@@ -90,6 +94,7 @@ impl<I, T, S, O, F, C> SessionDeps<I, T, S, O, F, C> {
             metrics: Arc::new(MetricsCollector::new()),
             view: RuntimeView::new(),
             events: None,
+            transcripts: None,
         }
     }
     pub fn with_tts(mut self, tts: T) -> Self {
@@ -108,6 +113,10 @@ impl<I, T, S, O, F, C> SessionDeps<I, T, S, O, F, C> {
         self.events = Some(e);
         self
     }
+    pub fn with_transcripts(mut self, sink: Arc<dyn TranscriptSink>) -> Self {
+        self.transcripts = Some(sink);
+        self
+    }
 }
 
 struct ActiveFinalize {
@@ -116,6 +125,8 @@ struct ActiveFinalize {
     join: tokio::task::JoinHandle<()>,
     late_tx: mpsc::UnboundedSender<Vec<f32>>,
     grace_until: Instant,
+    /// Samples buffered at the stop edge (transcript log duration).
+    audio_samples: usize,
 }
 
 struct ActiveChunk {
@@ -937,6 +948,7 @@ where
         self.drain_and_buffer();
         let utt_gen = self.utterance_gen;
         let state = std::mem::replace(&mut self.state, UtteranceState::new());
+        let audio_samples = state.total;
         let (late_tx, late_rx) = mpsc::unbounded_channel::<Vec<f32>>();
         let cancel = Arc::new(AtomicBool::new(false));
         let finish_timeout = {
@@ -965,6 +977,7 @@ where
             join,
             late_tx,
             grace_until: self.now() + STOP_TAIL_GRACE,
+            audio_samples,
         });
         self.processing = true;
     }
@@ -1283,7 +1296,9 @@ where
                     return;
                 }
                 // Join the tracked task (should already be finished).
+                let mut audio_samples = 0;
                 if let Some(f) = self.finalize.take() {
+                    audio_samples = f.audio_samples;
                     if !f.join.is_finished() {
                         // Should be rare; don't block the actor on a wedged job.
                         f.cancel.store(true, Ordering::Release);
@@ -1310,6 +1325,21 @@ where
                         } else {
                             let text = if text.is_empty() {
                                 text
+                            } else if let Some(sink) = self.deps.transcripts.clone() {
+                                let trace = render_transcript_text_traced(&text, &self.render);
+                                let output = sanitize_final_injection_text(&trace.rendered);
+                                let audio_ms = (audio_samples as u64 * 1000)
+                                    / u64::from(self.sample_rate.max(1));
+                                sink.record(TranscriptRecord::new(
+                                    &self.config,
+                                    utt_gen,
+                                    self.render.text_case,
+                                    audio_ms,
+                                    &text,
+                                    trace,
+                                    &output,
+                                ));
+                                output
                             } else {
                                 let rendered = self.render_transcript_text(&text);
                                 sanitize_final_injection_text(&rendered)

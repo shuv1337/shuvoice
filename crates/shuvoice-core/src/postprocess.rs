@@ -111,7 +111,12 @@ pub fn find_bounded_phrase_matches(haystack: &str, needle: &str) -> Vec<(usize, 
     matches
 }
 
-fn apply_one_replacement(text: &str, source: &str, replacement: &str) -> String {
+fn apply_one_replacement(
+    text: &str,
+    source: &str,
+    replacement: &str,
+    mut matched: Option<&mut Vec<String>>,
+) -> String {
     let ranges = find_bounded_phrase_matches(text, source);
     if ranges.is_empty() {
         return text.to_string();
@@ -120,11 +125,25 @@ fn apply_one_replacement(text: &str, source: &str, replacement: &str) -> String 
     let mut cursor = 0usize;
     for (start, end) in ranges {
         out.push_str(&text[cursor..start]);
+        if let Some(matched) = matched.as_deref_mut() {
+            matched.push(text[start..end].to_string());
+        }
         out.push_str(replacement);
         cursor = end;
     }
     out.push_str(&text[cursor..]);
     out
+}
+
+/// One replacement rule that fired while rendering a transcript.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ReplacementHit {
+    /// Configured `text_replacements` key.
+    pub rule: String,
+    /// Text as it appeared in the transcript (case may differ from `rule`).
+    pub matched: String,
+    pub replacement: String,
+    pub count: usize,
 }
 
 /// Compile whole-word replacement entries once for hot-path reuse.
@@ -176,10 +195,49 @@ pub fn apply_text_replacements(
     if compiled.is_empty() {
         return text.to_string();
     }
+    apply_compiled(text, compiled, None)
+}
 
+/// [`apply_text_replacements`] that also reports which rules fired.
+pub fn apply_text_replacements_traced(
+    text: &str,
+    compiled: &CompiledTextReplacements,
+) -> (String, Vec<ReplacementHit>) {
+    let mut hits = Vec::new();
+    if text.is_empty() || compiled.is_empty() {
+        return (text.to_string(), hits);
+    }
+    let out = apply_compiled(text, compiled, Some(&mut hits));
+    (out, hits)
+}
+
+fn apply_compiled(
+    text: &str,
+    compiled: &CompiledTextReplacements,
+    mut hits: Option<&mut Vec<ReplacementHit>>,
+) -> String {
     let mut result = text.to_string();
+    let mut matched = Vec::new();
     for entry in compiled.iter() {
-        result = apply_one_replacement(&result, &entry.source, &entry.replacement);
+        let tracking = hits.is_some();
+        result = apply_one_replacement(
+            &result,
+            &entry.source,
+            &entry.replacement,
+            tracking.then_some(&mut matched),
+        );
+        if let Some(hits) = hits.as_deref_mut() {
+            matched.sort();
+            for group in matched.chunk_by(|a, b| a == b) {
+                hits.push(ReplacementHit {
+                    rule: entry.source.clone(),
+                    matched: group[0].clone(),
+                    replacement: entry.replacement.clone(),
+                    count: group.len(),
+                });
+            }
+            matched.clear();
+        }
     }
 
     let collapsed = MULTI_SPACE.replace_all(&result, " ");
@@ -218,13 +276,38 @@ pub fn render_transcript_text(text: &str, options: &RenderOptions) -> String {
         return text.to_string();
     }
     let rendered = apply_text_replacements(text, None, Some(&options.replacements));
-    if rendered.is_empty() {
-        return rendered;
+    apply_text_case(rendered, options)
+}
+
+/// Intermediate stages of [`render_transcript_text`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderTrace {
+    /// After replacements, before case policy.
+    pub replaced: String,
+    /// Same as [`render_transcript_text`] output.
+    pub rendered: String,
+    pub hits: Vec<ReplacementHit>,
+}
+
+/// [`render_transcript_text`] that keeps the replaced stage and rule hits.
+pub fn render_transcript_text_traced(text: &str, options: &RenderOptions) -> RenderTrace {
+    let (replaced, hits) = apply_text_replacements_traced(text, &options.replacements);
+    let rendered = apply_text_case(replaced.clone(), options);
+    RenderTrace {
+        replaced,
+        rendered,
+        hits,
+    }
+}
+
+fn apply_text_case(text: String, options: &RenderOptions) -> String {
+    if text.is_empty() {
+        return text;
     }
     match options.text_case {
-        TypingTextCase::Lowercase => lowercase_text(&rendered),
-        TypingTextCase::Default if options.auto_capitalize => capitalize_first(&rendered),
-        TypingTextCase::Default => rendered,
+        TypingTextCase::Lowercase => lowercase_text(&text),
+        TypingTextCase::Default if options.auto_capitalize => capitalize_first(&text),
+        TypingTextCase::Default => text,
     }
 }
 
@@ -389,5 +472,60 @@ mod tests {
             apply_text_replacements("high-land", Some(&replacements), None),
             "high-terrain"
         );
+    }
+
+    #[test]
+    fn traced_replacements_report_hits_and_match_untraced_output() {
+        let mut replacements = BTreeMap::new();
+        replacements.insert("tail scale".into(), "Tailscale".into());
+        replacements.insert("um".into(), "".into());
+        replacements.insert("unused".into(), "x".into());
+        let compiled = compile_text_replacements(&replacements);
+        let text = "um over Tail Scale and tail scale um";
+        let (out, hits) = apply_text_replacements_traced(text, &compiled);
+        assert_eq!(out, apply_text_replacements(text, None, Some(&compiled)));
+        assert_eq!(out, "over Tailscale and Tailscale");
+        assert_eq!(
+            hits,
+            vec![
+                ReplacementHit {
+                    rule: "tail scale".into(),
+                    matched: "Tail Scale".into(),
+                    replacement: "Tailscale".into(),
+                    count: 1,
+                },
+                ReplacementHit {
+                    rule: "tail scale".into(),
+                    matched: "tail scale".into(),
+                    replacement: "Tailscale".into(),
+                    count: 1,
+                },
+                ReplacementHit {
+                    rule: "um".into(),
+                    matched: "um".into(),
+                    replacement: "".into(),
+                    count: 2,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn traced_render_keeps_replaced_stage_before_case_policy() {
+        let mut replacements = BTreeMap::new();
+        replacements.insert("hyper land".into(), "Hyprland".into());
+        let options = RenderOptions {
+            text_case: TypingTextCase::Lowercase,
+            auto_capitalize: true,
+            replacements: compile_text_replacements(&replacements),
+        };
+        let trace = render_transcript_text_traced("I love Hyper Land", &options);
+        assert_eq!(trace.replaced, "I love Hyprland");
+        assert_eq!(trace.rendered, "i love hyprland");
+        assert_eq!(
+            trace.rendered,
+            render_transcript_text("I love Hyper Land", &options)
+        );
+        assert_eq!(trace.hits.len(), 1);
     }
 }

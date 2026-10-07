@@ -85,7 +85,7 @@ pub static DEFAULT_TEXT_REPLACEMENTS: Lazy<BTreeMap<String, String>> = Lazy::new
 /// Nested TOML section → field names (for serialization).
 pub fn config_section_fields() -> &'static [(&'static str, &'static [&'static str])] {
     &[
-        ("vocabulary", &["recognition_hints"]),
+        ("vocabulary", &["recognition_hints", "transcript_log"]),
         (
             "audio",
             &[

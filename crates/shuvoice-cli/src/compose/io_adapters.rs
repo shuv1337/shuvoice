@@ -29,16 +29,19 @@
 #![allow(clippy::let_and_return)]
 #![allow(clippy::double_must_use)]
 #![allow(clippy::result_unit_err)]
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use shuvoice_app::traits::{SelectionCapture as AppSelectionCapture, TextInjector};
-use shuvoice_core::{Config, InjectionMode};
+use shuvoice_app::traits::{SelectionCapture as AppSelectionCapture, TextInjector, TranscriptSink};
+use shuvoice_core::{
+    Config, InjectionMode, TRANSCRIPT_LOG_MAX_BYTES, TranscriptRecord, transcript_log_path,
+};
 use shuvoice_io::{
-    CommitOutcome, FinalInjectionMode, InjectError, SelectionCapture as IoSelectionCapture,
-    SelectionError, StreamingTyper, TyperConfig,
+    CommitOutcome, FinalInjectionMode, InjectError, JsonlAppender,
+    SelectionCapture as IoSelectionCapture, SelectionError, StreamingTyper, TyperConfig,
 };
 use tracing::warn;
 
@@ -266,6 +269,53 @@ impl AppSelectionCapture for IoSelection {
         .await
         .map_err(|_| "clipboard capture task failed".to_string())?;
         result
+    }
+}
+
+/// Transcript log sink over the private JSON-lines appender.
+pub struct JsonlTranscriptSink {
+    log: JsonlAppender,
+}
+
+impl JsonlTranscriptSink {
+    pub fn spawn(path: PathBuf) -> std::io::Result<Self> {
+        Ok(Self {
+            log: JsonlAppender::spawn(path, TRANSCRIPT_LOG_MAX_BYTES)?,
+        })
+    }
+}
+
+impl TranscriptSink for JsonlTranscriptSink {
+    fn record(&self, record: TranscriptRecord) {
+        match serde_json::to_string(&record) {
+            Ok(line) => {
+                if !self.log.append(line) {
+                    warn!(
+                        dropped = self.log.dropped(),
+                        "transcript log queue full; record dropped"
+                    );
+                }
+            }
+            Err(err) => warn!(error = %err, "transcript record serialization failed"),
+        }
+    }
+}
+
+/// `Some` only when `[vocabulary].transcript_log` is enabled.
+pub fn transcript_sink(config: &Config) -> Option<Arc<dyn TranscriptSink>> {
+    if !config.transcript_log {
+        return None;
+    }
+    let path = transcript_log_path();
+    match JsonlTranscriptSink::spawn(path.clone()) {
+        Ok(sink) => {
+            tracing::info!(path = %path.display(), "transcript log enabled");
+            Some(Arc::new(sink))
+        }
+        Err(err) => {
+            warn!(error = %err, "transcript log writer failed to start; logging disabled");
+            None
+        }
     }
 }
 

@@ -1,13 +1,16 @@
 //! High-risk flow tests (async ASR owner composition).
 
+use std::sync::Arc;
 use std::time::Duration;
 
+use shuvoice_app::core::TranscriptRecord;
 use shuvoice_app::core::{
     UtteranceState, apply_utterance_gain, looks_like_cuda_oom_error, prefer_transcript,
 };
 use shuvoice_app::fakes::{
     FakeSelection, FakeTts, ScriptedAsrBackend, ScriptedInner, offline_asr, remote_asr,
 };
+use shuvoice_app::traits::TranscriptSink;
 use shuvoice_app::{
     ASR_MAX_FAILURES, Config, OutputMode, OverlayState, PTT_REARM_GRACE_SEC, RecordingStatus,
     SessionCommand, TestHarness, TtsPlayerState, TtsSource, TypingTextCase,
@@ -476,6 +479,58 @@ async fn alt_start_on_lowercase_config_yields_as_transcribed_text() {
     h.session.process_recording_chunks().await;
     h.session.commit_utterance().await;
     assert_eq!(h.injector.finals(), vec!["Raw transcript".to_string()]);
+    h.shutdown().await;
+}
+
+#[derive(Default)]
+struct RecordingSink(parking_lot::Mutex<Vec<TranscriptRecord>>);
+
+impl TranscriptSink for RecordingSink {
+    fn record(&self, record: TranscriptRecord) {
+        self.0.lock().push(record);
+    }
+}
+
+#[tokio::test]
+async fn finalize_records_transcript_stages_when_sink_present() {
+    let mut config = cfg();
+    config.typing_text_case = TypingTextCase::Lowercase;
+    config
+        .text_replacements
+        .insert("tail scale".into(), "Tailscale".into());
+    config.text_replacements.insert("um".into(), "".into());
+    let sink = Arc::new(RecordingSink::default());
+    let mut h = TestHarness::new_with_transcripts(
+        offline_asr("um connect over tail scale"),
+        FakeTts::new(),
+        FakeSelection::default(),
+        config,
+        Some(sink.clone()),
+    )
+    .await;
+    h.session.start_recording().await;
+    h.session.begin_utterance().await;
+    h.session.append_recording_chunk(&[0.2; 400]);
+    h.session.stop_recording();
+    h.session.handle_recording_stop().await;
+    assert_eq!(
+        h.injector.finals(),
+        vec!["connect over tailscale".to_string()]
+    );
+    let records = sink.0.lock().clone();
+    assert_eq!(records.len(), 1);
+    let record = &records[0];
+    assert_eq!(record.raw, "um connect over tail scale");
+    assert_eq!(record.replaced, "connect over Tailscale");
+    assert_eq!(record.output, "connect over tailscale");
+    assert_eq!(record.text_case, "lowercase");
+    assert_eq!(record.audio_ms, 25);
+    let rules: Vec<_> = record
+        .replacements
+        .iter()
+        .map(|r| r.rule.as_str())
+        .collect();
+    assert_eq!(rules, ["tail scale", "um"]);
     h.shutdown().await;
 }
 

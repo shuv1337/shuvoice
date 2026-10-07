@@ -260,6 +260,7 @@ const BASIC_FIELDS: &[FieldMeta] = &[
 /// Display label and unit for fields generated from `config_section_fields()`.
 const GENERATED_LABELS: &[(&str, &str, &str)] = &[
     ("recognition_hints", "Preferred terms", ""),
+    ("transcript_log", "Save transcript log", ""),
     ("sample_rate", "Sample rate", "Hz"),
     ("chunk_ms", "Chunk length", "ms"),
     ("fallback_sample_rate", "Fallback sample rate", "Hz"),
