@@ -295,6 +295,8 @@ pub enum ConfigSetKey {
     TypingTextCase,
     #[value(name = "overlay_debug_mode")]
     OverlayDebugMode,
+    #[value(name = "transcript_log")]
+    TranscriptLog,
 }
 
 impl ConfigSetKey {
@@ -303,6 +305,7 @@ impl ConfigSetKey {
             Self::TypingFinalInjectionMode => "typing_final_injection_mode",
             Self::TypingTextCase => "typing_text_case",
             Self::OverlayDebugMode => "overlay_debug_mode",
+            Self::TranscriptLog => "transcript_log",
         }
     }
 }

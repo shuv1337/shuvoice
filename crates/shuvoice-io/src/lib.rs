@@ -9,6 +9,7 @@
 //! - pure audio helpers (+ optional `cpal` capture behind `audio` feature)
 //! - Waybar format/systemd helpers
 //! - diagnostics formatting / log ring buffer
+//! - private JSON-lines appender (transcript log)
 
 //!
 //! ## Residual notes
@@ -26,6 +27,7 @@ pub mod env_loader;
 pub mod error;
 pub mod hyprland;
 pub mod inject;
+pub mod jsonl_log;
 pub mod noise_floor;
 pub mod process;
 pub mod selection;
@@ -39,6 +41,7 @@ pub use inject::{
     CommitOutcome, FinalInjectionMode, InjectError, StreamingTyper, TyperConfig,
     sanitize_final_injection_text,
 };
+pub use jsonl_log::JsonlAppender;
 pub use noise_floor::NoiseFloor;
 pub use process::{
     CommandRunner, DEFAULT_MAX_OUTPUT_BYTES, RunOptions, RunOutput, ScriptedRunner,

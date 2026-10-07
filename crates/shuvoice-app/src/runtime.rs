@@ -21,7 +21,7 @@ use crate::fakes::{
 use crate::session::{Session, SessionDeps};
 use crate::traits::{
     Clock, FakeClock, FeedbackSink, OverlaySink, SelectionCapture, SystemClock, TextInjector,
-    TtsEngine,
+    TranscriptSink, TtsEngine,
 };
 use crate::types::{
     DEFAULT_ASR_OP_TIMEOUT, DEFAULT_COMMAND_CAPACITY, DEFAULT_EVENT_CAPACITY, RuntimeView,
@@ -359,6 +359,33 @@ where
     F: FeedbackSink + 'static,
     C: Clock + 'static,
 {
+    spawn_session_runtime_with_transcripts(
+        config, backend, injector, selection, overlay, feedback, clock, tts, None,
+    )
+    .await
+}
+
+/// [`spawn_session_runtime`] with an optional transcript log sink.
+#[allow(clippy::too_many_arguments)]
+pub async fn spawn_session_runtime_with_transcripts<I, T, S, O, F, C>(
+    config: Config,
+    backend: Box<DynAsrBackend>,
+    injector: Arc<I>,
+    selection: Arc<S>,
+    overlay: O,
+    feedback: F,
+    clock: Arc<C>,
+    tts: Option<T>,
+    transcripts: Option<Arc<dyn TranscriptSink>>,
+) -> AppResult<SessionRuntime>
+where
+    I: TextInjector + 'static,
+    T: TtsEngine + 'static,
+    S: SelectionCapture + 'static,
+    O: OverlaySink + 'static,
+    F: FeedbackSink + 'static,
+    C: Clock + 'static,
+{
     let (asr_handle, asr_join) = spawn_asr_owner(backend, 32, DEFAULT_ASR_OP_TIMEOUT);
     if let Err(e) = asr_handle.load().await {
         // Fail-fast: never construct EventBus/session/dispatcher on load failure.
@@ -410,6 +437,9 @@ where
     .with_events(event_bus);
     if let Some(tts) = tts {
         deps = deps.with_tts(tts);
+    }
+    if let Some(sink) = transcripts {
+        deps = deps.with_transcripts(sink);
     }
 
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<SessionCommand>(DEFAULT_COMMAND_CAPACITY);
@@ -515,6 +545,16 @@ impl TestHarness {
         selection: FakeSelection,
         config: Config,
     ) -> Self {
+        Self::new_with_transcripts(scripted, tts, selection, config, None).await
+    }
+
+    pub async fn new_with_transcripts(
+        scripted: ScriptedAsrBackend,
+        tts: FakeTts,
+        selection: FakeSelection,
+        config: Config,
+        transcripts: Option<Arc<dyn TranscriptSink>>,
+    ) -> Self {
         let shared = scripted.shared();
         let clock = FakeClock::new();
         let (asr, asr_join) = spawn_asr_owner(Box::new(scripted), 32, DEFAULT_ASR_OP_TIMEOUT);
@@ -533,7 +573,7 @@ impl TestHarness {
                 dispatcher_join,
             },
         ) = EventBus::new(256, 64);
-        let deps = SessionDeps::new(
+        let mut deps = SessionDeps::new(
             asr,
             audio_ring,
             Arc::clone(&injector),
@@ -544,6 +584,9 @@ impl TestHarness {
         )
         .with_tts(tts)
         .with_events(events.clone());
+        if let Some(sink) = transcripts {
+            deps = deps.with_transcripts(sink);
+        }
         let mut session = Session::new(config, deps);
         session.sync_audio_params_from_asr();
         session.set_model_load_failed(false);

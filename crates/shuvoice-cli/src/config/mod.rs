@@ -218,9 +218,9 @@ fn set_config_key(key: ConfigSetKey, value: ConfigSetValue) -> Result<String, St
         ConfigSetKey::TypingTextCase => {
             let _ = TypingTextCase::from_str(&value_norm).map_err(|e| e.to_string())?;
         }
-        ConfigSetKey::OverlayDebugMode => {
+        ConfigSetKey::OverlayDebugMode | ConfigSetKey::TranscriptLog => {
             if !matches!(value_norm.as_str(), "true" | "false") {
-                return Err("overlay_debug_mode must be one of: true, false".into());
+                return Err(format!("{key_norm} must be one of: true, false"));
             }
         }
     }
@@ -232,6 +232,7 @@ fn set_config_key(key: ConfigSetKey, value: ConfigSetValue) -> Result<String, St
     let section = match key {
         ConfigSetKey::TypingFinalInjectionMode | ConfigSetKey::TypingTextCase => "typing",
         ConfigSetKey::OverlayDebugMode => "overlay",
+        ConfigSetKey::TranscriptLog => "vocabulary",
     };
 
     let table = migrated
@@ -241,7 +242,7 @@ fn set_config_key(key: ConfigSetKey, value: ConfigSetValue) -> Result<String, St
         .ok_or_else(|| format!("[{section}] must be a table"))?;
 
     match key {
-        ConfigSetKey::OverlayDebugMode => {
+        ConfigSetKey::OverlayDebugMode | ConfigSetKey::TranscriptLog => {
             table.insert(key_norm.to_string(), Value::Bool(value_norm == "true"));
         }
         ConfigSetKey::TypingFinalInjectionMode => {

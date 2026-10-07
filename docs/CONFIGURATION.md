@@ -13,6 +13,38 @@ implemented hint adapter. `typing.text_replacements` remains a separate,
 cross-backend post-transcription correction map; built-ins are merged with
 user overrides. Hints guide recognition but do not force output.
 
+### Transcript log
+
+`[vocabulary].transcript_log` defaults to `false`. When `true`, the service
+appends one JSON object per finalized utterance to
+`$XDG_STATE_HOME/shuvoice/transcripts.jsonl` (default
+`~/.local/state/shuvoice/transcripts.jsonl`). Use it to find recurring
+misrecognitions and grow `typing.text_replacements`.
+
+Each record has `ts`, `utt_gen`, `asr_backend`, `asr_model`, `text_case`,
+`audio_ms`, `raw` (ASR output), `replaced` (after replacements, before case
+policy), `output` (text sent to the injector; empty when nothing was typed),
+`replacements` (rules that fired, with the matched text and count), and
+`config_revision` when known.
+
+The log holds everything you dictate in plain text. The file is created `0600`
+in a `0700` directory, rotates once to `transcripts.jsonl.1` at 16 MiB, and
+lines are dropped rather than delaying dictation if the writer falls behind.
+The setting takes effect on the next service start.
+
+```bash
+shuvoice config set transcript_log true
+systemctl --user restart shuvoice
+
+# Most frequent raw ASR words
+jq -r '.raw' ~/.local/state/shuvoice/transcripts.jsonl \
+  | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '\n' | sort | uniq -c | sort -rn | head -50
+
+# Rules that fire most often
+jq -r '.replacements[] | [.rule, .count] | @tsv' ~/.local/state/shuvoice/transcripts.jsonl \
+  | awk -F'\t' '{n[$1] += $2} END {for (r in n) print n[r] "\t" r}' | sort -rn
+```
+
 ShuVoice reads `~/.config/shuvoice/config.toml`. The wizard writes this file;
 manual examples live under `examples/`. Schema ownership is
 `crates/shuvoice-core` (`Config` + section field map).

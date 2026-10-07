@@ -50,6 +50,12 @@ pub trait OverlaySink: Send {
     fn set_debug_text(&mut self, _text: &str) {}
 }
 
+/// Receives one record per finalized utterance. Must not block: the session
+/// actor calls it inline.
+pub trait TranscriptSink: Send + Sync {
+    fn record(&self, record: shuvoice_core::TranscriptRecord);
+}
+
 pub trait FeedbackSink: Send {
     fn play_start(&mut self) {}
     fn play_stop(&mut self) {}

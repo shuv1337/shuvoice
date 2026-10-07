@@ -19,6 +19,7 @@ pub mod runtime;
 pub mod settings;
 pub mod streaming_health;
 pub mod transcript;
+pub mod transcript_log;
 pub mod tts_speed;
 pub mod types;
 pub mod utterance;
@@ -48,9 +49,10 @@ pub use flush::{
 };
 pub use metrics::{MetricsCollector, MetricsSnapshot, metrics_to_human, metrics_to_json};
 pub use postprocess::{
-    CompiledReplacement, CompiledTextReplacements, RenderOptions, apply_text_replacements,
-    capitalize_first, compile_text_replacements, find_bounded_phrase_matches, is_word_char,
-    lowercase_text, render_transcript_text, sanitize_final_injection_text,
+    CompiledReplacement, CompiledTextReplacements, RenderOptions, RenderTrace, ReplacementHit,
+    apply_text_replacements, apply_text_replacements_traced, capitalize_first,
+    compile_text_replacements, find_bounded_phrase_matches, is_word_char, lowercase_text,
+    render_transcript_text, render_transcript_text_traced, sanitize_final_injection_text,
 };
 pub use runtime::{
     ASR_LOOP_POLL_TIMEOUT, BeginUtteranceParams, METRICS_LOG_PERIOD, STOP_TAIL_GRACE, StartGate,
@@ -58,6 +60,7 @@ pub use runtime::{
 };
 pub use streaming_health::should_trigger_stall_flush;
 pub use transcript::{MIN_OVERLAP_CHARS, MIN_OVERLAP_WORDS, prefer_transcript};
+pub use transcript_log::{TRANSCRIPT_LOG_MAX_BYTES, TranscriptRecord, transcript_log_path};
 pub use tts_speed::{
     TTS_PLAYBACK_SPEED_DEFAULT, TTS_PLAYBACK_SPEED_MAX, TTS_PLAYBACK_SPEED_MIN,
     TTS_PLAYBACK_SPEED_STEP, format_tts_playback_speed, normalize_tts_playback_speed,
@@ -74,8 +77,8 @@ pub use types::{
 };
 pub use utterance::UtteranceState;
 pub use xdg::{
-    config_dir, config_path, data_dir, local_dev_env_path, wizard_done_path, xdg_config_home,
-    xdg_data_home, xdg_runtime_dir,
+    config_dir, config_path, data_dir, local_dev_env_path, state_dir, wizard_done_path,
+    xdg_config_home, xdg_data_home, xdg_runtime_dir, xdg_state_home,
 };
 
 /// Exit status used for dependency/configuration failures that systemd must not restart.
