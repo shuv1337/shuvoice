@@ -212,6 +212,15 @@ const BASIC_FIELDS: &[FieldMeta] = &[
             },
         )
     },
+    FieldMeta {
+        help: "Opt in to native MPRIS pause during recording, including the microphone tail. Conservatively restore only confirmed pauses afterward; browser support covers selected sessions, not all tabs. Does not keep media paused for read aloud.",
+        ..field(
+            "audio.pause_media_during_recording",
+            Section::Audio,
+            "Pause media while recording",
+            FieldKind::Bool,
+        )
+    },
     field(
         "audio.audio_device",
         Section::Audio,
@@ -1150,6 +1159,51 @@ mod tests {
                 .iter()
                 .all(|f| f.get("default").is_some() && f["advanced"].is_boolean())
         );
+    }
+
+    #[test]
+    fn pause_media_schema_and_patch_preserve_unrelated_keys() {
+        let id = "audio.pause_media_during_recording";
+        let meta = FIELDS.iter().find(|f| f.id == id).unwrap();
+        assert_eq!(meta.section, Section::Audio);
+        assert!(matches!(meta.kind, FieldKind::Bool));
+        assert_eq!(meta.label, "Pause media while recording");
+        let schema = schema_fields();
+        assert_eq!(
+            schema.iter().find(|f| f["id"] == id).unwrap()["default"],
+            false
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = write(
+            &dir,
+            "config_version = 1\n[audio]\ninput_gain = 1.5\nmy_note = 'keep'\n[custom]\nfoo = 1\n",
+        );
+        assert_eq!(snapshot(&path, |_| false).unwrap().values[id], false);
+        for enabled in [true, false] {
+            let rev = revision(&path).unwrap();
+            apply(&path, &rev, &changes(&[(id, json!(enabled))])).unwrap();
+            let cfg = Config::load_from_path(&path).unwrap();
+            assert_eq!(cfg.pause_media_during_recording, enabled);
+            assert_eq!(cfg.input_gain, 1.5);
+            let raw = load_raw(&path).unwrap();
+            assert_eq!(raw["audio"]["my_note"], "keep");
+            assert_eq!(raw["custom"]["foo"], 1);
+            assert_eq!(raw["config_version"], 1);
+            assert!(raw.get("asr").is_none());
+        }
+        let before = std::fs::read_to_string(&path).unwrap();
+        let err = apply(
+            &path,
+            &revision(&path).unwrap(),
+            &changes(&[(id, json!("true"))]),
+        )
+        .unwrap_err();
+        let ApplyError::Invalid { errors } = err else {
+            panic!("expected field validation error");
+        };
+        assert!(errors.iter().any(|e| e.field.as_deref() == Some(id)));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
     }
 
     #[test]

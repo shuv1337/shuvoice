@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use shuvoice_asr::{AsrError, FallbackOutcome};
 use shuvoice_core::{
-    FinalizationMode, STOP_TAIL_GRACE, TailFlushDecision, UtteranceState, apply_utterance_gain,
+    FinalizationMode, TailFlushDecision, UtteranceState, apply_utterance_gain,
     evaluate_tail_flush_step, flush_noise_escalation, is_silent_utterance, make_flush_noise,
     observe_recording_chunk, prefer_transcript, sanitize_final_injection_text,
 };
@@ -22,12 +22,16 @@ use crate::asr_owner::{AsrOwnerHandle, gen_is_current};
 use crate::types::UtteranceGen;
 
 /// Why a lifecycle reset was requested (applied on the actor via JobResult).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LifecyclePurpose {
     /// PTT start — begin recording only after reset succeeds.
-    StartRecording,
+    StartRecording {
+        intent: shuvoice_core::media::RecordingIntentId,
+    },
     /// One-shot recovery when starting while circuit is open.
-    DisabledRecovery,
+    DisabledRecovery {
+        intent: shuvoice_core::media::RecordingIntentId,
+    },
     /// Post-error recovery reset (non-CUDA).
     RecoverAfterFailure { context: String },
     /// Circuit-breaker cooldown elapsed.
@@ -103,13 +107,12 @@ fn absorb_late_chunk(state: &mut UtteranceState, chunk: &[f32], wants_raw: bool)
     observe_recording_chunk(state, chunk, wants_raw, 1, 0.15, 10.0);
 }
 
-/// Spawn finalize work. Collects late audio until `grace` elapses or cancel.
+/// Spawn finalize work. The actor closes capture; drain accepted late PCM to EOF.
 pub fn spawn_finalize_job(
     asr: AsrOwnerHandle,
     utt_gen: UtteranceGen,
     mut state: UtteranceState,
     mut late_rx: mpsc::UnboundedReceiver<Vec<f32>>,
-    grace: Duration,
     cancel: Arc<AtomicBool>,
     min_speech_samples: usize,
     _speech_rms_threshold: f32,
@@ -118,7 +121,6 @@ pub fn spawn_finalize_job(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let wants_raw = asr.wants_raw_audio();
-        let deadline = tokio::time::Instant::now() + grace;
         loop {
             if cancel.load(Ordering::Acquire) {
                 debug!("finalize cancelled during grace");
@@ -128,22 +130,9 @@ pub fn spawn_finalize_job(
                 });
                 return;
             }
-            if tokio::time::Instant::now() >= deadline {
-                while let Ok(chunk) = late_rx.try_recv() {
-                    absorb_late_chunk(&mut state, &chunk, wants_raw);
-                }
-                break;
-            }
-            match tokio::time::timeout_at(deadline, late_rx.recv()).await {
-                Ok(Some(chunk)) => absorb_late_chunk(&mut state, &chunk, wants_raw),
-                Ok(None) => break,
-                Err(_) => {
-                    // Deadline hit: absorb any chunks already queued (lossless grace).
-                    while let Ok(chunk) = late_rx.try_recv() {
-                        absorb_late_chunk(&mut state, &chunk, wants_raw);
-                    }
-                    break;
-                }
+            match late_rx.recv().await {
+                Some(chunk) => absorb_late_chunk(&mut state, &chunk, wants_raw),
+                None => break,
             }
         }
 
@@ -415,10 +404,6 @@ async fn map_err(asr: &AsrOwnerHandle, err: AsrError) -> FinalizeOutcome {
         count_breaker: err.counts_for_breaker(),
         cuda_recovered: false,
     }
-}
-
-pub fn default_grace() -> Duration {
-    STOP_TAIL_GRACE
 }
 
 pub fn spawn_chunk_job(

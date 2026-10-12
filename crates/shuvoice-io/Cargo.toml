@@ -10,6 +10,7 @@ repository.workspace = true
 [features]
 default = ["audio"]
 audio = ["dep:cpal"]
+mpris = ["dep:zbus", "dep:futures-util", "dep:shuvoice-core"]
 
 # Diagnostic: dumps the capture configs cpal advertises. Needs the cpal dep.
 [[example]]
@@ -18,6 +19,9 @@ required-features = ["audio"]
 
 [dependencies]
 cpal = { workspace = true, optional = true }
+zbus = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }
+shuvoice-core = { workspace = true, optional = true }
 libc.workspace = true
 regex.workspace = true
 rustix = { workspace = true, features = ["fs", "process", "runtime", "thread"] }

@@ -79,6 +79,7 @@ pub struct Config {
     pub chunk_ms: u32,
     pub fallback_sample_rate: u32,
     pub audio_device: Option<DeviceRef>,
+    pub pause_media_during_recording: bool,
     pub input_gain: f64,
     pub audio_queue_max_size: u32,
     pub recording_preroll_ms: u32,
@@ -199,6 +200,7 @@ impl Default for Config {
             chunk_ms: 100,
             fallback_sample_rate: 48000,
             audio_device: None,
+            pause_media_during_recording: false,
             input_gain: 1.0,
             audio_queue_max_size: 200,
             recording_preroll_ms: 200,
@@ -907,6 +909,7 @@ impl Config {
             "chunk_ms" => Value::from(self.chunk_ms),
             "fallback_sample_rate" => Value::from(self.fallback_sample_rate),
             "audio_device" => device_to_value(&self.audio_device),
+            "pause_media_during_recording" => Value::from(self.pause_media_during_recording),
             "input_gain" => json_f64(self.input_gain),
             "audio_queue_max_size" => Value::from(self.audio_queue_max_size),
             "recording_preroll_ms" => Value::from(self.recording_preroll_ms),
@@ -1095,6 +1098,9 @@ fn apply_flat_overrides(cfg: &mut Config, flat: &Map<String, Value>) -> CoreResu
             "transcript_log" => cfg.transcript_log = as_bool(value, "transcript_log")?,
             "config_version" => cfg.config_version = as_u32(value, "config_version")?,
             "sample_rate" => cfg.sample_rate = as_u32(value, "sample_rate")?,
+            "pause_media_during_recording" => {
+                cfg.pause_media_during_recording = as_bool(value, "pause_media_during_recording")?
+            }
             "chunk_ms" => cfg.chunk_ms = as_u32(value, "chunk_ms")?,
             "fallback_sample_rate" => {
                 cfg.fallback_sample_rate = as_u32(value, "fallback_sample_rate")?
@@ -1535,6 +1541,62 @@ mod tests {
         .unwrap();
         let cfg = Config::load_from_path(&path).unwrap();
         assert_eq!(cfg.typing_final_injection_mode, InjectionMode::Direct);
+    }
+
+    #[test]
+    fn pause_media_defaults_off_for_missing_current_and_legacy_configs() {
+        assert!(!Config::default().pause_media_during_recording);
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        assert!(
+            !Config::load_from_path(&path)
+                .unwrap()
+                .pause_media_during_recording
+        );
+        for text in ["config_version = 1\n", "[audio]\nsample_rate = 16000\n"] {
+            std::fs::write(&path, text).unwrap();
+            assert!(
+                !Config::load_from_path(&path)
+                    .unwrap()
+                    .pause_media_during_recording
+            );
+        }
+    }
+
+    #[test]
+    fn pause_media_boolean_toml_roundtrip_and_type_validation() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let saved = dir.path().join("saved.toml");
+        for enabled in [true, false] {
+            std::fs::write(
+                &path,
+                format!("config_version = 1\n[audio]\npause_media_during_recording = {enabled}\n"),
+            )
+            .unwrap();
+            let cfg = Config::load_from_path(&path).unwrap();
+            assert_eq!(cfg.pause_media_during_recording, enabled);
+            cfg.save_to_path(&saved).unwrap();
+            assert_eq!(
+                Config::load_from_path(&saved)
+                    .unwrap()
+                    .pause_media_during_recording,
+                enabled
+            );
+        }
+        for invalid in ["1", "\"true\"", "[]"] {
+            std::fs::write(
+                &path,
+                format!("config_version = 1\n[audio]\npause_media_during_recording = {invalid}\n"),
+            )
+            .unwrap();
+            assert!(
+                Config::load_from_path(&path)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("pause_media_during_recording must be true or false")
+            );
+        }
     }
 
     #[test]
