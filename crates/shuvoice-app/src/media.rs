@@ -259,6 +259,18 @@ fn drain(
             {
                 return (false, false);
             }
+            Ok(MediaEvent::Seeked { owner, path })
+                if owner == endpoint.unique_owner && path == endpoint.object_path =>
+            {
+                // Chromium recalibrates its media position with Seeked during
+                // ordinary Pause AND Play. Only tolerate this while confirming
+                // our own bounded effect, still requiring unchanged identity,
+                // owner and the expected playback transition. Before dispatch
+                // and during a confirmed hold, a seek revokes restoration.
+                if phase.prior.is_none() {
+                    return (false, false);
+                }
+            }
             Ok(MediaEvent::Paused { owner, path })
                 if owner == endpoint.unique_owner && path == endpoint.object_path =>
             {

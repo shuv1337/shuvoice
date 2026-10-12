@@ -206,7 +206,7 @@ async fn explicit_private_bus_deduplicates_aliases_checks_owner_and_reads_uncach
         .await
         .unwrap()
         .unwrap();
-    assert!(matches!(event, MediaEvent::Conflict { owner, .. } if owner != endpoint.unique_owner));
+    assert!(matches!(event, MediaEvent::Seeked { owner, .. } if owner != endpoint.unique_owner));
     service
         .release_name(endpoint.well_known_name.as_str())
         .await

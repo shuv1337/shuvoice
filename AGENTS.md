@@ -107,7 +107,9 @@ default `false`) is the Rust-owned Bool setting `audio.pause_media_during_record
 in Audio. Native MPRIS holds only during recording through capture-tail closure,
 not decoding/injection or TTS. Restore only confirmed owned pauses with unchanged
 owner/media and no observed conflicts. Media failures and feature-off builds fail
-open for recording, never exit 78. Browser endpoints represent selected sessions,
+open for recording, never exit 78. Chromium's normal Seeked notifications are
+tolerated only during confirmation of our bounded Pause/Play transition (seeks
+during the hold revoke restoration). Browser endpoints represent selected sessions,
 not all tabs; metadata cannot prove tab identity, preroll may contain media,
 unobservable manual Pause is ambiguous, and SIGKILL cannot guarantee restoration.
 See `docs/CONFIGURATION.md` for opt-in and best-effort limitations.

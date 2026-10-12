@@ -32,6 +32,7 @@ struct Fake {
     owner_delays: Mutex<std::collections::VecDeque<Duration>>,
     owner_calls: AtomicUsize,
     pause_invalidation_only: bool,
+    transition_seek: bool,
 }
 impl Fake {
     fn new(identity: bool, pause_delay: Duration) -> Self {
@@ -65,6 +66,7 @@ impl Fake {
             owner_delays: Mutex::default(),
             owner_calls: AtomicUsize::new(0),
             pause_invalidation_only: false,
+            transition_seek: false,
         }
     }
     fn endpoint() -> MediaEndpoint {
@@ -78,6 +80,13 @@ impl Fake {
     fn conflict(&self) {
         let e = Self::endpoint();
         let _ = self.events.send(MediaEvent::Conflict {
+            owner: e.unique_owner,
+            path: e.object_path,
+        });
+    }
+    fn seeked(&self) {
+        let e = Self::endpoint();
+        let _ = self.events.send(MediaEvent::Seeked {
             owner: e.unique_owner,
             path: e.object_path,
         });
@@ -156,6 +165,9 @@ impl MediaTransport for Fake {
             return self.outcome;
         }
         self.snapshot.lock().playback = MediaPlayback::Paused;
+        if self.transition_seek {
+            self.seeked();
+        }
         if self.pause_invalidation_only {
             let _ = self.events.send(MediaEvent::Properties {
                 owner: e.unique_owner.clone(),
@@ -191,6 +203,9 @@ impl MediaTransport for Fake {
     async fn play(&self, _: &MediaEndpoint) -> MediaCallOutcome {
         self.plays.fetch_add(1, Ordering::SeqCst);
         tokio::time::sleep(self.play_delay).await;
+        if self.transition_seek {
+            self.seeked();
+        }
         if self.play_transition_delay.is_zero() {
             self.snapshot.lock().playback = MediaPlayback::Playing;
         } else {
@@ -205,6 +220,59 @@ async fn advance(ms: u64) {
         tokio::time::advance(Duration::from_millis(1)).await;
         tokio::task::yield_now().await;
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn chromium_transition_seek_resumes_but_seek_during_hold_revokes() {
+    for manual_seek in [false, true] {
+        let mut f = Fake::new(true, Duration::ZERO);
+        f.transition_seek = true;
+        let fake = Arc::new(f);
+        let (h, join) = spawn_media_coordinator(fake.clone());
+        h.hold(RecordingIntentId(1));
+        advance(30).await;
+        assert!(h.settled(RecordingIntentId(1)));
+        assert_eq!(fake.pauses.load(Ordering::SeqCst), 1);
+        if manual_seek {
+            fake.seeked();
+            advance(10).await;
+        }
+        h.release(RecordingIntentId(1));
+        advance(30).await;
+        assert_eq!(fake.plays.load(Ordering::SeqCst), usize::from(!manual_seek));
+        assert_eq!(
+            fake.snapshot.lock().playback,
+            if manual_seek {
+                MediaPlayback::Paused
+            } else {
+                MediaPlayback::Playing
+            }
+        );
+        join.shutdown().await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn chromium_play_seek_keeps_successor_reconciliation() {
+    let mut f = Fake::new(true, Duration::ZERO);
+    f.transition_seek = true;
+    f.play_delay = Duration::from_millis(20);
+    let fake = Arc::new(f);
+    let (h, join) = spawn_media_coordinator(fake.clone());
+    h.hold(RecordingIntentId(1));
+    advance(30).await;
+    h.release(RecordingIntentId(1));
+    advance(5).await;
+    assert_eq!(fake.plays.load(Ordering::SeqCst), 1);
+    h.hold(RecordingIntentId(2));
+    advance(50).await;
+    assert_eq!(fake.pauses.load(Ordering::SeqCst), 2);
+    assert_eq!(fake.snapshot.lock().playback, MediaPlayback::Paused);
+    h.release(RecordingIntentId(2));
+    advance(50).await;
+    assert_eq!(fake.plays.load(Ordering::SeqCst), 2);
+    assert_eq!(fake.snapshot.lock().playback, MediaPlayback::Playing);
+    join.shutdown().await;
 }
 
 #[tokio::test(start_paused = true)]

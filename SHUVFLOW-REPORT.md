@@ -60,3 +60,22 @@ automated shuvflow run. Plannotator tailnet publication failed because Tailscale
 Serve lacks operator permission, so no interactive review URL was available.
 Tooling issues were recorded as papercuts. No PR was opened and no remote was
 pushed.
+
+## Helium resume correction — October 12, 2026 PDT
+
+Live diagnosis found that Helium/Chromium emits `Rate`, `Seeked`, then
+`PlaybackStatus` during ordinary Pause and Play, with unchanged metadata. The
+original transport classified every Seeked as a conflict, discarding its own
+pause entitlement. Seeked is now a distinct event tolerated only while confirming
+our bounded Pause/Play transition. A seek during the established hold still
+revokes restoration; simultaneous manual seeks within the transition remain
+ambiguous, as documented.
+
+An exact-player probe of the real Helium endpoint through the native adapter and
+coordinator verified **Playing → Paused → Playing** without speech capture. No
+Spotify endpoints were tested or controlled. The temporary probe source was
+removed afterward. Regression coverage includes Chromium transition seeks,
+manual seeks during the hold, and a successor recording during Play.
+
+The combined app/core/IO suite passed **365 tests**; default and feature-off
+clippy, formatting, and the release build passed.

@@ -106,6 +106,11 @@ pub enum MediaEvent {
         owner: String,
         path: String,
     },
+    /// Some players also emit this when recalibrating position on Pause/Play.
+    Seeked {
+        owner: String,
+        path: String,
+    },
     Conflict {
         owner: String,
         path: String,

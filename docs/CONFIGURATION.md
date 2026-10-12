@@ -96,6 +96,10 @@ pause it owns, with the same player owner and media identity, a fresh paused
 state, and no observed conflicting activity. Already paused/stopped players are
 left alone. Independent resume, stop, seek, track changes, owner changes or loss
 of event continuity revoke restoration; uncertain calls may leave media paused.
+Chromium also emits position/seek notifications during ordinary Pause/Play.
+These are tolerated only while confirming ShuVoice's own bounded transition;
+a real seek coinciding with that transition cannot always be distinguished.
+Seeks observed during the established recording hold still revoke restoration.
 To suppress restoration during a hold, independently resume, stop or change the
 media. Disabling the setting prevents future acquisitions after reload/restart.
 

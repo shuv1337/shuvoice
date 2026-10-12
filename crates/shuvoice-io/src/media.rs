@@ -112,7 +112,10 @@ impl MprisClient {
                         }
                     } else if path == PATH && interface == Some(PLAYER) && member == Some("Seeked")
                     {
-                        Some(MediaEvent::Conflict { owner, path })
+                        match message.body().deserialize::<(i64,)>() {
+                            Ok(_) => Some(MediaEvent::Seeked { owner, path }),
+                            Err(_) => Some(MediaEvent::Lost),
+                        }
                     } else if path == PATH
                         && interface == Some("org.freedesktop.DBus.Properties")
                         && member == Some("PropertiesChanged")
