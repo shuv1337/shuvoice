@@ -20,6 +20,10 @@ recognition_hints = []
 transcript_log = false
 
 [audio]
+# Opt-in native MPRIS pause during recording, through the microphone tail.
+# Restores only confirmed owned pauses; browsers expose selected sessions,
+# not all tabs. Recording only, not read aloud. See docs/CONFIGURATION.md.
+pause_media_during_recording = false
 sample_rate = 16000
 chunk_ms = 100
 fallback_sample_rate = 48000

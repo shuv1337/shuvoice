@@ -291,6 +291,8 @@ async fn exactly_once_injection_across_generations() {
     h.session.commit_utterance().await;
     assert_eq!(h.injector.finals().len(), 1);
     // New generation
+    h.session.stop_recording();
+    h.clock.advance_ms(400);
     h.session.start_recording().await;
     h.session.begin_utterance().await;
     h.scripted.lock().utterance_text = "second".into();

@@ -33,7 +33,7 @@ GPUIX needs `apps/settings/patches/gpui-primary-seat.patch`
 `apps/settings/README.md`.
 
 Default desktop Cargo feature: **`desktop`** on `shuvoice-cli`
-(`audio` + `asr-sherpa` + `asr-openai` + `ui` + `tts` + `tts-worker`).
+(`audio` + `asr-sherpa` + `asr-openai` + `ui` + `tts` + `tts-worker` + `media-control`).
 
 ADRs: `docs/adr/0001-rust-modular-monolith.md`,
 `docs/adr/0002-versioned-model-workers.md`.
@@ -69,6 +69,7 @@ Workspace: root `Cargo.toml`. Default member: `shuvoice-cli`.
 | `ui` | GTK host + overlays |
 | `tts` | CPAL player + feedback tones |
 | `tts-worker` | MeloTTS via worker-proto (requires `tts`) |
+| `media-control` | Native session-bus MPRIS pause/restore (opt-in config, no GTK dependency) |
 
 `--no-default-features` builds still compile the CLI; `run` / setup composition
 **fails closed with exit 78** when the selected backend or UI surface is missing.
@@ -100,6 +101,16 @@ gated by `ui` and is not enabled by the settings bridge alone.
 
 User-facing config keys live in Rust core — do not invent keys in docs or
 callers. Prefer `shuvoice config effective` and `examples/config.toml`.
+
+`[audio].pause_media_during_recording` (`Config::pause_media_during_recording`,
+default `false`) is the Rust-owned Bool setting `audio.pause_media_during_recording`
+in Audio. Native MPRIS holds only during recording through capture-tail closure,
+not decoding/injection or TTS. Restore only confirmed owned pauses with unchanged
+owner/media and no observed conflicts. Media failures and feature-off builds fail
+open for recording, never exit 78. Browser endpoints represent selected sessions,
+not all tabs; metadata cannot prove tab identity, preroll may contain media,
+unobservable manual Pause is ambiguous, and SIGKILL cannot guarantee restoration.
+See `docs/CONFIGURATION.md` for opt-in and best-effort limitations.
 
 `[vocabulary].recognition_hints` is a validated list distinct from correction
 rules. Prompt hints are implemented for OpenAI `gpt-4o-transcribe`,

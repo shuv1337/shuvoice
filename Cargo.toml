@@ -82,6 +82,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "regist
 url = "2.5"
 uuid = { version = "1.22", features = ["serde", "v7"] }
 which = "8.0"
+zbus = { version = "5.19", default-features = false, features = ["tokio"] }
 
 assert_cmd = "2.1"
 httpmock = "0.8"

@@ -255,6 +255,7 @@ impl SessionHandle {
 }
 
 pub struct SessionRuntime {
+    media_join: Option<crate::media::MediaCoordinatorJoin>,
     pub handle: SessionHandle,
     pub audio: AudioIngress,
     pub control: EnqueueControlAdapter,
@@ -319,6 +320,9 @@ impl SessionRuntime {
             }
         }
 
+        if let Some(media) = self.media_join {
+            media.shutdown().await;
+        }
         // Retain mut join handle; never detach. Abort then await (with short timeout).
         let mut dispatcher_join = self.dispatcher_join;
         dispatcher_join.abort();
@@ -386,6 +390,49 @@ where
     F: FeedbackSink + 'static,
     C: Clock + 'static,
 {
+    spawn_session_runtime_with_services(
+        config,
+        backend,
+        injector,
+        selection,
+        overlay,
+        feedback,
+        clock,
+        tts,
+        RuntimeServices {
+            transcripts,
+            media: None,
+        },
+    )
+    .await
+}
+
+#[derive(Default)]
+pub struct RuntimeServices {
+    pub transcripts: Option<Arc<dyn TranscriptSink>>,
+    pub media: Option<Arc<dyn crate::media::MediaTransport>>,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn spawn_session_runtime_with_services<I, T, S, O, F, C>(
+    config: Config,
+    backend: Box<DynAsrBackend>,
+    injector: Arc<I>,
+    selection: Arc<S>,
+    overlay: O,
+    feedback: F,
+    clock: Arc<C>,
+    tts: Option<T>,
+    services: RuntimeServices,
+) -> AppResult<SessionRuntime>
+where
+    I: TextInjector + 'static,
+    T: TtsEngine + 'static,
+    S: SelectionCapture + 'static,
+    O: OverlaySink + 'static,
+    F: FeedbackSink + 'static,
+    C: Clock + 'static,
+{
     let (asr_handle, asr_join) = spawn_asr_owner(backend, 32, DEFAULT_ASR_OP_TIMEOUT);
     if let Err(e) = asr_handle.load().await {
         // Fail-fast: never construct EventBus/session/dispatcher on load failure.
@@ -438,9 +485,18 @@ where
     if let Some(tts) = tts {
         deps = deps.with_tts(tts);
     }
-    if let Some(sink) = transcripts {
+    if let Some(sink) = services.transcripts {
         deps = deps.with_transcripts(sink);
     }
+
+    let media_join = services
+        .media
+        .filter(|_| config.pause_media_during_recording)
+        .map(|transport| {
+            let (handle, join) = crate::media::spawn_media_coordinator(transport);
+            deps.media = Some(handle);
+            join
+        });
 
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<SessionCommand>(DEFAULT_COMMAND_CAPACITY);
     let (reply_tx, mut reply_rx) = mpsc::channel::<ActorMsg>(DEFAULT_COMMAND_CAPACITY);
@@ -507,6 +563,7 @@ where
     });
 
     Ok(SessionRuntime {
+        media_join,
         handle,
         audio: audio_ingress,
         control,

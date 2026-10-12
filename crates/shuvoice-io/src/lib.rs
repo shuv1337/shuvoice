@@ -49,3 +49,5 @@ pub use process::{
 };
 pub use selection::{SelectionCapture, capture_clipboard, capture_selection};
 pub use xdg::{config_home, data_home, runtime_dir, shuvoice_config_dir, shuvoice_data_dir};
+#[cfg(feature = "mpris")]
+pub mod media;

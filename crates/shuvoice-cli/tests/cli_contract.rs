@@ -174,6 +174,43 @@ fn config_set_injection_mode_and_effective() {
 }
 
 #[test]
+#[serial]
+fn config_pause_media_effective_and_invalid_value() {
+    with_xdg(|config_home| {
+        let cfg = config_home.join("shuvoice/config.toml");
+        fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        fs::write(&cfg, "config_version = 1\n").unwrap();
+        let mut cmd = cargo_bin_cmd!("shuvoice");
+        cmd.args(["config", "effective"]);
+        cmd.assert().success().stdout(predicate::str::contains(
+            "pause_media_during_recording = false",
+        ));
+        for enabled in ["true", "false"] {
+            fs::write(
+                &cfg,
+                format!("config_version = 1\n[audio]\npause_media_during_recording = {enabled}\n"),
+            )
+            .unwrap();
+            let mut cmd = cargo_bin_cmd!("shuvoice");
+            cmd.args(["config", "effective"]);
+            cmd.assert()
+                .success()
+                .stdout(predicate::str::contains(format!(
+                    "pause_media_during_recording = {enabled}"
+                )));
+        }
+        let invalid = "config_version = 1\n[audio]\npause_media_during_recording = 1\n";
+        fs::write(&cfg, invalid).unwrap();
+        let mut cmd = cargo_bin_cmd!("shuvoice");
+        cmd.args(["config", "validate"]);
+        cmd.assert().failure().stderr(predicate::str::contains(
+            "pause_media_during_recording must be true or false",
+        ));
+        assert_eq!(fs::read_to_string(&cfg).unwrap(), invalid);
+    });
+}
+
+#[test]
 fn legacy_flags_mutually_exclusive_exit_2() {
     let mut cmd = cargo_bin_cmd!("shuvoice");
     cmd.args(["--preflight", "--wizard"]);
@@ -292,10 +329,14 @@ fn settings_bridge_speaks_json_lines_and_saves_patches() {
         let first: serde_json::Value =
             serde_json::from_slice(out.stdout.split(|b| *b == b'\n').next().unwrap()).unwrap();
         assert_eq!(first["result"]["values"]["overlay.font_size"], 20);
+        assert_eq!(
+            first["result"]["values"]["audio.pause_media_during_recording"],
+            false
+        );
         let revision = first["result"]["revision"].as_str().unwrap().to_string();
 
         let save = format!(
-            r#"{{"v":1,"id":2,"op":"save","params":{{"revision":"{revision}","changes":{{"overlay.font_size":28}}}}}}"#
+            r#"{{"v":1,"id":2,"op":"save","params":{{"revision":"{revision}","changes":{{"overlay.font_size":28,"audio.pause_media_during_recording":true}}}}}}"#
         );
         let mut cmd = cargo_bin_cmd!("shuvoice");
         let out = cmd
@@ -312,6 +353,11 @@ fn settings_bridge_speaks_json_lines_and_saves_patches() {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0]["ok"], true, "{}", lines[0]);
         assert_eq!(lines[1]["error"]["kind"], "unknown_op");
+        assert!(
+            shuvoice_core::Config::load_from_path(&cfg)
+                .unwrap()
+                .pause_media_during_recording
+        );
         let text = fs::read_to_string(&cfg).unwrap();
         assert!(
             text.contains("font_size = 28") && text.contains("my_note = \"keep\""),

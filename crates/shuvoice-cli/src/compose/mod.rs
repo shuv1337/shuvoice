@@ -63,8 +63,8 @@ use std::time::Duration;
 use shuvoice_app::traits::{FeedbackSink, OverlaySink, SystemClock, TtsEngine};
 #[allow(unused_imports)] // SessionCommand used under feature = "tts"
 use shuvoice_app::{
-    EnqueueControlAdapter, SessionCommand, SessionEvent, SessionRuntime, TtsPlayerState,
-    spawn_session_runtime, spawn_session_runtime_with_transcripts,
+    EnqueueControlAdapter, RuntimeServices, SessionCommand, SessionEvent, SessionRuntime,
+    TtsPlayerState, spawn_session_runtime, spawn_session_runtime_with_services,
 };
 use shuvoice_asr::DynAsrBackend;
 use shuvoice_control::{ControlCommand, ControlServer};
@@ -930,7 +930,7 @@ async fn compose_and_run(config: Config) -> Result<(), ComposeError> {
     // ── Session runtime ───────────────────────────────────────────────────
     // After this succeeds, every error path MUST call `abort_live_startup`
     // before returning (no bare `?` across the live-runtime boundary).
-    let mut runtime = match spawn_session_runtime_with_transcripts(
+    let mut runtime = match spawn_session_runtime_with_services(
         config.clone(),
         backend,
         injector,
@@ -939,7 +939,10 @@ async fn compose_and_run(config: Config) -> Result<(), ComposeError> {
         feedback_for_session,
         clock,
         tts_engine,
-        transcript_sink(&config),
+        RuntimeServices {
+            transcripts: transcript_sink(&config),
+            media: media::transport(&config),
+        },
     )
     .await
     {
@@ -2173,3 +2176,4 @@ mod tests {
         }
     }
 }
+mod media;

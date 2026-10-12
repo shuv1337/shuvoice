@@ -93,6 +93,7 @@ pub fn config_section_fields() -> &'static [(&'static str, &'static [&'static st
                 "chunk_ms",
                 "fallback_sample_rate",
                 "audio_device",
+                "pause_media_during_recording",
                 "input_gain",
                 "audio_queue_max_size",
                 "recording_preroll_ms",

@@ -791,6 +791,9 @@ async fn process_utterance_safe_triggers_disable_after_max_failures() {
         h.session.decode_offline_utterance().await;
         h.session.stop_recording();
         let _ = h.session.tick().await;
+        // Starts now arm capture immediately: even this short tap enters
+        // finalize. Respect the normal rearm gate before the next attempt.
+        h.clock.advance_ms(400);
     }
     assert_eq!(h.session.recording_status(), RecordingStatus::AsrDisabled);
     h.shutdown().await;

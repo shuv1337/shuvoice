@@ -13,6 +13,7 @@ pub mod env_loader;
 pub mod error;
 pub mod feedback;
 pub mod flush;
+pub mod media;
 pub mod metrics;
 pub mod postprocess;
 pub mod runtime;

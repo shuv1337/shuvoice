@@ -10,7 +10,8 @@ repository.workspace = true
 [features]
 # Packaged desktop builds: audio + native Sherpa/OpenAI ASR + GTK UI + CPAL TTS + worker-proto.
 default = ["desktop"]
-desktop = ["audio", "asr-sherpa", "asr-openai", "ui", "tts", "tts-worker"]
+desktop = ["audio", "asr-sherpa", "asr-openai", "ui", "tts", "tts-worker", "media-control"]
+media-control = ["shuvoice-io/mpris"]
 audio = ["dep:cpal", "shuvoice-io/audio"]
 ui = ["shuvoice-ui/gtk", "dep:gtk4", "dep:glib"]
 # Real shuvoice-asr backends (static Sherpa; no Python wheel / CUDA repair).

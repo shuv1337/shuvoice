@@ -67,6 +67,43 @@ shuvoice config validate
 shuvoice config set typing_final_injection_mode auto
 ```
 
+## Pause media while recording
+
+```toml
+[audio]
+pause_media_during_recording = false # opt in with true
+```
+
+Also available in Settings → Audio as **Pause media while recording**. This
+Rust-owned boolean defaults to `false`, including for legacy configurations.
+Changes take effect after the normal settings reload/service restart.
+
+When enabled, native MPRIS control on the session bus attempts to pause supported
+players that were already playing when recording was admitted. No `playerctl`,
+shell helper, browser extension, or remote Spotify API is required. The
+`media-control` Cargo feature is included in the default `desktop` build; builds
+without it leave recording usable but cannot pause media. Unavailable players or
+media-control failures do not disable speech recognition.
+
+The hold covers microphone capture **including its tail after key release**.
+Restoration may begin once that capture closes, without waiting for decoding or
+text insertion. This is recording-only: external media can resume before
+ShuVoice read aloud begins. Existing speech preroll is unchanged, so buffered
+audio from before the pause can still contain media.
+
+Restoration is conservative and best effort: ShuVoice resumes only a confirmed
+pause it owns, with the same player owner and media identity, a fresh paused
+state, and no observed conflicting activity. Already paused/stopped players are
+left alone. Independent resume, stop, seek, track changes, owner changes or loss
+of event continuity revoke restoration; uncertain calls may leave media paused.
+To suppress restoration during a hold, independently resume, stop or change the
+media. Disabling the setting prevents future acquisitions after reload/restart.
+
+Browsers expose selected MPRIS media sessions, **not all tabs**. Metadata is a
+heuristic and cannot prove tab identity. A manual Pause with no observable state
+change cannot be distinguished from ShuVoice's pause. Process death such as
+`SIGKILL` cannot guarantee restoration; there is no persistent restore ledger.
+
 ## ASR backends
 
 ```toml

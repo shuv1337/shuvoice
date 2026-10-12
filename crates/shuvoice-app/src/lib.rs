@@ -35,8 +35,9 @@ pub use audio::{AudioIngress, AudioRing};
 pub use error::{AppError, AppResult};
 pub use events::{EventBus, EventBusRx, push_event_log};
 pub use runtime::{
-    ControlHandlerSurface, EnqueueControlAdapter, SESSION_SHUTDOWN_GRACE, SessionHandle,
-    SessionRuntime, TestHarness, spawn_session_runtime, spawn_session_runtime_with_transcripts,
+    ControlHandlerSurface, EnqueueControlAdapter, RuntimeServices, SESSION_SHUTDOWN_GRACE,
+    SessionHandle, SessionRuntime, TestHarness, spawn_session_runtime,
+    spawn_session_runtime_with_services, spawn_session_runtime_with_transcripts,
     spawn_test_runtime,
 };
 pub use session::{Session, SessionDeps, TEST_HANG_ACTOR_ON_SHUTDOWN};
@@ -58,3 +59,4 @@ pub mod core {
         sanitize_final_injection_text,
     };
 }
+pub mod media;

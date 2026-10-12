@@ -38,7 +38,7 @@ use crate::audio::AudioRing;
 use crate::error::{AppError, AppResult};
 use crate::events::{EventBus, push_event_log};
 use crate::finalize::{
-    FinalizeOutcome, JobResult, LifecyclePurpose, TtsCaptureKind, default_grace, spawn_chunk_job,
+    FinalizeOutcome, JobResult, LifecyclePurpose, TtsCaptureKind, spawn_chunk_job,
     spawn_fallback_job, spawn_finalize_job, spawn_reset_job,
 };
 use crate::traits::{
@@ -58,6 +58,7 @@ pub static TEST_HANG_ACTOR_ON_SHUTDOWN: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 pub struct SessionDeps<I, T, S, O, F, C> {
+    pub media: Option<crate::media::MediaHandle>,
     pub asr: AsrOwnerHandle,
     pub audio: Arc<AudioRing>,
     pub injector: Arc<I>,
@@ -72,6 +73,39 @@ pub struct SessionDeps<I, T, S, O, F, C> {
     pub transcripts: Option<Arc<dyn TranscriptSink>>,
 }
 
+#[cfg(test)]
+mod media_lifecycle_tests {
+    use super::*;
+    use crate::{TestHarness, fakes::ScriptedAsrBackend};
+
+    #[tokio::test]
+    async fn stale_reset_cannot_complete_new_intent_and_cancel_discards_pending_pcm() {
+        let mut h = TestHarness::basic(ScriptedAsrBackend::default(), Config::default()).await;
+        h.session.request_start_recording();
+        let old = h.session.intent.unwrap();
+        h.session.pending_media_audio.push(vec![0.1; 160]);
+        h.session.stop_recording();
+        assert!(h.session.pending_media_audio.is_empty());
+        assert!(h.session.intent.is_none());
+        h.session.request_start_recording();
+        let new = h.session.intent.unwrap();
+        assert_ne!(new, old);
+        h.session
+            .apply_job_result(JobResult::Reset {
+                purpose: LifecyclePurpose::StartRecording { intent: old },
+                result: Ok(999),
+            })
+            .await;
+        assert!(h.session.start_pending);
+        assert!(!h.session.recording);
+        assert_ne!(h.session.utterance_gen, 999);
+        assert!(
+            matches!(h.session.lifecycle_job.as_ref().unwrap().purpose, LifecyclePurpose::StartRecording { intent } if intent == new)
+        );
+        h.shutdown().await;
+    }
+}
+
 impl<I, T, S, O, F, C> SessionDeps<I, T, S, O, F, C> {
     pub fn new(
         asr: AsrOwnerHandle,
@@ -83,6 +117,7 @@ impl<I, T, S, O, F, C> SessionDeps<I, T, S, O, F, C> {
         clock: Arc<C>,
     ) -> Self {
         Self {
+            media: None,
             asr,
             audio,
             injector,
@@ -99,6 +134,10 @@ impl<I, T, S, O, F, C> SessionDeps<I, T, S, O, F, C> {
     }
     pub fn with_tts(mut self, tts: T) -> Self {
         self.tts = Some(tts);
+        self
+    }
+    pub fn with_media(mut self, media: crate::media::MediaHandle) -> Self {
+        self.media = Some(media);
         self
     }
     pub fn with_metrics(mut self, m: Arc<MetricsCollector>) -> Self {
@@ -123,8 +162,9 @@ struct ActiveFinalize {
     utt_gen: UtteranceGen,
     cancel: Arc<AtomicBool>,
     join: tokio::task::JoinHandle<()>,
-    late_tx: mpsc::UnboundedSender<Vec<f32>>,
-    grace_until: Instant,
+    late_tx: Option<mpsc::UnboundedSender<Vec<f32>>>,
+    intent: Option<shuvoice_core::media::RecordingIntentId>,
+    grace_until: tokio::time::Instant,
     /// Samples buffered at the stop edge (transcript log duration).
     audio_samples: usize,
 }
@@ -182,6 +222,12 @@ enum PendingTts {
 
 /// Responsive session core.
 pub struct Session<I, T, S, O, F, C> {
+    intent: Option<shuvoice_core::media::RecordingIntentId>,
+    next_intent: u64,
+    capture_intent: Option<shuvoice_core::media::RecordingIntentId>,
+    media_deadline: Option<tokio::time::Instant>,
+    reset_ready_gen: Option<UtteranceGen>,
+    pending_media_audio: Vec<Vec<f32>>,
     maintenance_until: Option<std::time::Instant>,
     maintenance_generation: u64,
     pub config: Config,
@@ -259,6 +305,25 @@ pub struct Session<I, T, S, O, F, C> {
     tts_player_state: TtsPlayerState,
 }
 
+impl<I, T, S, O, F, C> Drop for Session<I, T, S, O, F, C> {
+    fn drop(&mut self) {
+        if let Some(f) = self.finalize.take() {
+            f.cancel.store(true, Ordering::Release);
+            f.join.abort();
+            drop(f.late_tx);
+        }
+        if let Some(job) = self.chunk_job.take() {
+            job.join.abort();
+        }
+        if let Some(job) = self.lifecycle_job.take() {
+            job.join.abort();
+        }
+        if let (Some(media), Some(intent)) = (&self.deps.media, self.intent) {
+            media.release(intent);
+        }
+    }
+}
+
 impl<I, T, S, O, F, C> Session<I, T, S, O, F, C>
 where
     I: TextInjector + 'static,
@@ -281,6 +346,12 @@ where
         };
         let (job_tx, job_rx) = mpsc::unbounded_channel();
         let mut s = Self {
+            intent: None,
+            next_intent: 0,
+            capture_intent: None,
+            media_deadline: None,
+            reset_ready_gen: None,
+            pending_media_audio: Vec::new(),
             speech_rms_threshold: config.silence_rms_threshold.max(0.0) as f32,
             speech_rms_multiplier: config.silence_rms_multiplier.max(1.0) as f32,
             min_speech_samples: ms_to_samples(sample_rate, config.min_speech_ms),
@@ -583,6 +654,16 @@ where
     }
 
     fn disable_asr(&mut self, reason: &str) {
+        if let Some(f) = self.finalize.take() {
+            f.cancel.store(true, Ordering::Release);
+            f.join.abort();
+            drop(f.late_tx);
+        }
+        self.abort_chunk_job();
+        self.was_recording = false;
+        self.start_pending = false;
+        self.state.reset(self.speech_rms_threshold);
+        self.close_capture(self.intent);
         self.circuit.force_open(self.now());
         self.recording = false;
         self.processing = false;
@@ -692,10 +773,7 @@ where
         }
 
         if !self.deps.asr.is_alive() {
-            self.asr_thread_alive = false;
-            self.show_error("⚠ ASR thread crashed — restart ShuVoice");
-            self.emit(SessionEvent::AsrThreadDead);
-            self.publish_view();
+            self.handle_asr_death();
             return;
         }
 
@@ -729,6 +807,7 @@ where
                 return;
             }
             StartGate::AsrDisabledNeedsRecovery => {
+                let intent = self.admit_media();
                 warn!("ASR disabled; queueing one-shot reset on recording start");
                 // Cancel prior finalize without awaiting ASR.
                 if self.finalize.is_some() || self.processing || self.was_recording {
@@ -740,12 +819,13 @@ where
                 self.processing = true;
                 self.emit(SessionEvent::Status(self.recording_status()));
                 self.publish_view();
-                self.spawn_lifecycle(LifecyclePurpose::DisabledRecovery);
+                self.spawn_lifecycle(LifecyclePurpose::DisabledRecovery { intent });
                 return;
             }
             StartGate::Allow => {}
         }
 
+        let intent = self.admit_media();
         // Stop→rearm→Start: cancel prior finalize without awaiting ASR.
         if self.finalize.is_some() || self.processing || self.was_recording {
             self.cancel_finalize_and_reset_injector();
@@ -758,7 +838,7 @@ where
         self.processing = true;
         self.emit(SessionEvent::Status(self.recording_status()));
         self.publish_view();
-        self.spawn_lifecycle(LifecyclePurpose::StartRecording);
+        self.spawn_lifecycle(LifecyclePurpose::StartRecording { intent });
     }
 
     /// Test/direct API: request start and pump job results until settled.
@@ -807,11 +887,61 @@ where
         }
     }
 
+    fn admit_media(&mut self) -> shuvoice_core::media::RecordingIntentId {
+        self.next_intent = self.next_intent.wrapping_add(1);
+        let intent = shuvoice_core::media::RecordingIntentId(self.next_intent);
+        self.intent = Some(intent);
+        self.reset_ready_gen = None;
+        self.pending_media_audio.clear();
+        self.media_deadline = Some(tokio::time::Instant::now() + crate::media::ACQUISITION_BUDGET);
+        if let Some(media) = &self.deps.media {
+            media.hold(intent);
+        }
+        intent
+    }
+
+    fn close_capture(&mut self, intent: Option<shuvoice_core::media::RecordingIntentId>) {
+        if let Some(intent) = intent {
+            if let Some(media) = &self.deps.media {
+                media.release(intent);
+            }
+            if self.intent == Some(intent) {
+                self.intent = None;
+                self.reset_ready_gen = None;
+                self.pending_media_audio.clear();
+            }
+        }
+    }
+
+    fn try_complete_start(&mut self) {
+        if let (true, Some(g), Some(intent)) =
+            (self.start_pending, self.reset_ready_gen, self.intent)
+        {
+            if self.deps.media.as_ref().is_none_or(|m| m.settled(intent))
+                || self
+                    .media_deadline
+                    .is_some_and(|d| tokio::time::Instant::now() >= d)
+            {
+                self.reset_ready_gen = None;
+                self.complete_start_recording(g);
+            }
+        }
+    }
+
     fn complete_start_recording(&mut self, utt_gen: UtteranceGen) {
+        self.capture_intent = self.intent;
         self.utterance_gen = utt_gen;
-        self.capture_recording_preroll();
+        if self.deps.media.is_some() {
+            self.pending_media_audio.extend(self.deps.audio.drain());
+        } else {
+            self.capture_recording_preroll();
+        }
         self.committed_gen = None;
-        self.was_recording = false;
+        self.begin_utterance_sync();
+        for chunk in std::mem::take(&mut self.pending_media_audio) {
+            self.append_recording_chunk(&chunk);
+        }
+        self.was_recording = true;
         self.start_pending = false;
         self.processing = false;
         self.recording = true;
@@ -834,6 +964,7 @@ where
     }
 
     fn fail_start_recording(&mut self, err: &AsrError) {
+        self.close_capture(self.intent);
         self.start_pending = false;
         self.processing = false;
         warn!(%err, "ASR reset failed on recording start");
@@ -850,6 +981,7 @@ where
     pub fn stop_recording(&mut self) {
         // Cancel in-flight start reset without waiting for ASR.
         if self.start_pending {
+            self.close_capture(self.intent);
             debug!("Cancelling pending start on stop");
             self.start_pending = false;
             self.abort_lifecycle_job();
@@ -908,6 +1040,11 @@ where
 
     /// Begin utterance: threshold + preroll only (reset already done on start).
     pub async fn begin_utterance(&mut self) {
+        if !self.was_recording {
+            self.begin_utterance_sync();
+        }
+    }
+    fn begin_utterance_sync(&mut self) {
         let preroll = std::mem::take(&mut self.preroll);
         begin_utterance(
             &mut self.state,
@@ -964,7 +1101,6 @@ where
             utt_gen,
             state,
             late_rx,
-            default_grace(),
             Arc::clone(&cancel),
             self.min_speech_samples,
             self.speech_rms_threshold,
@@ -975,8 +1111,9 @@ where
             utt_gen,
             cancel,
             join,
-            late_tx,
-            grace_until: self.now() + STOP_TAIL_GRACE,
+            late_tx: Some(late_tx),
+            intent: self.capture_intent,
+            grace_until: tokio::time::Instant::now() + STOP_TAIL_GRACE,
             audio_samples,
         });
         self.processing = true;
@@ -990,6 +1127,8 @@ where
             f.cancel.store(true, Ordering::Release);
             let _ = self.deps.asr.bump_gen();
             f.join.abort();
+            drop(f.late_tx);
+            self.close_capture(f.intent);
         }
         self.abort_chunk_job();
         // Do **not** abort inject partial/commit — side effects keep running.
@@ -999,6 +1138,8 @@ where
         self.state.reset(self.speech_rms_threshold);
         self.debug_current_transcript.clear();
         self.request_inject_reset();
+        let old = self.capture_intent.take();
+        self.close_capture(old);
     }
 
     /// Selection is read-only: safe to abandon (abort handle). Track join until done.
@@ -1225,22 +1366,39 @@ where
     }
 
     fn feed_finalize_grace_audio(&mut self) {
+        self.close_expired_capture();
         let Some(f) = self.finalize.as_ref() else {
             return;
         };
-        if self.now() > f.grace_until {
+        if tokio::time::Instant::now() >= f.grace_until {
             return;
         }
         let chunks = self.deps.audio.drain();
         for chunk in chunks {
-            let _ = f.late_tx.send(chunk);
+            if let Some(tx) = &f.late_tx {
+                let _ = tx.send(chunk);
+            }
         }
     }
 
     async fn poll_jobs(&mut self) {
+        self.close_expired_capture();
         while let Ok(msg) = self.job_rx.try_recv() {
             self.apply_job_result(msg).await;
         }
+        self.try_complete_start();
+    }
+
+    fn close_expired_capture(&mut self) {
+        let now = tokio::time::Instant::now();
+        let intent = self.finalize.as_mut().and_then(|f| {
+            if now >= f.grace_until && f.late_tx.take_if(|_| true).is_some() {
+                f.intent
+            } else {
+                None
+            }
+        });
+        self.close_capture(intent);
     }
 
     async fn apply_job_result(&mut self, msg: JobResult) {
@@ -1393,9 +1551,11 @@ where
                 self.publish_view();
             }
             JobResult::Reset { purpose, result } => {
-                if self.lifecycle_job.as_ref().is_some_and(|l| {
-                    std::mem::discriminant(&l.purpose) == std::mem::discriminant(&purpose)
-                }) {
+                if self
+                    .lifecycle_job
+                    .as_ref()
+                    .is_some_and(|l| l.purpose == purpose)
+                {
                     if let Some(life) = self.lifecycle_job.take() {
                         // Task should be finished; abort if not to avoid HOL.
                         if !life.join.is_finished() {
@@ -1404,18 +1564,21 @@ where
                     }
                 }
                 match purpose {
-                    LifecyclePurpose::StartRecording => {
-                        if !self.start_pending {
+                    LifecyclePurpose::StartRecording { intent } => {
+                        if !self.start_pending || self.intent != Some(intent) {
                             debug!("start reset completed after cancel; ignoring");
                             return;
                         }
                         match result {
-                            Ok(g) => self.complete_start_recording(g),
+                            Ok(g) => {
+                                self.reset_ready_gen = Some(g);
+                                self.try_complete_start();
+                            }
                             Err(err) => self.fail_start_recording(&err),
                         }
                     }
-                    LifecyclePurpose::DisabledRecovery => {
-                        if !self.start_pending {
+                    LifecyclePurpose::DisabledRecovery { intent } => {
+                        if !self.start_pending || self.intent != Some(intent) {
                             debug!("disabled-recovery reset completed after cancel; ignoring");
                             return;
                         }
@@ -1424,10 +1587,11 @@ where
                                 self.utterance_gen = g;
                                 self.circuit.close_after_recovery();
                                 // Continue into normal start reset.
-                                self.spawn_lifecycle(LifecyclePurpose::StartRecording);
+                                self.spawn_lifecycle(LifecyclePurpose::StartRecording { intent });
                             }
                             Err(err) => {
                                 warn!(%err, "ASR recovery reset failed; still disabled");
+                                self.close_capture(Some(intent));
                                 self.start_pending = false;
                                 self.processing = false;
                                 self.show_error("⚠ ASR error — restart ShuVoice");
@@ -1843,18 +2007,18 @@ where
         self.poll_jobs().await;
         self.pump_inject_pipeline();
 
-        if !self.deps.asr.is_alive() && self.asr_thread_alive {
-            self.asr_thread_alive = false;
-            self.recording = false;
-            self.show_error("⚠ ASR thread crashed — restart ShuVoice");
-            self.emit(SessionEvent::AsrThreadDead);
-            self.publish_view();
+        if !self.deps.asr.is_alive() {
+            self.handle_asr_death();
         }
         if self.circuit.is_disabled() {
             let _ = self.try_circuit_recovery();
         }
 
         let chunks = self.deps.audio.drain();
+        if self.start_pending && self.reset_ready_gen.is_some() {
+            self.pending_media_audio.extend(chunks);
+            return true;
+        }
         let dropped = self.deps.audio.dropped();
         if dropped > self.last_reported_drops {
             self.emit(SessionEvent::AudioOverflow { dropped });
@@ -1866,12 +2030,14 @@ where
             let f_grace = self
                 .finalize
                 .as_ref()
-                .map(|f| self.now() <= f.grace_until)
+                .map(|f| tokio::time::Instant::now() < f.grace_until && f.late_tx.is_some())
                 .unwrap_or(false);
             if f_grace {
                 if let Some(f) = self.finalize.as_ref() {
                     for chunk in chunks {
-                        let _ = f.late_tx.send(chunk);
+                        if let Some(tx) = &f.late_tx {
+                            let _ = tx.send(chunk);
+                        }
                     }
                 }
             } else {
@@ -1960,6 +2126,24 @@ where
         true
     }
 
+    fn handle_asr_death(&mut self) {
+        if !self.asr_thread_alive {
+            return;
+        }
+        // Close routing and owned jobs before publishing the dead-owner flag.
+        // Both command admission and tick use this idempotent transition.
+        self.recording = false;
+        self.start_pending = false;
+        self.abort_lifecycle_job();
+        self.cancel_finalize_and_reset_injector();
+        self.close_capture(self.intent);
+        self.processing = false;
+        self.asr_thread_alive = false;
+        self.show_error("⚠ ASR thread crashed — restart ShuVoice");
+        self.emit(SessionEvent::AsrThreadDead);
+        self.publish_view();
+    }
+
     pub async fn shutdown(&mut self) {
         // Async hang — abortable by JoinHandle::abort (unlike thread::sleep).
         // Polled, not pending(): the flag is process-global, so an unrelated
@@ -1983,6 +2167,7 @@ where
         }
         self.abort_chunk_job();
         self.release_effect_jobs_on_shutdown();
+        self.close_capture(self.intent);
         let _ = self.deps.asr.bump_gen();
         if let Some(tts) = self.deps.tts.as_mut() {
             let _ = tts.stop();
